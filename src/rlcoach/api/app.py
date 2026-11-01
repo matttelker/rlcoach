@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __version__
+from ..benchmarks import seed_default_benchmarks
 from ..config import ConfigError, RLCoachConfig, get_default_config_path, load_config
 from ..db.session import create_session, init_db
 
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _config = load_config(config_path)
             _config.validate()
             init_db(_config.db_path)
+            seed_default_benchmarks()
             logger.info(f"CLI mode: loaded config from {config_path}")
         except (ConfigError, FileNotFoundError) as e:
             # No config and no DATABASE_URL - use in-memory for development

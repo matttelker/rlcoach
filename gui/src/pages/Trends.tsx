@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { getTrends, getBenchmarks } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonChart, ErrorState, NoDataEmpty } from '../components';
-import { hasBenchmarkValue } from './dataTransforms';
+import { Card, CardHeader, CardContent, SkeletonChart, ErrorState, NoDataEmpty, PlaylistSelect } from '../components';
+import { hasBenchmarkValue, parseLocalDate } from './dataTransforms';
 
 const METRIC_OPTIONS = [
   { value: 'bcpm', label: 'Boost/Min', category: 'Boost' },
@@ -24,17 +24,20 @@ const PERIOD_OPTIONS = [
 export function Trends() {
   const [metric, setMetric] = useState('bcpm');
   const [period, setPeriod] = useState('30d');
+  const [playlist, setPlaylist] = useState<string>();
   const [showBenchmark, setShowBenchmark] = useState(true);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['trends', metric, period],
-    queryFn: () => getTrends({ metric, period }),
+    queryKey: ['trends', metric, period, playlist],
+    queryFn: () => getTrends({ metric, period, playlist }),
   });
 
+  const activePlaylist = playlist ?? data?.playlist;
+
   const { data: benchmarksData } = useQuery({
-    queryKey: ['benchmarks', metric],
-    queryFn: () => getBenchmarks({ metric, rank: 'GC1' }),
-    enabled: showBenchmark,
+    queryKey: ['benchmarks', metric, activePlaylist],
+    queryFn: () => getBenchmarks({ metric, rank: 'GC1', playlist: activePlaylist }),
+    enabled: showBenchmark && !!activePlaylist,
   });
 
   if (error) {
@@ -45,7 +48,7 @@ export function Trends() {
   const hasBenchmark = showBenchmark && hasBenchmarkValue(benchmarkValue);
 
   const chartData = data?.values.map((v) => ({
-    date: new Date(v.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    date: parseLocalDate(v.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     value: v.value,
     benchmark: hasBenchmark ? benchmarkValue : undefined,
   })) ?? [];
@@ -90,6 +93,7 @@ export function Trends() {
               ))}
             </select>
           </div>
+          <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
           <div className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -114,7 +118,10 @@ export function Trends() {
           {isLoading ? (
             <SkeletonChart />
           ) : chartData.length === 0 ? (
-            <NoDataEmpty message="No data for selected period" />
+            <NoDataEmpty
+              message="No data for selected period"
+              description="Try a longer period or another playlist."
+            />
           ) : (
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
@@ -142,7 +149,7 @@ export function Trends() {
                     dataKey="value"
                     stroke="var(--color-primary)"
                     strokeWidth={2}
-                    dot={false}
+                    dot={{ r: 3 }}
                     name={selectedMetric?.label}
                   />
                   {hasBenchmark && (

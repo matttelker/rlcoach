@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getReplay } from '../api/client';
 import { Card, CardHeader, CardContent, SkeletonCard, ErrorState } from '../components';
+import { parseUtc } from './dataTransforms';
 
 export function GameDetail() {
   const { replayId } = useParams<{ replayId: string }>();
@@ -29,8 +30,8 @@ export function GameDetail() {
     return <ErrorState message="Replay not found" />;
   }
 
-  const bluePlayers = data.players.filter((p) => p.team === 'BLUE');
-  const orangePlayers = data.players.filter((p) => p.team === 'ORANGE');
+  const bluePlayers = data.player_stats.filter((p) => p.team === 'BLUE');
+  const orangePlayers = data.player_stats.filter((p) => p.team === 'ORANGE');
 
   return (
     <div className="space-y-6">
@@ -60,7 +61,7 @@ export function GameDetail() {
             </span>
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">
-            {new Date(data.played_at_utc).toLocaleString()} • {data.playlist} • {data.map}
+            {parseUtc(data.played_at_utc).toLocaleString()} • {data.playlist} • {data.map}
           </p>
         </div>
       </div>
@@ -158,9 +159,16 @@ export function GameDetail() {
                 {orangePlayers.map((player) => (
                   <tr key={player.player_id} className="border-b border-[var(--color-border)]">
                     <td className="p-3">
-                      <span className={player.is_me ? 'text-[var(--color-primary)] font-medium' : ''}>
-                        {player.display_name}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={player.is_me ? 'text-[var(--color-primary)] font-medium' : ''}>
+                          {player.display_name}
+                        </span>
+                        {player.is_me && (
+                          <span className="text-xs px-1.5 py-0.5 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded">
+                            You
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="text-center p-3">{player.goals}</td>
                     <td className="text-center p-3">{player.assists}</td>

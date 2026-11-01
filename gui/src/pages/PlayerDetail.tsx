@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer } from 'recharts';
 import { getPlayer, tagPlayer } from '../api/client';
 import { Card, CardHeader, CardContent, SkeletonCard, ErrorState } from '../components';
+import { parseUtc } from './dataTransforms';
 
 export function PlayerDetail() {
   const { playerId } = useParams<{ playerId: string }>();
@@ -100,7 +101,7 @@ export function PlayerDetail() {
                 <span className="text-[var(--color-text-muted)]">First Seen</span>
                 <span>
                   {data.first_seen_utc
-                    ? new Date(data.first_seen_utc).toLocaleDateString()
+                    ? parseUtc(data.first_seen_utc).toLocaleDateString()
                     : 'Unknown'}
                 </span>
               </div>
@@ -108,7 +109,7 @@ export function PlayerDetail() {
                 <span className="text-[var(--color-text-muted)]">Last Seen</span>
                 <span>
                   {data.last_seen_utc
-                    ? new Date(data.last_seen_utc).toLocaleDateString()
+                    ? parseUtc(data.last_seen_utc).toLocaleDateString()
                     : 'Unknown'}
                 </span>
               </div>

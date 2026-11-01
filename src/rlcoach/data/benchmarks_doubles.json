@@ -1,0 +1,333 @@
+{
+  "metadata": {
+    "source": "Master Research Compilation",
+    "collected_date": "2025-01-01",
+    "notes": "Generated from RANK_BENCHMARKS_MASTER.md Part 2. Compiled from ballchasing.com, academic research and RLCS data, not measured here."
+  },
+  "benchmarks": [
+    {
+      "metric": "bcpm",
+      "playlist": "DOUBLES",
+      "rank_tier": "C2",
+      "median": 300.0,
+      "p25": 250.0,
+      "p75": 330.0,
+      "elite": 350.0
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "DOUBLES",
+      "rank_tier": "C3",
+      "median": 330.0,
+      "p25": 280.0,
+      "p75": 370.0,
+      "elite": 380.0
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC1",
+      "median": 380.0,
+      "p25": 330.0,
+      "p75": 420.0,
+      "elite": 420.0
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC2",
+      "median": 400.0,
+      "p25": 350.0,
+      "p75": 450.0,
+      "elite": 450.0
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC3",
+      "median": 420.0,
+      "p25": 370.0,
+      "p75": 470.0,
+      "elite": 470.0
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "DOUBLES",
+      "rank_tier": "SSL",
+      "median": 440.0,
+      "p25": 400.0,
+      "p75": 500.0,
+      "elite": 500.0
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "DOUBLES",
+      "rank_tier": "C2",
+      "median": 35.0,
+      "p25": 30.0,
+      "p75": 40.0,
+      "elite": 25.0
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "DOUBLES",
+      "rank_tier": "C3",
+      "median": 32.0,
+      "p25": 28.0,
+      "p75": 36.0,
+      "elite": 22.0
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC1",
+      "median": 30.0,
+      "p25": 25.0,
+      "p75": 34.0,
+      "elite": 20.0
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC2",
+      "median": 28.0,
+      "p25": 24.0,
+      "p75": 32.0,
+      "elite": 18.0
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC3",
+      "median": 26.0,
+      "p25": 22.0,
+      "p75": 30.0,
+      "elite": 15.0
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "DOUBLES",
+      "rank_tier": "SSL",
+      "median": 25.0,
+      "p25": 20.0,
+      "p75": 30.0,
+      "elite": 12.5
+    },
+    {
+      "metric": "goals",
+      "playlist": "DOUBLES",
+      "rank_tier": "C2",
+      "median": 0.6,
+      "p25": 0.3,
+      "p75": 0.9,
+      "elite": 1.0
+    },
+    {
+      "metric": "goals",
+      "playlist": "DOUBLES",
+      "rank_tier": "C3",
+      "median": 0.65,
+      "p25": 0.35,
+      "p75": 0.95,
+      "elite": 1.05
+    },
+    {
+      "metric": "goals",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC1",
+      "median": 0.7,
+      "p25": 0.4,
+      "p75": 1.0,
+      "elite": 1.1
+    },
+    {
+      "metric": "goals",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC2",
+      "median": 0.75,
+      "p25": 0.45,
+      "p75": 1.05,
+      "elite": 1.2
+    },
+    {
+      "metric": "goals",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC3",
+      "median": 0.8,
+      "p25": 0.5,
+      "p75": 1.1,
+      "elite": 1.25
+    },
+    {
+      "metric": "goals",
+      "playlist": "DOUBLES",
+      "rank_tier": "SSL",
+      "median": 0.9,
+      "p25": 0.55,
+      "p75": 1.25,
+      "elite": 1.4
+    },
+    {
+      "metric": "assists",
+      "playlist": "DOUBLES",
+      "rank_tier": "C2",
+      "median": 0.35,
+      "p25": 0.15,
+      "p75": 0.55,
+      "elite": 0.65
+    },
+    {
+      "metric": "assists",
+      "playlist": "DOUBLES",
+      "rank_tier": "C3",
+      "median": 0.4,
+      "p25": 0.2,
+      "p75": 0.6,
+      "elite": 0.7
+    },
+    {
+      "metric": "assists",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC1",
+      "median": 0.45,
+      "p25": 0.25,
+      "p75": 0.65,
+      "elite": 0.75
+    },
+    {
+      "metric": "assists",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC2",
+      "median": 0.5,
+      "p25": 0.3,
+      "p75": 0.7,
+      "elite": 0.8
+    },
+    {
+      "metric": "assists",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC3",
+      "median": 0.55,
+      "p25": 0.35,
+      "p75": 0.75,
+      "elite": 0.85
+    },
+    {
+      "metric": "assists",
+      "playlist": "DOUBLES",
+      "rank_tier": "SSL",
+      "median": 0.65,
+      "p25": 0.4,
+      "p75": 0.9,
+      "elite": 1.0
+    },
+    {
+      "metric": "saves",
+      "playlist": "DOUBLES",
+      "rank_tier": "C2",
+      "median": 1.4,
+      "p25": 0.9,
+      "p75": 1.9,
+      "elite": 2.2
+    },
+    {
+      "metric": "saves",
+      "playlist": "DOUBLES",
+      "rank_tier": "C3",
+      "median": 1.5,
+      "p25": 1.0,
+      "p75": 2.0,
+      "elite": 2.4
+    },
+    {
+      "metric": "saves",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC1",
+      "median": 1.6,
+      "p25": 1.1,
+      "p75": 2.1,
+      "elite": 2.5
+    },
+    {
+      "metric": "saves",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC2",
+      "median": 1.7,
+      "p25": 1.2,
+      "p75": 2.2,
+      "elite": 2.6
+    },
+    {
+      "metric": "saves",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC3",
+      "median": 1.8,
+      "p25": 1.3,
+      "p75": 2.3,
+      "elite": 2.7
+    },
+    {
+      "metric": "saves",
+      "playlist": "DOUBLES",
+      "rank_tier": "SSL",
+      "median": 2.0,
+      "p25": 1.4,
+      "p75": 2.6,
+      "elite": 3.0
+    },
+    {
+      "metric": "shots",
+      "playlist": "DOUBLES",
+      "rank_tier": "C2",
+      "median": 2.4,
+      "p25": 1.6,
+      "p75": 3.2,
+      "elite": 3.8
+    },
+    {
+      "metric": "shots",
+      "playlist": "DOUBLES",
+      "rank_tier": "C3",
+      "median": 2.6,
+      "p25": 1.8,
+      "p75": 3.4,
+      "elite": 4.0
+    },
+    {
+      "metric": "shots",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC1",
+      "median": 2.8,
+      "p25": 2.0,
+      "p75": 3.6,
+      "elite": 4.2
+    },
+    {
+      "metric": "shots",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC2",
+      "median": 3.0,
+      "p25": 2.2,
+      "p75": 3.8,
+      "elite": 4.5
+    },
+    {
+      "metric": "shots",
+      "playlist": "DOUBLES",
+      "rank_tier": "GC3",
+      "median": 3.2,
+      "p25": 2.4,
+      "p75": 4.0,
+      "elite": 4.7
+    },
+    {
+      "metric": "shots",
+      "playlist": "DOUBLES",
+      "rank_tier": "SSL",
+      "median": 3.5,
+      "p25": 2.6,
+      "p75": 4.4,
+      "elite": 5.0
+    }
+  ]
+}

@@ -239,3 +239,98 @@ class TestWeaknessesEndpoint:
         for weakness in data["weaknesses"]:
             assert "severity" in weakness
             assert "z_score" in weakness
+
+
+class TestLocalModeTrends:
+    """Local replays have no owner, so trends must not require a user."""
+
+    def test_trends_return_games_without_a_user(self, client):
+        data = client.get("/trends?metric=bcpm&period=all").json()
+
+        assert data["playlist"] == "DOUBLES"
+        assert len(data["values"]) == 10
+
+
+class TestPrimaryPlaylistDefault:
+    """Endpoints default to the configured playlist, not always Doubles."""
+
+    @pytest.fixture
+    def standard_client(self, db_with_analysis_data):
+        from dataclasses import replace
+
+        from rlcoach.api.app import create_app
+        from rlcoach.config import PreferencesConfig
+
+        config = replace(
+            db_with_analysis_data,
+            preferences=PreferencesConfig(
+                primary_playlist="STANDARD", target_rank="GC1"
+            ),
+        )
+        with patch("rlcoach.api.app.get_config", return_value=config):
+            yield TestClient(create_app())
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/trends?metric=bcpm&period=all",
+            "/compare?rank=GC1&period=all",
+            "/patterns?period=all",
+            "/weaknesses?period=all",
+        ],
+    )
+    def test_uses_configured_playlist(self, standard_client, path):
+        assert standard_client.get(path).json()["playlist"] == "STANDARD"
+
+    def test_explicit_playlist_wins(self, standard_client):
+        data = standard_client.get(
+            "/compare?rank=GC1&period=all&playlist=DOUBLES"
+        ).json()
+
+        assert data["playlist"] == "DOUBLES"
+        assert data["game_count"] == 10
+
+    def test_falls_back_to_doubles_without_config(self, db_with_analysis_data):
+        from rlcoach.api.app import create_app
+
+        client = TestClient(create_app())
+
+        assert client.get("/patterns?period=all").json()["playlist"] == "DOUBLES"
+
+
+class TestMetricDirection:
+    """Lower-is-better metrics must not be scored as if higher were better."""
+
+    @staticmethod
+    def _lower_avg_boost_benchmark():
+        from rlcoach.db.models import Benchmark
+        from rlcoach.db.session import create_session
+
+        session = create_session()
+        benchmark = session.query(Benchmark).filter_by(metric="avg_boost").one()
+        benchmark.p25_value = 15.0
+        benchmark.median_value = 20.0
+        benchmark.p75_value = 25.0
+        session.commit()
+        session.close()
+
+    def test_holding_too_much_boost_is_a_weakness(self, client):
+        self._lower_avg_boost_benchmark()
+
+        data = client.get("/weaknesses?rank=GC1&period=all").json()
+
+        assert "avg_boost" in {w["metric"] for w in data["weaknesses"]}
+        assert "avg_boost" not in {s["metric"] for s in data["strengths"]}
+        assert data["has_benchmarks"] is True
+
+    def test_compare_reports_each_metrics_direction(self, client):
+        data = client.get("/compare?rank=GC1&period=all").json()
+        directions = {c["metric"]: c["direction"] for c in data["comparisons"]}
+
+        assert directions["avg_boost"] == "lower"
+        assert directions["bcpm"] == "higher"
+
+    def test_weaknesses_flag_missing_benchmarks(self, client):
+        data = client.get("/weaknesses?rank=SSL&period=all").json()
+
+        assert data["has_benchmarks"] is False

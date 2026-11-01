@@ -4,6 +4,9 @@ import {
   buildCompareChartData,
   buildGamesParams,
   hasBenchmarkValue,
+  isOnTarget,
+  parseLocalDate,
+  parseUtc,
 } from '../dataTransforms';
 import type { Comparison } from '../../types/api';
 
@@ -24,6 +27,7 @@ describe('Compare chart data', () => {
         target_median: 50,
         difference: null,
         difference_pct: null,
+        direction: 'higher',
       },
       {
         metric: 'goals',
@@ -31,6 +35,7 @@ describe('Compare chart data', () => {
         target_median: 1,
         difference: 1,
         difference_pct: 100,
+        direction: 'higher',
       },
     ];
 
@@ -38,10 +43,33 @@ describe('Compare chart data', () => {
       {
         metric: 'GOALS',
         difference: 100,
+        onTarget: true,
         myValue: 2,
         targetMedian: 1,
       },
     ]);
+  });
+
+  it('treats being under target as good for lower-is-better metrics', () => {
+    expect(isOnTarget(-10, 'lower')).toBe(true);
+    expect(isOnTarget(10, 'lower')).toBe(false);
+    expect(isOnTarget(10, 'higher')).toBe(true);
+    expect(isOnTarget(-10, 'higher')).toBe(false);
+  });
+});
+
+describe('Date parsing', () => {
+  it('reads offset-less API timestamps as UTC', () => {
+    expect(parseUtc('2026-11-01T03:56:53').toISOString()).toBe('2026-11-01T03:56:53.000Z');
+  });
+
+  it('keeps timestamps that already carry an offset', () => {
+    expect(parseUtc('2026-11-01T03:56:53Z').toISOString()).toBe('2026-11-01T03:56:53.000Z');
+    expect(parseUtc('2026-11-01T03:56:53+01:00').toISOString()).toBe('2026-11-01T02:56:53.000Z');
+  });
+
+  it('keeps a play date on its own calendar day in any timezone', () => {
+    expect(parseLocalDate('2026-10-31').getDate()).toBe(31);
   });
 });
 

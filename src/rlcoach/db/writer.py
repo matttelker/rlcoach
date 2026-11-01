@@ -25,6 +25,32 @@ class PlayerNotFoundError(Exception):
     pass
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Attach UTC to the offset-less datetimes SQLite returns."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _played_at_utc(metadata: dict[str, Any]) -> datetime:
+    """Return when a report's game was played, or now if it is unknown."""
+    played_at_str = metadata.get("started_at_utc", "")
+    if played_at_str:
+        return datetime.fromisoformat(played_at_str.replace("Z", "+00:00"))
+    return datetime.now(timezone.utc)
+
+
+def _record_sighting(player: Player, seen_at: datetime) -> None:
+    """Widen a player's first and last seen range to include a game.
+
+    Replays can be ingested in any order, so the newest game is not always last.
+    """
+    first_seen = _as_utc(player.first_seen_utc)
+    last_seen = _as_utc(player.last_seen_utc)
+    player.first_seen_utc = min(first_seen, seen_at) if first_seen else seen_at
+    player.last_seen_utc = max(last_seen, seen_at) if last_seen else seen_at
+
+
 def _resolve_player_from_accounts(
     session: Any,
     user_id: str,
@@ -127,14 +153,17 @@ def _resolve_player_for_user(
 def upsert_players(
     players: list[dict[str, Any]],
     identity_config: IdentityConfig,
+    seen_at: datetime | None = None,
 ) -> None:
     """Create or update player records.
 
     Args:
         players: List of player dicts with 'player_id' and 'display_name'
         identity_config: Config for determining who is "me"
+        seen_at: When the game was played (default: now)
     """
     resolver = PlayerIdentityResolver(identity_config)
+    seen_at = seen_at or datetime.now(timezone.utc)
 
     session = create_session()
     try:
@@ -149,7 +178,7 @@ def upsert_players(
             if existing:
                 # Update
                 existing.display_name = display_name
-                existing.last_seen_utc = datetime.now(timezone.utc)
+                _record_sighting(existing, seen_at)
                 if not is_me:
                     existing.games_with_me = (existing.games_with_me or 0) + 1
             else:
@@ -159,8 +188,8 @@ def upsert_players(
                     display_name=display_name,
                     platform=platform,
                     is_me=is_me,
-                    first_seen_utc=datetime.now(timezone.utc),
-                    last_seen_utc=datetime.now(timezone.utc),
+                    first_seen_utc=seen_at,
+                    last_seen_utc=seen_at,
                     games_with_me=0 if is_me else 1,
                 )
                 session.add(player)
@@ -426,7 +455,11 @@ def write_report(
         PlayerNotFoundError: If player identity cannot be resolved
     """
     # Step 1: Upsert players
-    upsert_players(report["players"], config.identity)
+    upsert_players(
+        report["players"],
+        config.identity,
+        seen_at=_played_at_utc(report.get("metadata", {})),
+    )
 
     # Step 2: Insert replay record
     replay_id = insert_replay(report, file_hash, config)
@@ -567,15 +600,15 @@ def write_report_saas(
             existing = session.get(Player, pid)
             if existing:
                 existing.display_name = display_name
-                existing.last_seen_utc = datetime.now(timezone.utc)
+                _record_sighting(existing, played_at_utc)
             else:
                 player = Player(
                     player_id=pid,
                     display_name=display_name,
                     platform=platform,
                     is_me=False,  # SaaS: determined via account linking, not config
-                    first_seen_utc=datetime.now(timezone.utc),
-                    last_seen_utc=datetime.now(timezone.utc),
+                    first_seen_utc=played_at_utc,
+                    last_seen_utc=played_at_utc,
                     games_with_me=0,
                 )
                 session.add(player)

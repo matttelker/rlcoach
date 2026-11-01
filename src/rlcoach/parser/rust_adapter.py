@@ -9,6 +9,7 @@ ingest validator, with explicit quality warnings.
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -33,6 +34,37 @@ try:  # best-effort import of Rust core
 except Exception:  # pragma: no cover - environment may not have the module
     _rust = None  # type: ignore
     _RUST_AVAILABLE = False
+
+_REPLAY_DATE_FORMATS = ("%Y-%m-%d %H-%M-%S", "%Y-%m-%d:%H-%M")
+
+
+def parse_replay_date(raw: Any, tz: _dt.tzinfo | None = None) -> str | None:
+    """Convert a replay header Date to a UTC ISO timestamp.
+
+    The header stores the recording machine's clock with no timezone. It is
+    read in ``tz``, or this machine's timezone by default, so the result is
+    only as accurate as that assumption.
+    """
+    if not isinstance(raw, str):
+        return None
+    for fmt in _REPLAY_DATE_FORMATS:
+        try:
+            recorded = _dt.datetime.strptime(raw.strip(), fmt)
+            if tz is not None:
+                recorded = recorded.replace(tzinfo=tz)
+            started = recorded.astimezone(_dt.timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            continue
+        return started.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return None
+
+
+def _read_started_at_utc(path: Path) -> str | None:
+    """Read when a replay was recorded, or None if the header lacks it."""
+    try:
+        return parse_replay_date(_rust.header_property(str(path), "Date"))
+    except Exception:
+        return None
 
 
 def _parse_backend_chain_env() -> list[str] | None:
@@ -149,6 +181,7 @@ class RustAdapter(ParserAdapter):
             match_length=float(d.get("match_length", 0.0) or 0.0),
             engine_build=d.get("engine_build"),
             match_guid=d.get("match_guid"),
+            started_at_utc=d.get("started_at_utc"),
             declared_record_fps=(
                 float(d["declared_record_fps"])
                 if d.get("declared_record_fps") is not None
@@ -288,6 +321,7 @@ class RustAdapter(ParserAdapter):
                     raise HeaderParseError(
                         str(path), "Rust core returned non-dict header"
                     )
+                d["started_at_utc"] = _read_started_at_utc(path)
                 header = self._header_from_rust_dict(d)
                 return header
 

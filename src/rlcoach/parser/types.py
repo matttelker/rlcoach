@@ -72,6 +72,7 @@ class Header:
     team_size: int = 0
     engine_build: str | None = None
     match_guid: str | None = None
+    started_at_utc: str | None = None
     declared_record_fps: float | None = None
     overtime: bool | None = None
     mutators: dict[str, str | int | float | bool] = field(default_factory=dict)

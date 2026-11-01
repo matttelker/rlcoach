@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getWeaknesses, getPatterns } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonCard, ErrorState, NoDataEmpty } from '../components';
+import { Card, CardHeader, CardContent, SkeletonCard, ErrorState, NoDataEmpty, PlaylistSelect } from '../components';
+import { BENCHMARK_HINT } from './dataTransforms';
 
 const SEVERITY_STYLES = {
   critical: 'bg-[var(--color-error)]/20 text-[var(--color-error)] border-[var(--color-error)]/50',
-  moderate: 'bg-[var(--color-warning)]/20 text-[var(--color-warning)] border-[var(--color-warning)]/50',
-  minor: 'bg-blue-500/20 text-blue-400 border-blue-500/50',
+  high: 'bg-[var(--color-error)]/20 text-[var(--color-error)] border-[var(--color-error)]/50',
+  medium: 'bg-[var(--color-warning)]/20 text-[var(--color-warning)] border-[var(--color-warning)]/50',
+  low: 'bg-blue-500/20 text-blue-400 border-blue-500/50',
   strength: 'bg-[var(--color-success)]/20 text-[var(--color-success)] border-[var(--color-success)]/50',
   neutral: 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] border-[var(--color-border)]',
 };
@@ -14,20 +16,32 @@ const SEVERITY_STYLES = {
 export function Focus() {
   const [period] = useState('30d');
   const [rank] = useState('GC1');
+  const [playlist, setPlaylist] = useState<string>();
 
   const { data: weaknessesData, isLoading: weaknessesLoading, error: weaknessesError } = useQuery({
-    queryKey: ['weaknesses', period, rank],
-    queryFn: () => getWeaknesses({ period, rank }),
+    queryKey: ['weaknesses', period, rank, playlist],
+    queryFn: () => getWeaknesses({ period, rank, playlist }),
   });
 
   const { data: patternsData, isLoading: patternsLoading, error: patternsError } = useQuery({
-    queryKey: ['patterns', period],
-    queryFn: () => getPatterns({ period }),
+    queryKey: ['patterns', period, playlist],
+    queryFn: () => getPatterns({ period, playlist }),
   });
 
   if (weaknessesError || patternsError) {
     return <ErrorState message="Failed to load focus areas" />;
   }
+
+  const activePlaylist = playlist ?? weaknessesData?.playlist;
+  const missingData =
+    weaknessesData?.game_count === 0
+      ? {
+          message: `No ${activePlaylist} games in this period`,
+          description: 'Try another playlist.',
+        }
+      : weaknessesData?.has_benchmarks === false
+        ? { message: `No ${rank} benchmarks for ${activePlaylist}`, description: BENCHMARK_HINT }
+        : null;
 
   return (
     <div className="space-y-6">
@@ -35,6 +49,17 @@ export function Focus() {
         <h1 className="text-2xl font-bold text-[var(--color-text)]">Focus Areas</h1>
         <p className="text-sm text-[var(--color-text-muted)]">Areas to improve and your strengths</p>
       </div>
+
+      <Card>
+        <CardContent className="flex flex-wrap gap-4 items-center">
+          <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
+          {weaknessesData && (
+            <div className="ml-auto text-sm text-[var(--color-text-muted)]">
+              Based on {weaknessesData.game_count} games
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Weaknesses */}
@@ -45,8 +70,13 @@ export function Focus() {
           <CardContent>
             {weaknessesLoading ? (
               <SkeletonCard />
+            ) : missingData ? (
+              <NoDataEmpty {...missingData} />
             ) : weaknessesData?.weaknesses.length === 0 ? (
-              <NoDataEmpty message="No weaknesses detected" />
+              <NoDataEmpty
+                message="No weaknesses detected"
+                description={`Your averages are within the normal ${rank} range.`}
+              />
             ) : (
               <div className="space-y-3">
                 {weaknessesData?.weaknesses.map((w) => (
@@ -81,6 +111,8 @@ export function Focus() {
           <CardContent>
             {weaknessesLoading ? (
               <SkeletonCard />
+            ) : missingData ? (
+              <NoDataEmpty {...missingData} />
             ) : weaknessesData?.strengths.length === 0 ? (
               <NoDataEmpty message="Keep playing to identify strengths" />
             ) : (
@@ -100,7 +132,7 @@ export function Focus() {
                       Your avg: {s.my_value.toFixed(2)} • {rank} median: {s.target_median.toFixed(2)}
                     </div>
                     <div className="text-xs mt-1 opacity-60">
-                      Z-score: +{s.z_score.toFixed(2)} ({s.z_score.toFixed(1)} std devs above average)
+                      Z-score: {s.z_score.toFixed(2)} ({Math.abs(s.z_score).toFixed(1)} std devs {s.z_score < 0 ? 'below' : 'above'} average)
                     </div>
                   </div>
                 ))}
@@ -124,7 +156,10 @@ export function Focus() {
           {patternsLoading ? (
             <SkeletonCard />
           ) : patternsData?.patterns.length === 0 ? (
-            <NoDataEmpty message="Need more games to detect patterns" />
+            <NoDataEmpty
+              message="Need more games to detect patterns"
+              description={`Needs at least ${patternsData?.min_games} wins and ${patternsData?.min_games} losses in ${patternsData?.playlist}.`}
+            />
           ) : (
             <div className="space-y-4">
               {patternsData?.patterns.map((p) => (

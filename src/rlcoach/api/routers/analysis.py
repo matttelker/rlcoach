@@ -12,6 +12,7 @@ from ...analysis.patterns import compute_pattern_analysis
 from ...analysis.weaknesses import detect_weaknesses
 from ...db import create_session, get_session
 from ...db.models import Benchmark, PlayerGameStats, Replay, UserReplay
+from ...metrics import MetricDirection, get_metric
 from ..auth import OptionalUser
 
 router = APIRouter(tags=["analysis"])
@@ -33,6 +34,27 @@ ALLOWED_METRICS = {
 }
 
 
+def _resolve_playlist(playlist: str | None) -> str:
+    """Use the requested playlist, falling back to the configured primary one."""
+    if playlist:
+        return playlist
+
+    from ..app import get_config
+
+    try:
+        return get_config().preferences.primary_playlist
+    except RuntimeError:
+        return "DOUBLES"
+
+
+def _metric_direction(metric: str) -> str:
+    """Return "lower" for metrics where less is better, otherwise "higher"."""
+    definition = get_metric(metric)
+    if definition and definition.direction == MetricDirection.LOWER_BETTER:
+        return MetricDirection.LOWER_BETTER.value
+    return MetricDirection.HIGHER_BETTER.value
+
+
 @router.get("/trends")
 async def get_trends(
     user: OptionalUser,
@@ -46,7 +68,7 @@ async def get_trends(
     Args:
         metric: The metric to get trends for
         period: Time period to analyze
-        playlist: Optional playlist filter
+        playlist: Playlist to trend (default: the configured primary playlist)
     """
     # Security: Validate metric against allowlist
     if metric not in ALLOWED_METRICS:
@@ -69,26 +91,26 @@ async def get_trends(
         days = int(period.rstrip("d"))
         date_from = date.today() - timedelta(days=days)
 
-    # Require authentication to prevent data leakage
-    # Unauthenticated requests return empty (use CLI with --token for auth)
-    if not user:
-        return {"metric": metric, "period": period, "values": []}
+    playlist = _resolve_playlist(playlist)
 
-    # Build query scoped to user's data via UserReplay join
     query = (
         db.query(Replay.play_date, PlayerGameStats)
-        .join(UserReplay, Replay.replay_id == UserReplay.replay_id)
         .join(PlayerGameStats, Replay.replay_id == PlayerGameStats.replay_id)
-        .filter(UserReplay.user_id == user.id)
         .filter(PlayerGameStats.is_me == True)  # noqa: E712
+        .filter(Replay.playlist == playlist)
     )
+
+    # This router is never mounted in SaaS mode. Local replays have no owner, so
+    # only scope to a user when a request actually carries one.
+    if user:
+        query = query.join(UserReplay, Replay.replay_id == UserReplay.replay_id).filter(
+            UserReplay.user_id == user.id
+        )
 
     if date_from:
         query = query.filter(Replay.play_date >= date_from)
-    if playlist:
-        query = query.filter(Replay.playlist == playlist)
 
-    query = query.order_by(Replay.play_date)
+    query = query.order_by(Replay.play_date, Replay.played_at_utc)
     results = query.all()
 
     # Extract values by date (metric already validated)
@@ -106,6 +128,7 @@ async def get_trends(
     return {
         "metric": metric,
         "period": period,
+        "playlist": playlist,
         "values": values,
     }
 
@@ -160,16 +183,18 @@ async def list_benchmarks(
 @router.get("/compare")
 async def get_comparison(
     rank: str = Query(..., description="Target rank to compare against"),
-    playlist: str = Query(default="DOUBLES"),
+    playlist: str | None = None,
     period: str = Query(default="30d"),
 ) -> dict[str, Any]:
     """Compare my stats to target rank benchmarks.
 
     Args:
         rank: Target rank tier (e.g., GC1, C3)
-        playlist: Playlist to compare
+        playlist: Playlist to compare (default: the configured primary playlist)
         period: Time period for my averages
     """
+    playlist = _resolve_playlist(playlist)
+
     # Parse period
     if period == "all":
         date_from = None
@@ -239,6 +264,7 @@ async def get_comparison(
                         "target_median": benchmark.median_value,
                         "difference": round(diff, 2),
                         "difference_pct": round(diff_pct, 1),
+                        "direction": _metric_direction(metric),
                     }
                 )
             else:
@@ -249,6 +275,7 @@ async def get_comparison(
                         "target_median": None,
                         "difference": None,
                         "difference_pct": None,
+                        "direction": _metric_direction(metric),
                     }
                 )
 
@@ -265,7 +292,7 @@ async def get_comparison(
 
 @router.get("/patterns")
 async def get_patterns(
-    playlist: str = Query(default="DOUBLES"),
+    playlist: str | None = None,
     period: str = Query(default="30d"),
     min_games: int = Query(default=5),
 ) -> dict[str, Any]:
@@ -274,10 +301,12 @@ async def get_patterns(
     Uses Cohen's d effect size to identify statistically significant patterns.
 
     Args:
-        playlist: Playlist to analyze
+        playlist: Playlist to analyze (default: the configured primary playlist)
         period: Time period
         min_games: Minimum games per result type
     """
+    playlist = _resolve_playlist(playlist)
+
     # Parse period
     if period == "all":
         date_from = None
@@ -336,8 +365,10 @@ async def get_patterns(
 
         return {
             "patterns": pattern_list,
+            "playlist": playlist,
             "win_count": len(wins),
             "loss_count": len(losses),
+            "min_games": min_games,
         }
 
     finally:
@@ -346,7 +377,7 @@ async def get_patterns(
 
 @router.get("/weaknesses")
 async def get_weaknesses(
-    playlist: str = Query(default="DOUBLES"),
+    playlist: str | None = None,
     rank: str = Query(default="GC1"),
     period: str = Query(default="30d"),
 ) -> dict[str, Any]:
@@ -355,10 +386,12 @@ async def get_weaknesses(
     Uses z-scores to identify areas needing improvement.
 
     Args:
-        playlist: Playlist to analyze
+        playlist: Playlist to analyze (default: the configured primary playlist)
         rank: Target rank for comparison
         period: Time period for averages
     """
+    playlist = _resolve_playlist(playlist)
+
     # Parse period
     if period == "all":
         date_from = None
@@ -386,6 +419,8 @@ async def get_weaknesses(
                 "weaknesses": [],
                 "strengths": [],
                 "game_count": 0,
+                "playlist": playlist,
+                "has_benchmarks": False,
             }
 
         # Compute averages
@@ -413,6 +448,7 @@ async def get_weaknesses(
                 "p25": b.p25_value,
                 "median": b.median_value,
                 "p75": b.p75_value,
+                "direction": _metric_direction(b.metric),
             }
 
         # Detect weaknesses and strengths
@@ -425,7 +461,7 @@ async def get_weaknesses(
             item = {
                 "metric": w.metric,
                 "my_value": round(w.my_value, 2),
-                "target_median": round(w.target_median, 2),
+                "target_median": round(w.benchmark_median, 2),
                 "z_score": round(w.z_score, 2),
                 "severity": w.severity.value,
             }
@@ -443,6 +479,8 @@ async def get_weaknesses(
             "weaknesses": weaknesses,
             "strengths": strengths,
             "game_count": len(my_stats),
+            "playlist": playlist,
+            "has_benchmarks": bool(benchmarks),
         }
 
     finally:

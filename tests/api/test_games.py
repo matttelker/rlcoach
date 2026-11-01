@@ -278,3 +278,60 @@ class TestReplayFullEndpoint:
 
         assert "replay" in data
         assert "player_stats" in data
+
+
+class TestDashboardToday:
+    """Today's dashboard totals span every playlist."""
+
+    def test_today_sums_all_playlists(self, client):
+        from datetime import date as date_cls
+
+        from rlcoach.db.models import DailyStats
+        from rlcoach.db.session import create_session
+
+        session = create_session()
+        for playlist, games, wins in (("DOUBLES", 1, 1), ("STANDARD", 3, 1)):
+            session.add(
+                DailyStats(
+                    play_date=date_cls.today(),
+                    playlist=playlist,
+                    games_played=games,
+                    wins=wins,
+                    losses=games - wins,
+                    draws=0,
+                )
+            )
+        session.commit()
+        session.close()
+
+        today = client.get("/dashboard").json()["today"]
+
+        assert today["games_played"] == 4
+        assert today["wins"] == 2
+        assert today["losses"] == 2
+        assert today["win_rate"] == 50.0
+
+    def test_today_has_every_field_when_no_games_were_played(self, client):
+        today = client.get("/dashboard").json()["today"]
+
+        assert today == {
+            "games_played": 0,
+            "wins": 0,
+            "losses": 0,
+            "draws": 0,
+            "win_rate": None,
+        }
+
+    def test_quick_stats_average_boost_per_minute(self, client):
+        quick_stats = client.get("/dashboard").json()["quick_stats"]
+
+        assert quick_stats["avg_bcpm"] == pytest.approx(370.0)
+
+
+class TestReplayPlayerNames:
+    """Game detail needs a name to show for each player."""
+
+    def test_replay_player_stats_include_display_name(self, client):
+        player = client.get("/replays/replay_0").json()["player_stats"][0]
+
+        assert player["display_name"] == "TestPlayer"

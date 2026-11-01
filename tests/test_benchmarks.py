@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from rlcoach.benchmarks import import_benchmarks, validate_benchmark_data
+from rlcoach.benchmarks import (
+    DEFAULT_BENCHMARKS_PATH,
+    import_benchmarks,
+    seed_default_benchmarks,
+    validate_benchmark_data,
+)
 from rlcoach.db.models import Benchmark
 from rlcoach.db.session import create_session, init_db, reset_engine
 from rlcoach.parser.types import Header, NetworkDiagnostics, NetworkFrames, PlayerInfo
@@ -425,3 +430,39 @@ def test_parser_corpus_health_tracks_parser_event_and_provenance_metrics(monkeyp
         summary["scorecard_coverage"]["avg_player_identity_coverage"]
         == summary["avg_player_identity_coverage"]
     )
+
+
+def test_bundled_benchmarks_pass_validation():
+    data = json.loads(DEFAULT_BENCHMARKS_PATH.read_text(encoding="utf-8"))
+
+    assert validate_benchmark_data(data) == []
+    assert {b["playlist"] for b in data["benchmarks"]} == {"DOUBLES"}
+
+
+def test_seed_default_benchmarks_only_loads_once(tmp_path):
+    init_db(tmp_path / "test.db")
+
+    assert seed_default_benchmarks() == 36
+    assert seed_default_benchmarks() == 0
+
+
+def test_seed_default_benchmarks_keeps_imported_rows(tmp_path):
+    init_db(tmp_path / "test.db")
+    session = create_session()
+    session.add(
+        Benchmark(
+            metric="bcpm",
+            playlist="STANDARD",
+            rank_tier="GC1",
+            median_value=999.0,
+            source="mine",
+        )
+    )
+    session.commit()
+    session.close()
+
+    assert seed_default_benchmarks() == 0
+
+    session = create_session()
+    assert session.query(Benchmark).count() == 1
+    session.close()

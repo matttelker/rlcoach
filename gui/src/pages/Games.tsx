@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getGames } from '../api/client';
 import { Card, CardHeader, CardContent, SkeletonTable, ErrorState, NoGamesEmpty, Pagination } from '../components';
-import { buildGamesParams, type GameFilters, type GameResult } from './dataTransforms';
+import { buildGamesParams, parseUtc, type GameFilters, type GameResult } from './dataTransforms';
 
 export function Games() {
   const [filters, setFilters] = useState<GameFilters>({
@@ -96,10 +96,10 @@ export function Games() {
                           to={`/games/${encodeURIComponent(game.replay_id)}`}
                           className="text-[var(--color-primary)] hover:underline"
                         >
-                          {new Date(game.played_at_utc).toLocaleDateString()}
+                          {parseUtc(game.played_at_utc).toLocaleDateString()}
                         </Link>
                         <div className="text-xs text-[var(--color-text-muted)]">
-                          {new Date(game.played_at_utc).toLocaleTimeString()}
+                          {parseUtc(game.played_at_utc).toLocaleTimeString()}
                         </div>
                       </td>
                       <td className="p-4 text-sm">{game.playlist}</td>

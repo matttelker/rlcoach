@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ...db.models import PlayerGameStats, Replay
+from ...db.models import Player, PlayerGameStats, Replay
 from ...db.session import create_session
 from ._sorting import apply_sort
 
@@ -112,17 +112,19 @@ async def get_replay(replay_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="Replay not found")
 
         # Get player stats
-        stats = (
-            session.query(PlayerGameStats)
+        rows = (
+            session.query(PlayerGameStats, Player.display_name)
+            .join(Player, Player.player_id == PlayerGameStats.player_id)
             .filter(PlayerGameStats.replay_id == replay_id)
             .all()
         )
 
         player_stats = []
-        for s in stats:
+        for s, display_name in rows:
             player_stats.append(
                 {
                     "player_id": s.player_id,
+                    "display_name": display_name,
                     "team": s.team,
                     "is_me": s.is_me,
                     "goals": s.goals,

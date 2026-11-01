@@ -1,5 +1,7 @@
 """Tests for event detection and timeline aggregation."""
 
+from dataclasses import replace
+
 from rlcoach.events import (
     GOAL_LINE_THRESHOLD,
     DemoEvent,
@@ -17,6 +19,7 @@ from rlcoach.events import (
 from rlcoach.field_constants import FIELD, Vec3
 from rlcoach.parser.types import (
     BallFrame,
+    BoostPadEventFrame,
     Frame,
     Header,
     ParserDemoEvent,
@@ -1507,3 +1510,46 @@ class TestParserAuthorityPreference:
 
         # Ensure roles vary (the original bug was all BACK)
         assert len(set(player_roles.values())) > 1
+
+
+class TestBoostPadEventCoverage:
+    """Pad events only replace boost-delta detection when they are complete."""
+
+    @staticmethod
+    def _collected(player_id: str) -> BoostPadEventFrame:
+        return BoostPadEventFrame(
+            pad_id=0, status="COLLECTED", is_big=True, player_id=player_id
+        )
+
+    def _three_pickup_frames(self, pad_event_times: set[float]) -> list[Frame]:
+        corner = Vec3(-3584.0, -4096.0, 17.0)
+        boost_by_time = [
+            (1.0, 20),
+            (1.1, 100),
+            (12.0, 20),
+            (12.1, 100),
+            (23.0, 20),
+            (23.1, 100),
+        ]
+        frames = []
+        for timestamp, boost in boost_by_time:
+            frame = create_test_frame(
+                timestamp,
+                Vec3(0.0, 0.0, 93.15),
+                Vec3(0.0, 0.0, 0.0),
+                [create_test_player("p1", 0, corner, boost=boost)],
+            )
+            if timestamp in pad_event_times:
+                frame = replace(frame, boost_pad_events=[self._collected("p1")])
+            frames.append(frame)
+        return frames
+
+    def test_sparse_pad_events_do_not_hide_boost_gains(self):
+        """One decoded pad event must not erase the other two pickups."""
+        assert len(detect_boost_pickups(self._three_pickup_frames({1.1}))) == 3
+
+    def test_pad_events_are_used_when_they_cover_most_pickups(self):
+        """Pad events stay preferred once they explain most boost gains."""
+        pickups = detect_boost_pickups(self._three_pickup_frames({1.1, 12.1}))
+
+        assert [round(pickup.t, 1) for pickup in pickups] == [1.1, 12.1]

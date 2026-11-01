@@ -341,7 +341,7 @@ def generate_report(
             "overtime": bool(getattr(header, "overtime", False) or False),
             "mutators": getattr(header, "mutators", {}) or {},
             "match_guid": getattr(header, "match_guid", None) or "unknown",
-            "started_at_utc": _utc_now_iso(),
+            "started_at_utc": getattr(header, "started_at_utc", None) or _utc_now_iso(),
             "duration_seconds": match_duration,
             "recorded_frame_hz": float(recorded_hz),
             "total_frames": max(1, len(normalized_frames)),

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getDashboard } from '../api/client';
 import { StatCard, Card, CardHeader, CardContent, SkeletonCard, ErrorState, NoGamesEmpty } from '../components';
+import { parseUtc } from './dataTransforms';
 
 export function Dashboard() {
   const { data, isLoading, error } = useQuery({
@@ -34,21 +35,24 @@ export function Dashboard() {
           <>
             <StatCard
               label="Games Today"
-              value={data.quick_stats.games_today}
+              value={data.today.games_played}
             />
             <StatCard
               label="Wins Today"
-              value={data.quick_stats.wins_today}
-              subtitle={`of ${data.quick_stats.games_today} games`}
+              value={data.today.wins}
+              subtitle={`of ${data.today.games_played} games`}
             />
             <StatCard
-              label="Win Rate"
-              value={`${Math.round(data.quick_stats.win_rate_today)}%`}
-              trend={data.quick_stats.win_rate_today >= 50 ? 'up' : 'down'}
+              label="Win Rate Today"
+              value={data.today.win_rate === null ? '-' : `${Math.round(data.today.win_rate)}%`}
+              trend={
+                data.today.win_rate === null ? undefined : data.today.win_rate >= 50 ? 'up' : 'down'
+              }
             />
             <StatCard
               label="Avg Boost/Min"
-              value={data.quick_stats.avg_bcpm_today?.toFixed(0) ?? '-'}
+              value={data.quick_stats.avg_bcpm?.toFixed(0) ?? '-'}
+              subtitle="last 10 games"
             />
           </>
         ) : null}
@@ -105,7 +109,13 @@ export function Dashboard() {
                     </div>
                   </div>
                   <div className="text-xs text-[var(--color-text-muted)]">
-                    {new Date(game.played_at_utc).toLocaleTimeString()}
+                    {parseUtc(game.played_at_utc).toLocaleString(undefined, {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
                   </div>
                 </Link>
               ))}

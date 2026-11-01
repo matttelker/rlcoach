@@ -167,6 +167,11 @@ python -m rlcoach.ui view out/replay.json --player "DisplayName"
 
 See `codex/docs/ui.md` for usage.
 
+## Local Dashboard
+
+`gui/` is a browser dashboard for your own replays, served locally with no accounts. See
+[gui/README.md](gui/README.md) to set it up and run it.
+
 ## License
 
 MIT License - see LICENSE file for details.

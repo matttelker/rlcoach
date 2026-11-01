@@ -25,6 +25,7 @@ from .constants import (
     CHAIN_PAD_RADIUS,
     DEBUG_BOOST_ENV,
     MIN_ORIENTATION_SAMPLES,
+    MIN_PAD_EVENT_COVERAGE,
     PAD_ENVELOPES,
     PAD_NEUTRAL_TOLERANCE,
     PAD_RESPAWN_TOLERANCE,
@@ -41,20 +42,21 @@ def detect_boost_pickups(frames: list[Frame]) -> list[BoostPickupEvent]:
     if not frames:
         return []
 
-    pickups: list[BoostPickupEvent] = []
+    legacy_pickups = _detect_boost_pickups_legacy(frames)
 
     if _frames_have_pad_events(frames):
         try:
             pad_event_results = _detect_boost_pickups_from_pad_events(frames)
-            if pad_event_results:
-                pickups = pad_event_results
-                return _merge_pickup_events(pickups)
+            # Many replays replicate only a fraction of their pad pickups, so a
+            # sparse pad stream must not replace the boost-delta detector.
+            minimum = len(legacy_pickups) * MIN_PAD_EVENT_COVERAGE
+            if pad_event_results and len(pad_event_results) >= minimum:
+                return _merge_pickup_events(pad_event_results)
         except Exception:
             # Fall back to legacy heuristics if parsing fails for any reason.
             pass
 
-    pickups = _detect_boost_pickups_legacy(frames)
-    return _merge_pickup_events(pickups)
+    return _merge_pickup_events(legacy_pickups)
 
 
 def determine_team_sides(frames: list[Frame]) -> dict[int, int]:

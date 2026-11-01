@@ -2,15 +2,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { getComparison } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonChart, ErrorState, NoDataEmpty } from '../components';
-import { buildCompareChartData } from './dataTransforms';
+import { Card, CardHeader, CardContent, SkeletonChart, ErrorState, NoDataEmpty, PlaylistSelect } from '../components';
+import { BENCHMARK_HINT, buildCompareChartData, isOnTarget } from './dataTransforms';
 
-const RANK_OPTIONS = [
-  'GC3', 'GC2', 'GC1',
-  'C3', 'C2', 'C1',
-  'D3', 'D2', 'D1',
-  'P3', 'P2', 'P1',
-];
+const RANK_OPTIONS = ['SSL', 'GC3', 'GC2', 'GC1', 'C3', 'C2'];
 
 const PERIOD_OPTIONS = [
   { value: '7d', label: 'Last 7 Days' },
@@ -22,10 +17,11 @@ const PERIOD_OPTIONS = [
 export function Compare() {
   const [rank, setRank] = useState('GC1');
   const [period, setPeriod] = useState('30d');
+  const [playlist, setPlaylist] = useState<string>();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['compare', rank, period],
-    queryFn: () => getComparison({ rank, period }),
+    queryKey: ['compare', rank, period, playlist],
+    queryFn: () => getComparison({ rank, period, playlist }),
   });
 
   if (error) {
@@ -33,6 +29,13 @@ export function Compare() {
   }
 
   const chartData = buildCompareChartData(data?.comparisons);
+  const activePlaylist = playlist ?? data?.playlist;
+  const noGames = (
+    <NoDataEmpty
+      message={`No ${activePlaylist} games in this period`}
+      description="Try a longer period or another playlist."
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -70,6 +73,7 @@ export function Compare() {
               ))}
             </select>
           </div>
+          <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
           {data && (
             <div className="ml-auto text-sm text-[var(--color-text-muted)]">
               Based on {data.game_count} games
@@ -86,8 +90,13 @@ export function Compare() {
         <CardContent>
           {isLoading ? (
             <SkeletonChart />
+          ) : data?.game_count === 0 ? (
+            noGames
           ) : chartData.length === 0 ? (
-            <NoDataEmpty message="No benchmark data available" />
+            <NoDataEmpty
+              message={`No ${rank} benchmarks for ${activePlaylist}`}
+              description={BENCHMARK_HINT}
+            />
           ) : (
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
@@ -122,7 +131,7 @@ export function Compare() {
                     {chartData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
-                        fill={entry.difference >= 0 ? 'var(--color-success)' : 'var(--color-error)'}
+                        fill={entry.onTarget ? 'var(--color-success)' : 'var(--color-error)'}
                       />
                     ))}
                   </Bar>
@@ -142,7 +151,7 @@ export function Compare() {
           {isLoading ? (
             <div className="p-4">Loading...</div>
           ) : data?.comparisons.length === 0 ? (
-            <NoDataEmpty />
+            noGames
           ) : (
             <table className="w-full">
               <thead>
@@ -165,7 +174,7 @@ export function Compare() {
                       {c.difference_pct !== null ? (
                         <span
                           className={
-                            c.difference_pct >= 0
+                            isOnTarget(c.difference_pct, c.direction)
                               ? 'text-[var(--color-success)]'
                               : 'text-[var(--color-error)]'
                           }

@@ -23,25 +23,18 @@ async def get_dashboard() -> dict[str, Any]:
 
     session = create_session()
     try:
-        # Get today's stats
-        daily = (
-            session.query(DailyStats)
-            .filter_by(
-                play_date=today,
-                playlist="DOUBLES",
-            )
-            .first()
-        )
+        # Get today's stats across every playlist
+        daily_rows = session.query(DailyStats).filter_by(play_date=today).all()
 
-        today_stats = {}
-        if daily:
-            today_stats = {
-                "games_played": daily.games_played,
-                "wins": daily.wins,
-                "losses": daily.losses,
-                "draws": daily.draws,
-                "win_rate": daily.win_rate,
-            }
+        games_played = sum(d.games_played or 0 for d in daily_rows)
+        wins = sum(d.wins or 0 for d in daily_rows)
+        today_stats = {
+            "games_played": games_played,
+            "wins": wins,
+            "losses": sum(d.losses or 0 for d in daily_rows),
+            "draws": sum(d.draws or 0 for d in daily_rows),
+            "win_rate": (wins / games_played * 100) if games_played else None,
+        }
 
         # Get recent games (last 10)
         recent_replays = (
@@ -69,6 +62,7 @@ async def get_dashboard() -> dict[str, Any]:
             "avg_goals": 0.0,
             "avg_saves": 0.0,
             "avg_assists": 0.0,
+            "avg_bcpm": None,
         }
 
         # Get average stats from recent games
@@ -93,6 +87,10 @@ async def get_dashboard() -> dict[str, Any]:
                 quick_stats["avg_assists"] = sum(
                     s.assists or 0 for s in my_stats
                 ) / len(my_stats)
+
+                bcpm_values = [s.bcpm for s in my_stats if s.bcpm is not None]
+                if bcpm_values:
+                    quick_stats["avg_bcpm"] = sum(bcpm_values) / len(bcpm_values)
 
         return {
             "today": today_stats,

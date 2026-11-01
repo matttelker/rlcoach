@@ -51,6 +51,10 @@ Each frame should carry:
 - `parser_tickmarks`
 - `parser_kickoff_markers`
 
+`boost_pad_events` are preferred for boost pickups only when they account for at least
+half of what the boost-delta detector finds. Many replays replicate only a fraction of
+their pad pickups, and a sparse stream would otherwise undercount boost tenfold.
+
 Positions are normalized through field-coordinate bounds. Velocity and angular-velocity
 vectors are not position-clamped; downstream mechanics depend on preserving magnitude,
 negative components, and sign flips.

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getPlayers, tagPlayer } from '../api/client';
 import { Card, CardHeader, CardContent, SkeletonTable, ErrorState, NoDataEmpty, Pagination } from '../components';
+import { parseUtc } from './dataTransforms';
 
 export function Players() {
   const queryClient = useQueryClient();
@@ -121,7 +122,7 @@ export function Players() {
                       <td className="p-4 text-center">{player.games_with_me}</td>
                       <td className="p-4 text-sm text-[var(--color-text-muted)]">
                         {player.last_seen_utc
-                          ? new Date(player.last_seen_utc).toLocaleDateString()
+                          ? parseUtc(player.last_seen_utc).toLocaleDateString()
                           : '-'}
                       </td>
                       <td className="p-4 text-center">

@@ -37,12 +37,18 @@ export function NoGamesEmpty() {
         </svg>
       }
       title="No games found"
-      description="Upload some replays to get started with your coaching journey."
+      description="Load your replays with rlcoach ingest --watch --process-existing."
     />
   );
 }
 
-export function NoDataEmpty({ message = "No data available" }: { message?: string }) {
+export function NoDataEmpty({
+  message = "No data available",
+  description = "Play more games to generate insights and analytics.",
+}: {
+  message?: string;
+  description?: string;
+}) {
   return (
     <EmptyState
       icon={
@@ -51,7 +57,7 @@ export function NoDataEmpty({ message = "No data available" }: { message?: strin
         </svg>
       }
       title={message}
-      description="Play more games to generate insights and analytics."
+      description={description}
     />
   );
 }

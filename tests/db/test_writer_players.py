@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from rlcoach.config import IdentityConfig
@@ -72,3 +74,60 @@ def test_upsert_players_updates_existing(tmp_path):
         assert player.games_with_me == 2  # Appeared in 2 games
     finally:
         session.close()
+
+
+def test_upsert_players_records_when_the_game_was_played(tmp_path):
+    init_db(tmp_path / "test.db")
+    identity = IdentityConfig(display_names=["Me"])
+    played_at = datetime(2024, 10, 25, 2, 49, tzinfo=timezone.utc)
+
+    upsert_players(
+        [{"player_id": "steam:123", "display_name": "Other"}],
+        identity,
+        seen_at=played_at,
+    )
+
+    session = create_session()
+    player = session.get(Player, "steam:123")
+    assert player.first_seen_utc.replace(tzinfo=timezone.utc) == played_at
+    assert player.last_seen_utc.replace(tzinfo=timezone.utc) == played_at
+    session.close()
+
+
+def test_upsert_players_keeps_seen_range_for_out_of_order_ingest(tmp_path):
+    init_db(tmp_path / "test.db")
+    identity = IdentityConfig(display_names=["Me"])
+    newest = datetime(2026, 10, 31, 12, tzinfo=timezone.utc)
+    oldest = datetime(2022, 12, 24, 12, tzinfo=timezone.utc)
+    players = [{"player_id": "steam:123", "display_name": "Other"}]
+
+    upsert_players(players, identity, seen_at=newest)
+    upsert_players(players, identity, seen_at=oldest)
+
+    session = create_session()
+    player = session.get(Player, "steam:123")
+    assert player.first_seen_utc.replace(tzinfo=timezone.utc) == oldest
+    assert player.last_seen_utc.replace(tzinfo=timezone.utc) == newest
+    assert player.games_with_me == 2
+    session.close()
+
+
+def test_tagging_a_player_does_not_change_last_seen(tmp_path):
+    init_db(tmp_path / "test.db")
+    identity = IdentityConfig(display_names=["Me"])
+    played_at = datetime(2024, 10, 25, 2, 49, tzinfo=timezone.utc)
+    upsert_players(
+        [{"player_id": "steam:123", "display_name": "Other"}],
+        identity,
+        seen_at=played_at,
+    )
+
+    session = create_session()
+    session.get(Player, "steam:123").is_tagged_teammate = True
+    session.commit()
+    session.close()
+
+    session = create_session()
+    last_seen = session.get(Player, "steam:123").last_seen_utc
+    assert last_seen.replace(tzinfo=timezone.utc) == played_at
+    session.close()

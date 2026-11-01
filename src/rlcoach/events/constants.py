@@ -42,6 +42,7 @@ BIG_PAD_MIN_GAIN = 70.0
 RESPAWN_BOOST_AMOUNT = 33.0
 RESPAWN_DISTANCE_THRESHOLD = 800.0
 CHAIN_PAD_RADIUS = 1500.0
+MIN_PAD_EVENT_COVERAGE = 0.5  # Share of boost-delta pickups pad events must match
 
 # Pad neutral zone
 CENTERLINE_TOLERANCE = 1200.0  # Within this Y range is considered neutral half

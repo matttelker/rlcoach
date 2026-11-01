@@ -14,6 +14,8 @@ from .db.models import Benchmark
 from .db.session import create_session
 from .metrics import VALID_PLAYLISTS, VALID_RANKS, is_valid_metric
 
+DEFAULT_BENCHMARKS_PATH = Path(__file__).parent / "data" / "benchmarks_doubles.json"
+
 
 class BenchmarkValidationError(Exception):
     """Benchmark validation error."""
@@ -138,3 +140,19 @@ def import_benchmarks(file_path: Path, replace: bool = False) -> int:
         raise
     finally:
         session.close()
+
+
+def seed_default_benchmarks() -> int:
+    """Load the bundled benchmarks if none have been imported yet.
+
+    Returns:
+        Number of benchmarks loaded (0 if the table already had rows)
+    """
+    session = create_session()
+    try:
+        if session.query(Benchmark).first() is not None:
+            return 0
+    finally:
+        session.close()
+
+    return import_benchmarks(DEFAULT_BENCHMARKS_PATH)

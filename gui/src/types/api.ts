@@ -10,12 +10,19 @@ export interface PaginatedResponse<T> {
 }
 
 // Dashboard types
+export interface TodayStats {
+  games_played: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  win_rate: number | null;
+}
+
 export interface QuickStats {
-  games_today: number;
-  wins_today: number;
-  losses_today: number;
-  win_rate_today: number;
-  avg_bcpm_today: number | null;
+  avg_goals: number;
+  avg_saves: number;
+  avg_assists: number;
+  avg_bcpm: number | null;
 }
 
 interface ReplaySummary {
@@ -28,12 +35,12 @@ interface ReplaySummary {
   duration_seconds: number;
 }
 
-export type RecentGame = ReplaySummary;
+export type RecentGame = Omit<ReplaySummary, 'duration_seconds'> & { map: string };
 
 export interface DashboardResponse {
+  today: TodayStats;
   quick_stats: QuickStats;
   recent_games: RecentGame[];
-  games_today: number;
 }
 
 // Game/Replay types
@@ -47,21 +54,17 @@ export interface PlayerStats {
   display_name: string;
   team: 'BLUE' | 'ORANGE';
   is_me: boolean;
-  is_teammate: boolean;
   goals: number;
   assists: number;
   saves: number;
   shots: number;
   bcpm: number | null;
   avg_boost: number | null;
-  first_man_pct: number | null;
-  second_man_pct: number | null;
-  third_man_pct: number | null;
 }
 
 export interface ReplayDetail extends ReplaySummary {
   map: string;
-  players: PlayerStats[];
+  player_stats: PlayerStats[];
 }
 
 export interface ReplayFull extends ReplayDetail {
@@ -87,6 +90,7 @@ export interface TrendValue {
 export interface TrendsResponse {
   metric: string;
   period: string;
+  playlist: string;
   values: TrendValue[];
 }
 
@@ -107,6 +111,7 @@ export interface Comparison {
   target_median: number | null;
   difference: number | null;
   difference_pct: number | null;
+  direction: 'higher' | 'lower';
 }
 
 export interface CompareResponse {
@@ -127,8 +132,10 @@ export interface Pattern {
 
 export interface PatternsResponse {
   patterns: Pattern[];
+  playlist: string;
   win_count: number;
   loss_count: number;
+  min_games: number;
 }
 
 export interface Weakness {
@@ -136,13 +143,15 @@ export interface Weakness {
   my_value: number;
   target_median: number;
   z_score: number;
-  severity: 'critical' | 'moderate' | 'minor' | 'strength' | 'neutral';
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'strength' | 'neutral';
 }
 
 export interface WeaknessesResponse {
   weaknesses: Weakness[];
   strengths: Weakness[];
   game_count: number;
+  playlist: string;
+  has_benchmarks: boolean;
 }
 
 // Player types

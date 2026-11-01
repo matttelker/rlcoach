@@ -90,7 +90,7 @@ class Player(Base):
     is_tagged_teammate = Column(Boolean, default=False)
     teammate_notes = Column(Text)
     first_seen_utc = Column(DateTime(timezone=True), default=_utc_now)
-    last_seen_utc = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+    last_seen_utc = Column(DateTime(timezone=True), default=_utc_now)
     games_with_me = Column(Integer, default=0)
 
 
