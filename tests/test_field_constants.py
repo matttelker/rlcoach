@@ -52,12 +52,9 @@ class TestBoostPadTable:
         sides = {p.pad_side for p in BOOST_PAD_TABLE}
         assert sides == {"blue", "orange", "mid"}
 
-    def test_big_pads_not_mid(self) -> None:
-        for pad in BOOST_PAD_TABLE:
-            if pad.is_big:
-                assert (
-                    pad.pad_side != "mid"
-                ), f"Big pad {pad.pad_id} wrongly classified as mid"
+    def test_big_pads_are_corners_and_midfield_sides(self) -> None:
+        sides = sorted(pad.pad_side for pad in BOOST_PAD_TABLE if pad.is_big)
+        assert sides == ["blue", "blue", "mid", "mid", "orange", "orange"]
 
     def test_big_pad_radius(self) -> None:
         for pad in BOOST_PAD_TABLE:
@@ -104,7 +101,7 @@ class TestBoostPadDataclass:
     def test_pad_side_explicit(self) -> None:
         p = BoostPad(
             pad_id=1,
-            position=Vec3(0, -4608, 73),
+            position=Vec3(-3072, -4096, 73),
             is_big=True,
             radius=250.0,
             pad_side="blue",

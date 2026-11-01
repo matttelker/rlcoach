@@ -75,14 +75,14 @@ class FieldConstants:
     SMALL_BOOST_RADIUS: float = 170.0
     BIG_BOOST_RADIUS: float = 250.0
 
-    # Boost pads - Large (100%) including corners and back-wall pads
+    # Boost pads - Large (100%): four corners, then the two midfield side pads
     BIG_BOOST_POSITIONS: tuple[Vec3, ...] = (
-        Vec3(-3584.0, -4096.0, 73.0),
-        Vec3(3584.0, -4096.0, 73.0),
-        Vec3(-3584.0, 4096.0, 73.0),
-        Vec3(3584.0, 4096.0, 73.0),
-        Vec3(0.0, -4608.0, 73.0),
-        Vec3(0.0, 4608.0, 73.0),
+        Vec3(-3072.0, -4096.0, 73.0),
+        Vec3(3072.0, -4096.0, 73.0),
+        Vec3(-3072.0, 4096.0, 73.0),
+        Vec3(3072.0, 4096.0, 73.0),
+        Vec3(-3584.0, 0.0, 73.0),
+        Vec3(3584.0, 0.0, 73.0),
     )
 
     CORNER_BOOST_POSITIONS: tuple[Vec3, ...] = BIG_BOOST_POSITIONS[:4]
@@ -178,7 +178,7 @@ def _load_canonical_pad_table() -> tuple[BoostPad, ...]:
         # Fallback: build from hard-coded FieldConstants positions.
         pads: list[BoostPad] = []
         for idx, pos in enumerate(FieldConstants.BIG_BOOST_POSITIONS):
-            side = "blue" if pos.y < 0 else "orange"
+            side = "mid" if pos.y == 0 else ("blue" if pos.y < 0 else "orange")
             pads.append(BoostPad(idx, pos, True, FieldConstants.BIG_BOOST_RADIUS, side))
         base = len(FieldConstants.BIG_BOOST_POSITIONS)
         for idx, pos in enumerate(FieldConstants.SMALL_BOOST_POSITIONS):

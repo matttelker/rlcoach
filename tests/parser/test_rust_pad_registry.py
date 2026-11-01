@@ -47,7 +47,7 @@ def test_rust_pad_registry_event_completeness():
     collected_events = [event for event in pad_events if event["status"] == "COLLECTED"]
     assert collected_events, "expected collected pad events"
     # Pin catches Location-arm dispatch regressions that drop pickup routing.
-    assert len(collected_events) == 35
+    assert len(collected_events) == 569
 
     for event in collected_events:
         assert "actor_id" in event, f"missing actor_id on collected event: {event}"
@@ -57,6 +57,31 @@ def test_rust_pad_registry_event_completeness():
     resolved_player = [event for event in collected_events if "player_id" in event]
     coverage = len(resolved_player) / len(collected_events)
     assert coverage >= 0.9, f"player_id resolution below threshold: {coverage:.2%}"
+
+
+@pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
+def test_rust_pad_registry_survives_checkpoints():
+    """Pad actors re-spawn about every 10s and re-send their last state."""
+    from rlcoach.field_constants import FIELD
+    from rlcoach.parser import get_adapter
+
+    adapter = get_adapter("rust")
+    frames = adapter.parse_network(Path("testing_replay.replay"))
+    pad_events = [
+        event for frame in frames.frames for event in frame.get("boost_pad_events", [])
+    ]
+
+    assert {event["pad_id"] for event in pad_events} == set(range(34))
+    assert sum(event["is_big"] for event in pad_events) > 50
+
+    # Statuses need not alternate: a car on a pad as it respawns collects with no
+    # RESPAWNED between. A re-sent state is the one repeat that cannot be real.
+    last_state: dict[int, int] = {}
+    for event in pad_events:
+        pad_id = event["pad_id"]
+        assert event["is_big"] == FIELD.BOOST_PADS[pad_id].is_big
+        assert last_state.get(pad_id) != event["raw_state"], f"pad {pad_id} re-sent"
+        last_state[pad_id] = event["raw_state"]
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")

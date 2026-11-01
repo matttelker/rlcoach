@@ -11,7 +11,7 @@ use std::io::Read;
 use boxcars::{Attribute, NewActor, Vector3f};
 use boxcars::{HeaderProp, ParserBuilder, Replay};
 
-use pads::{PadEvent, PadRegistry};
+use pads::{PadEvent, PadRegistry, PickupState};
 
 const KICKOFF_POSITION_TOLERANCE: f64 = 120.0;
 const BALL_REST_HEIGHT: f64 = 93.15;
@@ -1487,7 +1487,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
 
                             let events = pad_registry.handle_pickup(
                                 aid,
-                                pickup_bool_raw_state(pickup.picked_up),
+                                PickupState::Flag(pickup_bool_raw_state(pickup.picked_up)),
                                 nf.time,
                                 raw_actor_opt,
                                 resolved_actor,
@@ -1508,7 +1508,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
 
                             let events = pad_registry.handle_pickup(
                                 aid,
-                                pickup.picked_up,
+                                PickupState::Counter(pickup.picked_up),
                                 nf.time,
                                 raw_actor_opt,
                                 resolved_actor,

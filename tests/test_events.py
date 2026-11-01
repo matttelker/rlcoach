@@ -509,7 +509,7 @@ class TestBoostPickupDetection:
                 Vec3(0.0, 0.0, 93.15),
                 Vec3(0.0, 0.0, 0.0),
                 [
-                    create_test_player("p1", 0, Vec3(-3584.0, -4096.0, 17.0), boost=20)
+                    create_test_player("p1", 0, Vec3(-3072.0, -4096.0, 17.0), boost=20)
                 ],  # Corner boost
             ),
             create_test_frame(
@@ -517,7 +517,7 @@ class TestBoostPickupDetection:
                 Vec3(0.0, 0.0, 93.15),
                 Vec3(0.0, 0.0, 0.0),
                 [
-                    create_test_player("p1", 0, Vec3(-3584.0, -4096.0, 17.0), boost=100)
+                    create_test_player("p1", 0, Vec3(-3072.0, -4096.0, 17.0), boost=100)
                 ],  # Got 100 boost
             ),
         ]
@@ -596,7 +596,7 @@ class TestBoostPickupDetection:
                 Vec3(0.0, 0.0, 0.0),
                 [
                     create_test_player(
-                        "blue_p", 0, Vec3(3584.0, 4096.0, 17.0), boost=10
+                        "blue_p", 0, Vec3(3072.0, 4096.0, 17.0), boost=10
                     )
                 ],  # Blue in orange corner
             ),
@@ -606,7 +606,7 @@ class TestBoostPickupDetection:
                 Vec3(0.0, 0.0, 0.0),
                 [
                     create_test_player(
-                        "blue_p", 0, Vec3(3584.0, 4096.0, 17.0), boost=100
+                        "blue_p", 0, Vec3(3072.0, 4096.0, 17.0), boost=100
                     )
                 ],  # Boost stolen
             ),
@@ -857,6 +857,60 @@ class TestBoostPickupDetection:
 
         pickups = detect_boost_pickups(frames)
         assert len(pickups) == 1
+
+
+class TestBoostPadEventPickups:
+    """Pickups taken straight from parser pad events."""
+
+    @staticmethod
+    def _frame(timestamp, boost, events):
+        frame = create_test_frame(
+            timestamp,
+            Vec3(0.0, 0.0, 93.15),
+            Vec3(0.0, 0.0, 0.0),
+            [create_test_player("p1", 0, Vec3(0.0, -4000.0, 17.0), boost=boost)],
+        )
+        return replace(frame, boost_pad_events=events)
+
+    @staticmethod
+    def _collected(pad_id, timestamp, player_id):
+        return BoostPadEventFrame(
+            pad_id=pad_id,
+            status="COLLECTED",
+            is_big=FIELD.BOOST_PADS[pad_id].is_big,
+            player_id=player_id,
+            player_team=0 if player_id else None,
+            timestamp=timestamp,
+        )
+
+    def test_unattributed_event_is_skipped_without_losing_the_rest(self):
+        """One car with no player binding must not discard every pad event."""
+        frames = [
+            self._frame(1.0, 0, []),
+            self._frame(1.1, 12, [self._collected(6, 1.1, "p1")]),
+            self._frame(2.1, 12, [self._collected(9, 2.1, None)]),
+            self._frame(3.1, 24, [self._collected(11, 3.1, "p1")]),
+        ]
+
+        pickups = detect_boost_pickups(frames)
+
+        assert [pickup.pad_id for pickup in pickups] == [6, 11]
+        assert all(pickup.player_id == "p1" for pickup in pickups)
+
+    def test_side_big_pad_is_not_stolen(self):
+        """The (+-3584, 0) big pads sit on the halfway line, not in a half."""
+        pad = FIELD.BOOST_PADS[5]
+        assert (pad.position.x, pad.position.y) == (3584.0, 0.0)
+        frames = [
+            self._frame(1.0, 0, []),
+            self._frame(1.1, 100, [self._collected(5, 1.1, "p1")]),
+        ]
+
+        pickups = detect_boost_pickups(frames)
+
+        assert len(pickups) == 1
+        assert pickups[0].pad_type == "BIG"
+        assert pickups[0].stolen is False
 
 
 class TestTouchDetection:
