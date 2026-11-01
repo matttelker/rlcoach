@@ -46,6 +46,8 @@ BOUNCE_CONTACT_RANGE = 165.0  # A bounce-shaped change needs a car right there
 BOUNCE_GAP_SLOP = 30.0
 BOUNCE_SPEED_SLOP = 100.0
 CONTACT_MERGE_S = 0.2
+PUSH_MIN_FIT = 0.7  # 1 means the ball's speed changed straight away from the car
+TOUCH_EVENT_WINDOW_S = 0.16  # The replay's touch events run a little off the ball
 
 DANGER_DEPTH = 3500.0  # Ball this deep in your half threatens the net
 DANGER_WINDOW_S = 5.0
@@ -71,7 +73,8 @@ CLEARED_DEPTH = 1700.0  # Out of your third is a job done, whoever collects it
 GOAL_LOOKBACK_S = 15.0
 GOAL_DECISION_S = 4.0  # A long shot covers the field in about this time
 GOAL_REVIEW_WINDOW_S = 2.0
-GOAL_CHANCES = ("no_save_attempt", "missed_clear", "missed_save")
+GOAL_CHANCES = ("own_touch_in", "no_save_attempt", "missed_clear", "missed_save")
+HEADING_MIN_SPEED = 100.0  # Slower than this towards goal is not going in yet
 JUMP_RISE = 60.0  # Height gain that proves a car left the ground
 SAVE_REACH = 350.0  # Horizontal distance a jump can cover at the goal line
 SAVE_TRAVEL = 700.0  # Extra reach for each second of warning
@@ -102,6 +105,10 @@ INSTEAD = {
     "clear_given_back": (
         "Aim clears at the side walls and corners, or take a touch to control "
         "it, instead of hitting it to the next opponent."
+    ),
+    "own_touch_in": (
+        "Near your net, don't hit the ball while you face your own goal. Go "
+        "around to the goal side, or aim for the side wall."
     ),
     "no_save_attempt": (
         "Jump for any ball you can reach on the line, even if it looks high. "
@@ -309,10 +316,56 @@ def _active_cars(frame: Frame) -> list[PlayerFrame]:
     return [p for p in frame.players if not p.is_demolished]
 
 
+def _push_fit(car: PlayerFrame, before: BallFrame, after: BallFrame) -> float:
+    """Measure how well a ball's velocity change points away from a car, -1 to 1."""
+    away = (
+        after.position.x - car.position.x,
+        after.position.y - car.position.y,
+        after.position.z - car.position.z,
+    )
+    change = (
+        after.velocity.x - before.velocity.x,
+        after.velocity.y - before.velocity.y,
+        after.velocity.z - before.velocity.z,
+    )
+    size = math.hypot(*away) * math.hypot(*change)
+    if not size:
+        return 0.0
+    return sum(a * c for a, c in zip(away, change, strict=True)) / size
+
+
+def _hitting_car(
+    cars: Sequence[PlayerFrame],
+    before: BallFrame,
+    after: BallFrame,
+    reach: float,
+    named: set[str],
+) -> PlayerFrame | None:
+    """Pick the car in reach that hit the ball.
+
+    The replay's touch events miss some hits, but a car they name beats one they
+    don't. Then the nearest car that could push the ball the way it went wins,
+    because the nearest car can be a bystander beside the real hit. Car positions
+    lag the ball, so if no car fits the push, the nearest one keeps the touch.
+    """
+    in_reach = sorted(
+        (c for c in cars if _distance(c.position, after.position) <= reach),
+        key=lambda c: _distance(c.position, after.position),
+    )
+    pool = [c for c in in_reach if c.player_id in named] or in_reach
+    pushers = (c for c in pool if _push_fit(c, before, after) >= PUSH_MIN_FIT)
+    return next(pushers, pool[0] if pool else None)
+
+
 def find_contacts(frames: Sequence[Frame]) -> list[Contact]:
     """Infer ball contacts from sudden velocity changes beside a car."""
     contacts: list[Contact] = []
     last_contact: dict[str, float] = {}
+    touch_events = [
+        (frame.timestamp, event.player_id)
+        for frame in frames
+        for event in frame.parser_touch_events
+    ]
     for index in range(1, len(frames)):
         before, frame = frames[index - 1], frames[index]
         dt = frame.timestamp - before.timestamp
@@ -320,13 +373,15 @@ def find_contacts(frames: Sequence[Frame]) -> list[Contact]:
             continue
         if _speed_change(before.ball, frame.ball, dt) < CONTACT_MIN_SPEED_CHANGE:
             continue
-        cars = _active_cars(frame)
-        if not cars:
-            continue
-        car = min(cars, key=lambda p: _distance(p.position, frame.ball.position))
         rebound = _is_rebound(before.ball, frame.ball, dt)
         reach = BOUNCE_CONTACT_RANGE if rebound else CONTACT_RANGE
-        if _distance(car.position, frame.ball.position) > reach:
+        named = {
+            player_id
+            for t, player_id in touch_events
+            if abs(t - frame.timestamp) <= TOUCH_EVENT_WINDOW_S
+        }
+        car = _hitting_car(_active_cars(frame), before.ball, frame.ball, reach, named)
+        if car is None:
             continue
         if frame.timestamp - last_contact.get(car.player_id, -1e9) < CONTACT_MERGE_S:
             continue
@@ -773,6 +828,35 @@ def _can_reach_shot(
     return in_goal and _flat_distance(car.position, ball.position) < reach
 
 
+def _heading_into_goal(ctx: Context, ball: BallFrame) -> bool:
+    """Project the ball to the goal line and check it lands between the posts."""
+    speed = ctx.depth(ball.velocity.y)
+    if speed < HEADING_MIN_SPEED:
+        return False
+    travel = (GOAL_LINE_Y - ctx.depth(ball.position.y)) / speed
+    return abs(ball.position.x + ball.velocity.x * travel) < GOAL_WIDTH
+
+
+def _touch_that_turned_it_in(ctx: Context, earliest: int, cross: int) -> Contact | None:
+    """Find a defender's touch near the net that put a wide ball on target.
+
+    Only touches after the last opponent touch count, because anything before
+    that is not what sent the ball in. A touch far from the net doesn't count,
+    because that ball can still be saved.
+    """
+    touches = [c for c in ctx.contacts if earliest <= c.index <= cross]
+    for contact in reversed(touches):
+        if contact.team != ctx.team:
+            return None
+        before = ctx.frames[contact.index - 1].ball
+        after = ctx.frames[contact.index].ball
+        if ctx.depth(after.position.y) < DANGER_DEPTH:
+            continue
+        if _heading_into_goal(ctx, after) and not _heading_into_goal(ctx, before):
+            return contact
+    return None
+
+
 def _review_defender(
     ctx: Context, car_id: str, last_touch: int, cross: int
 ) -> DefenderRole:
@@ -810,7 +894,7 @@ def _review_defender(
     in_reach = _can_reach_shot(ctx, at_line, crossing.ball, warning)
     if in_reach and had_time and not jumped:
         text = "was in goal with time to react and never jumped"
-        return DefenderRole("no_attempt", text, moment)
+        return DefenderRole("no_save_attempt", text, moment)
     if closest >= MISS_RANGE:
         text = f"was {closest / 100:.0f} m away as it went in"
         return DefenderRole("away", text, moment)
@@ -844,6 +928,7 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
     shot = shots[-1].index if shots else earliest
     touches = [c.index for c in ctx.contacts if earliest <= c.index <= cross]
     last_touch = touches[-1] if touches else earliest
+    turned = _touch_that_turned_it_in(ctx, earliest, cross)
     # Soft touches go unseen, so an old shot says nothing about who was back.
     decision = max(shot, ctx.index_at(ctx.times[cross] - GOAL_DECISION_S))
     decision_frame = ctx.frames[decision]
@@ -854,6 +939,9 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
     lines: list[str] = []
     for car in sorted(cars, key=lambda c: c.player_id != ctx.player_id):
         role = _review_defender(ctx, car.player_id, last_touch, cross)
+        if turned is not None and turned.player_id == car.player_id:
+            text = "turned the ball into your net"
+            role = DefenderRole("own_touch_in", text, turned.index)
         roles[car.player_id] = role
         text = role.text
         if car.player_id == ctx.player_id and text.startswith("was "):
@@ -871,7 +959,10 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
     kind: str | None = None
     what = ""
     moment = decision
-    if label == "no_attempt":
+    if label == "own_touch_in":
+        kind = "own_touch_in"
+        what = "The ball wasn't heading for your goal until your touch turned it in."
+    elif label == "no_save_attempt":
         kind = "no_save_attempt"
         what = "You were in goal with time to react, and you never jumped."
     elif label == "missed_clear":
@@ -913,6 +1004,8 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
 
     if kind in ("last_back_upfield", "last_back_overcommit"):
         summary = "You were the last one back."
+    elif kind == "own_touch_in":
+        summary = "Your touch turned it in."
     elif kind is not None:
         summary = "You had the chance to stop this."
     elif any(r.label in GOAL_CHANCES for r in roles.values()):

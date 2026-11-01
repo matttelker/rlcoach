@@ -25,6 +25,7 @@ from rlcoach.analysis.mistakes import (
 )
 from rlcoach.events.types import ChallengeEvent, GoalEvent
 from rlcoach.field_constants import Vec3
+from rlcoach.parser.types import ParserTouchEvent
 from tests.fixtures.builders import (
     create_test_ball,
     create_test_frame,
@@ -133,6 +134,58 @@ def test_find_contacts_sees_a_ground_hit_with_the_car_already_past():
         create_test_frame(
             DT, players, _ball(1430.0, -2640.0, 120.0, vx=-330.0, vy=1950.0, vz=900.0)
         ),
+    ]
+    assert [c.player_id for c in find_contacts(frames)] == [ME]
+
+
+def test_find_contacts_credits_the_car_that_can_push_the_ball_that_way():
+    """From a real shot: a defender stood nearest, on the far side of the ball."""
+    players = [
+        _car(MATE, ORANGE, -1042.0, 4715.0, z=140.0),
+        _car(OPP, BLUE, -978.0, 4529.0, z=119.0),
+    ]
+    frames = [
+        create_test_frame(
+            0.0, players, _ball(-1030.0, 4638.0, 273.0, vx=1142.0, vy=-440.0)
+        ),
+        create_test_frame(
+            DT,
+            players,
+            _ball(-975.0, 4647.0, 247.0, vx=1060.0, vy=1858.0, vz=1700.0),
+        ),
+    ]
+    assert [c.player_id for c in find_contacts(frames)] == [OPP]
+
+
+def test_find_contacts_trusts_the_replays_touch_event_over_the_push_fit():
+    """The other car only looks right: the replay says who hit the ball."""
+    players = [
+        _car(MATE, ORANGE, -1042.0, 4715.0, z=140.0),
+        _car(OPP, BLUE, -978.0, 4529.0, z=119.0),
+    ]
+    event = ParserTouchEvent(timestamp=DT, player_id=MATE, team=ORANGE, frame_index=1)
+    frames = [
+        create_test_frame(
+            0.0, players, _ball(-1030.0, 4638.0, 273.0, vx=1142.0, vy=-440.0)
+        ),
+        replace(
+            create_test_frame(
+                DT,
+                players,
+                _ball(-975.0, 4647.0, 247.0, vx=1060.0, vy=1858.0, vz=1700.0),
+            ),
+            parser_touch_events=[event],
+        ),
+    ]
+    assert [c.player_id for c in find_contacts(frames)] == [MATE]
+
+
+def test_find_contacts_keeps_the_nearest_car_when_none_fits_the_push():
+    """Car positions lag the ball, so a poor fit alone must not lose a touch."""
+    players = [_car(ME, ORANGE, 0.0, 800.0, z=300.0)]
+    frames = [
+        create_test_frame(0.0, players, _ball(0.0, 900.0, 300.0, vy=500.0)),
+        create_test_frame(DT, players, _ball(0.0, 917.0, 300.0, vy=-1500.0)),
     ]
     assert [c.player_id for c in find_contacts(frames)] == [ME]
 
@@ -463,6 +516,122 @@ def test_teammate_who_never_jumped_is_named_in_my_review():
     assert reviews[0].on_you is False
     assert flags == []
     assert any("mate" in line and "never jumped" in line for line in reviews[0].lines)
+    assert reviews[0].summary == "A teammate had the chance to stop this."
+
+
+def _own_touch_scene(toucher, opp_follows=False):
+    """A cross runs across my goal, then `toucher` hits it towards the net.
+
+    With `opp_follows`, an opponent touches the ball again on its way in.
+    """
+    other = MATE if toucher == ME else ME
+    opp_x, opp_y = (-310.0, 4650.0) if opp_follows else (3000.0, -2000.0)
+
+    def players(t):
+        return [
+            _car(toucher, ORANGE, -400.0, 4330.0, z=100.0),
+            _car(other, ORANGE, 3000.0, -3000.0),
+            _car(OPP, BLUE, opp_x, opp_y, z=100.0),
+        ]
+
+    def ball(t):
+        if t < 0.5:
+            return _ball(
+                -1350.0 + 1900.0 * t, 4530.0 - 100.0 * t, 110.0, vx=1900.0, vy=-100.0
+            )
+        if opp_follows and t >= 0.8:
+            moved = t - 0.8
+            return _ball(
+                -310.0 - 100.0 * moved,
+                4750.0 + 1200.0 * moved,
+                110.0,
+                vx=-100.0,
+                vy=1200.0,
+            )
+        moved = t - 0.5
+        return _ball(
+            -400.0 + 300.0 * moved,
+            4480.0 + 900.0 * moved,
+            110.0,
+            vx=300.0,
+            vy=900.0,
+        )
+
+    frames, origin = _play(1.3, players, ball)
+    goal = GoalEvent(t=origin + 1.25, scorer=OPP, team="BLUE")
+    return frames, goal
+
+
+def test_my_touch_that_turns_a_cross_into_my_net_is_on_me():
+    """From a real overtime goal: the cross was going past until it was hit."""
+    frames, goal = _own_touch_scene(ME)
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert reviews[0].on_you is True
+    assert reviews[0].summary == "Your touch turned it in."
+    assert [f.kind for f in flags] == ["own_touch_in"]
+
+
+def test_a_teammates_touch_that_turns_it_in_is_named_but_not_on_me():
+    frames, goal = _own_touch_scene(MATE)
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert reviews[0].on_you is False
+    assert flags == []
+    assert any("mate" in line and "turned" in line for line in reviews[0].lines)
+
+
+def test_an_opponent_touch_after_mine_means_i_did_not_turn_it_in():
+    frames, goal = _own_touch_scene(ME, opp_follows=True)
+    _, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert "own_touch_in" not in [f.kind for f in flags]
+
+
+def test_turning_a_ball_on_target_far_from_my_net_is_not_an_own_touch():
+    """From a real goal: the touch came in the other half, with 2 s left to save."""
+
+    def players(t):
+        return [
+            _car(ME, ORANGE, -2330.0, -1180.0, z=124.0),
+            _car(MATE, ORANGE, 3000.0, -3000.0),
+            _car(OPP, BLUE, 3000.0, -2000.0),
+        ]
+
+    def ball(t):
+        if t < 0.5:
+            return _ball(-2278.0, -2000.0 + 1800.0 * t, 139.0, vy=1800.0)
+        moved = t - 0.5
+        return _ball(
+            -2270.0 + 760.0 * moved,
+            -1100.0 + 2950.0 * moved,
+            139.0,
+            vx=760.0,
+            vy=2950.0,
+        )
+
+    frames, origin = _play(2.7, players, ball)
+    goal = GoalEvent(t=origin + 2.6, scorer=OPP, team="BLUE")
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert "own_touch_in" not in [f.kind for f in flags]
+    assert not any("turned" in line for line in reviews[0].lines)
+
+
+def test_touching_a_ball_already_going_in_is_not_an_own_touch():
+    def players(t):
+        return [
+            _car(ME, ORANGE, -400.0, 4330.0, z=100.0),
+            _car(MATE, ORANGE, 3000.0, -3000.0),
+            _car(OPP, BLUE, 3000.0, -2000.0),
+        ]
+
+    def ball(t):
+        if t < 0.5:
+            return _ball(-400.0, 4000.0 + 900.0 * t, 110.0, vy=900.0)
+        return _ball(-400.0, 4450.0 + 500.0 * (t - 0.5), 110.0, vy=500.0)
+
+    frames, origin = _play(1.9, players, ball)
+    goal = GoalEvent(t=origin + 1.85, scorer=OPP, team="BLUE")
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert flags == []
+    assert any("got a touch" in line for line in reviews[0].lines)
 
 
 def test_defender_who_jumped_and_missed_is_flagged_for_the_miss():
