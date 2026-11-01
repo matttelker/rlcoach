@@ -125,7 +125,7 @@ def _detect_boost_pickups_from_pad_events(
                 if candidate in players_by_id:
                     player_id = candidate
             if player_id is None:
-                # Some cars have no player binding (about 0.3% of pickups).
+                # Only a car the stream never links to a player lands here.
                 # Dropping one beats discarding every pad event in the replay.
                 continue
 

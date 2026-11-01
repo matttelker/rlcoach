@@ -94,7 +94,7 @@ of frame dicts (network parsed with `must_parse_network_data`). Each frame:
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `player_id` | str | `"player_<index>"`, where index is the header player index this actor resolved to. |
+| `player_id` | str | `"player_<index>"`, where index is the header player index this actor resolved to. `PlayerStats` lists only who finished the match, so a leaver or a replaced bot gets an index past the header rows. Its id has no entry in the report's `players`. |
 | `team` | int | `0` or `1`. Prefers decoded `TeamPaint`; otherwise inferred from the sign of `y` (`y > 0` → orange/1). |
 | `position` | `{x,y,z}` | Car position. Default `(0, 0, 17)` if not yet observed. |
 | `velocity` | `{x,y,z}` | Linear velocity. |
