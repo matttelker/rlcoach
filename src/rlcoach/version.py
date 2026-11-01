@@ -4,7 +4,7 @@
 # MAJOR: Breaking changes to schema structure
 # MINOR: New fields added (backward compatible)
 # PATCH: Bug fixes and clarifications
-SCHEMA_VERSION = "1.0.3"  # Bumped for boost waste at the speed cap
+SCHEMA_VERSION = "1.0.4"  # Bumped for boost waste measured across each burst
 
 # Package version
 PACKAGE_VERSION = "0.1.0"

@@ -60,6 +60,24 @@ def create_test_player(
     )
 
 
+def create_burst_frames(
+    start_speed: float, end_speed: float, start_time: float = 0.0
+) -> list[Frame]:
+    """Build a 20-unit boost burst (0.6 s) whose drop replicates on its last frame."""
+    steps = 20
+    frames = []
+    for step in range(steps + 1):
+        speed = start_speed + (end_speed - start_speed) * step / steps
+        player = create_test_player(
+            "player1",
+            0,
+            boost=60 if step == steps else 80,
+            velocity=Vec3(speed, 0.0, 0.0),
+        )
+        frames.append(create_test_frame(start_time + step * 0.03, [player]))
+    return frames
+
+
 class TestBoostAnalysis:
     """Test boost analysis functions."""
 
@@ -357,6 +375,85 @@ class TestBoostAnalysis:
         result = analyze_boost(frames, {}, player_id="player1")
 
         assert result["waste"] == pytest.approx(expected_waste)
+
+    @pytest.mark.parametrize(
+        ("start_speed", "end_speed", "expected_waste"),
+        [
+            (1000.0, 1600.0, 0.0),  # Working boost, though each frame adds only 30
+            (1000.0, 1100.0, 0.0),  # Smallest gain that counts as useful
+            (1000.0, 1099.0, 6.0),  # Just under it: 20 boost * 0.3
+            (1500.0, 1200.0, 6.0),  # Lost speed while boosting
+        ],
+    )
+    def test_waste_compares_speed_across_the_whole_burst(
+        self, start_speed, end_speed, expected_waste
+    ):
+        """Boost adds little per frame, so only the whole burst shows its benefit."""
+        frames = create_burst_frames(start_speed, end_speed)
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == pytest.approx(expected_waste)
+
+    def test_waste_ignores_speed_from_before_the_burst(self):
+        """A car that slowed down first is judged only on what the burst added."""
+        slowing = [
+            create_test_frame(
+                0.0,
+                [
+                    create_test_player(
+                        "player1", 0, boost=80, velocity=Vec3(2000.0, 0.0, 0.0)
+                    )
+                ],
+            ),
+            create_test_frame(
+                1.9,
+                [
+                    create_test_player(
+                        "player1", 0, boost=80, velocity=Vec3(1000.0, 0.0, 0.0)
+                    )
+                ],
+            ),
+        ]
+        frames = slowing + create_burst_frames(1000.0, 1600.0, start_time=2.0)
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == 0.0
+
+    @pytest.mark.parametrize("speed_after", [0.0, 2300.0])  # Velocity can lag a reset
+    def test_reset_is_not_waste(self, speed_after):
+        """A kickoff or demo reset moves the car and takes boost without spending it."""
+        frames = [
+            create_test_frame(
+                0.0,
+                [
+                    create_test_player(
+                        "player1",
+                        0,
+                        boost=80,
+                        velocity=Vec3(1500.0, 0.0, 0.0),
+                        position=Vec3(3000.0, 3000.0, 17.0),
+                    )
+                ],
+            ),
+            create_test_frame(
+                0.03,
+                [
+                    create_test_player(
+                        "player1",
+                        0,
+                        boost=33,
+                        velocity=Vec3(speed_after, 0.0, 0.0),
+                        position=Vec3(0.0, -4608.0, 17.0),
+                    )
+                ],
+            ),
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == 0.0
 
     def test_bpm_and_bcpm_calculation(self):
         """Test BPM and BCPM rate calculations."""

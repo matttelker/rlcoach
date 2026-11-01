@@ -14,13 +14,14 @@ for comprehensive boost economy assessment.
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from collections.abc import Sequence
 from typing import Any
 
 from ..events import PAD_NEUTRAL_TOLERANCE, BoostPickupEvent
 from ..field_constants import FIELD, Vec3
 from ..parser.types import Frame, Header
-from ..physics_constants import CAR_MAX_SPEED_UU_S
+from ..physics_constants import BOOST_CONSUMPTION_PER_SECOND, CAR_MAX_SPEED_UU_S
 
 # Boost analysis thresholds (aligned with internal metric conventions)
 ZERO_BOOST_THRESHOLD = 3.0  # Consider < 3 as "zero boost"
@@ -29,6 +30,8 @@ OVERFILL_THRESHOLD = 80.0  # Overfill when collecting above this amount
 OVERFILL_BASELINE = 85.0  # Baseline boost level for wasted big-pad capacity
 SPEED_CAP_WASTE_THRESHOLD = CAR_MAX_SPEED_UU_S - 0.1  # Capped cars read under 2300
 WASTE_DETECTION_MIN_BOOST = 10.0  # Minimum boost to consider for waste detection
+MIN_BOOST_SPEED_GAIN = 100.0  # Gaining less than this across a burst counts as waste
+RESET_TELEPORT_DISTANCE = 500.0  # Further than a car moves between frames
 BIG_GAIN_THRESHOLD = 70.0
 SMALL_PAD_UNIT = 12.0
 RESPAWN_GAIN = 33.0
@@ -105,8 +108,10 @@ def _analyze_player_boost(
     waste = 0.0
 
     prev_boost = None
-    prev_speed = None
+    prev_position = None
     prev_timestamp = None
+    speed_times: list[float] = []
+    speeds: list[float] = []
 
     for frame in frames:
         player_frame = frame.get_player_by_id(player_id)
@@ -116,6 +121,9 @@ def _analyze_player_boost(
         frame_count += 1
         boost_amount = player_frame.boost_amount
         total_boost_sum += boost_amount
+        player_speed = _calculate_speed(player_frame.velocity)
+        speed_times.append(frame.timestamp)
+        speeds.append(player_speed)
 
         if prev_timestamp is not None:
             time_delta = frame.timestamp - prev_timestamp
@@ -129,29 +137,26 @@ def _analyze_player_boost(
                 time_hundred_boost += time_delta
 
             # Waste detection - boost spent at the speed cap or with minimal benefit
-            if prev_boost is not None and prev_boost > boost_amount:
-                boost_consumed = prev_boost - boost_amount
-                player_speed = _calculate_speed(player_frame.velocity)
-
+            boost_consumed = prev_boost - boost_amount
+            # A kickoff or demo reset moves the car and takes boost without spending it
+            was_reset = (
+                math.dist(prev_position, player_frame.position)
+                > RESET_TELEPORT_DISTANCE
+            )
+            if boost_consumed > WASTE_DETECTION_MIN_BOOST and not was_reset:
                 # Waste if consuming boost at the speed cap, where it adds nothing
-                if (
-                    player_speed >= SPEED_CAP_WASTE_THRESHOLD
-                    and boost_consumed > WASTE_DETECTION_MIN_BOOST
-                ):
+                if player_speed >= SPEED_CAP_WASTE_THRESHOLD:
                     waste += boost_consumed * 0.7  # Heuristic factor
 
-                # Waste if consuming boost with minimal speed benefit
+                # Waste if the burst that spent this boost gained little speed
                 elif (
-                    prev_speed
-                    and player_speed < prev_speed + 50.0
-                    and boost_consumed > WASTE_DETECTION_MIN_BOOST
+                    _speed_gain_across_burst(speed_times, speeds, boost_consumed)
+                    < MIN_BOOST_SPEED_GAIN
                 ):
                     waste += boost_consumed * 0.3  # Partial waste
 
         prev_boost = boost_amount
-        prev_speed = (
-            _calculate_speed(player_frame.velocity) if player_frame.velocity else 0.0
-        )
+        prev_position = player_frame.position
         prev_timestamp = frame.timestamp
 
     amount_collected = 0.0
@@ -579,3 +584,15 @@ def _calculate_speed(velocity: Vec3) -> float:
     if not velocity:
         return 0.0
     return math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+
+
+def _speed_gain_across_burst(
+    speed_times: list[float], speeds: list[float], boost_consumed: float
+) -> float:
+    """Return the speed gained over the boost burst ending at the latest sample.
+
+    Replicated boost updates as a burst ends, so the amount spent gives its length.
+    """
+    burst_start = speed_times[-1] - boost_consumed / BOOST_CONSUMPTION_PER_SECOND
+    start_index = max(bisect_right(speed_times, burst_start) - 1, 0)
+    return speeds[-1] - speeds[start_index]
