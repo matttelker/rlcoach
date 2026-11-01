@@ -61,13 +61,20 @@ def create_test_player(
 
 
 def create_burst_frames(
-    start_speed: float, end_speed: float, start_time: float = 0.0
+    start_speed: float,
+    end_speed: float,
+    start_time: float = 0.0,
+    held_steps: int = 0,
 ) -> list[Frame]:
-    """Build a 20-unit boost burst (0.6 s) whose drop replicates on its last frame."""
+    """Build a 20-unit boost burst (0.6 s) whose drop replicates on its last frame.
+
+    Speed ramps to end_speed, then stays there for the last held_steps steps.
+    """
     steps = 20
     frames = []
     for step in range(steps + 1):
-        speed = start_speed + (end_speed - start_speed) * step / steps
+        progress = min(step / (steps - held_steps), 1.0)
+        speed = start_speed + (end_speed - start_speed) * progress
         player = create_test_player(
             "player1",
             0,
@@ -395,6 +402,33 @@ class TestBoostAnalysis:
 
         assert result["waste"] == pytest.approx(expected_waste)
 
+    @pytest.mark.parametrize(
+        ("start_speed", "held_steps", "expected_waste"),
+        [
+            (1000.0, 0, 0.7),  # Reached the cap on the last sample: 1 of 20 * 0.7
+            (1000.0, 10, 7.7),  # 11 of 20 samples at the cap, the rest useful
+            (2250.0, 10, 10.4),  # Same share, but little gain: 7.7 + 9 boost * 0.3
+            (2300.0, 0, 14.0),  # Whole burst at the cap
+        ],
+    )
+    def test_waste_counts_only_the_boost_spent_at_the_cap(
+        self, start_speed, held_steps, expected_waste
+    ):
+        """A burst that climbed to the cap did useful work on the way there."""
+        frames = create_burst_frames(start_speed, 2300.0, held_steps=held_steps)
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == pytest.approx(expected_waste)
+
+    def test_waste_ignores_time_at_the_cap_before_the_burst(self):
+        """A burst that starts from the cap but falls away was never at it."""
+        frames = create_burst_frames(2300.0, 2000.0)
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == pytest.approx(6.0)  # Partial: 20 boost * 0.3
+
     def test_waste_ignores_speed_from_before_the_burst(self):
         """A car that slowed down first is judged only on what the burst added."""
         slowing = [
@@ -402,7 +436,7 @@ class TestBoostAnalysis:
                 0.0,
                 [
                     create_test_player(
-                        "player1", 0, boost=80, velocity=Vec3(2000.0, 0.0, 0.0)
+                        "player1", 0, boost=80, velocity=Vec3(2300.0, 0.0, 0.0)
                     )
                 ],
             ),

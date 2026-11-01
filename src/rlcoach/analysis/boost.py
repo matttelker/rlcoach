@@ -121,9 +121,8 @@ def _analyze_player_boost(
         frame_count += 1
         boost_amount = player_frame.boost_amount
         total_boost_sum += boost_amount
-        player_speed = _calculate_speed(player_frame.velocity)
         speed_times.append(frame.timestamp)
-        speeds.append(player_speed)
+        speeds.append(_calculate_speed(player_frame.velocity))
 
         if prev_timestamp is not None:
             time_delta = frame.timestamp - prev_timestamp
@@ -144,16 +143,15 @@ def _analyze_player_boost(
                 > RESET_TELEPORT_DISTANCE
             )
             if boost_consumed > WASTE_DETECTION_MIN_BOOST and not was_reset:
-                # Waste if consuming boost at the speed cap, where it adds nothing
-                if player_speed >= SPEED_CAP_WASTE_THRESHOLD:
-                    waste += boost_consumed * 0.7  # Heuristic factor
+                burst_speeds = _speeds_across_burst(speed_times, speeds, boost_consumed)
+                spent_at_cap = boost_consumed * _share_at_speed_cap(burst_speeds)
 
-                # Waste if the burst that spent this boost gained little speed
-                elif (
-                    _speed_gain_across_burst(speed_times, speeds, boost_consumed)
-                    < MIN_BOOST_SPEED_GAIN
-                ):
-                    waste += boost_consumed * 0.3  # Partial waste
+                # Waste for boost spent at the speed cap, where it adds nothing
+                waste += spent_at_cap * 0.7  # Heuristic factor
+
+                # The rest is waste if the burst gained little speed
+                if burst_speeds[-1] - burst_speeds[0] < MIN_BOOST_SPEED_GAIN:
+                    waste += (boost_consumed - spent_at_cap) * 0.3  # Partial waste
 
         prev_boost = boost_amount
         prev_position = player_frame.position
@@ -586,13 +584,21 @@ def _calculate_speed(velocity: Vec3) -> float:
     return math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
 
 
-def _speed_gain_across_burst(
+def _speeds_across_burst(
     speed_times: list[float], speeds: list[float], boost_consumed: float
-) -> float:
-    """Return the speed gained over the boost burst ending at the latest sample.
+) -> list[float]:
+    """Return speed samples for the boost burst ending at the latest sample.
 
     Replicated boost updates as a burst ends, so the amount spent gives its length.
+    The first sample returned is the last one from before the burst began.
     """
     burst_start = speed_times[-1] - boost_consumed / BOOST_CONSUMPTION_PER_SECOND
     start_index = max(bisect_right(speed_times, burst_start) - 1, 0)
-    return speeds[-1] - speeds[start_index]
+    return speeds[start_index:]
+
+
+def _share_at_speed_cap(burst_speeds: list[float]) -> float:
+    """Return the share of a burst spent at the speed cap."""
+    during_burst = burst_speeds[1:]
+    at_cap = sum(speed >= SPEED_CAP_WASTE_THRESHOLD for speed in during_burst)
+    return at_cap / len(during_burst)
