@@ -73,7 +73,14 @@ CLEARED_DEPTH = 1700.0  # Out of your third is a job done, whoever collects it
 GOAL_LOOKBACK_S = 15.0
 GOAL_DECISION_S = 4.0  # A long shot covers the field in about this time
 GOAL_REVIEW_WINDOW_S = 2.0
-GOAL_CHANCES = ("own_touch_in", "no_save_attempt", "missed_clear", "missed_save")
+GOAL_CHANCES = (
+    "own_touch_in",
+    "no_save_attempt",
+    "missed_clear",
+    "missed_save",
+    "behind_line",
+)
+BEHIND_LINE_MARGIN = 200.0  # A keeper on the line is fine, so ask for a clear gap
 HEADING_MIN_SPEED = 100.0  # Slower than this towards goal is not going in yet
 JUMP_RISE = 60.0  # Height gain that proves a car left the ground
 SAVE_REACH = 350.0  # Horizontal distance a jump can cover at the goal line
@@ -121,6 +128,10 @@ INSTEAD = {
     "missed_save": (
         "Get to the line early and square up to the shooter, so you only need a "
         "small move to meet the ball."
+    ),
+    "behind_line": (
+        "Stop at the line and face the ball. Don't reverse into your net: turn "
+        "and drive forward, or powerslide around, so you can still reach it."
     ),
     "last_back_upfield": (
         "As the last player back, hold near halfway and stay goal-side. Let "
@@ -896,6 +907,14 @@ def _review_defender(
         text = "was in goal with time to react and never jumped"
         return DefenderRole("no_save_attempt", text, moment)
     if closest >= MISS_RANGE:
+        if (
+            had_time
+            and at_line is not None
+            and ctx.depth(at_line.position.y) > GOAL_LINE_Y + BEHIND_LINE_MARGIN
+        ):
+            text = "was behind your goal line as it went in"
+            gap = _flat_distance(at_line.position, crossing.ball.position)
+            return DefenderRole("behind_line", text, last_touch, gap)
         text = (
             f"got no closer than {closest / 100:.0f} m to the ball "
             f"in the last {GOAL_REVIEW_WINDOW_S:.0f} s"
@@ -980,6 +999,13 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
         what = (
             "You had time to meet this shot, and it got past you "
             f"{my_role.gap / 100:.1f} m away."
+        )
+    elif label == "behind_line":
+        kind = "behind_line"
+        warning = ctx.times[cross] - ctx.times[last_touch]
+        what = (
+            f"You had {warning:.1f} s to react, but you were behind your goal line, "
+            f"{my_role.gap / 100:.0f} m from the ball as it went in."
         )
     elif (
         last_back is not None

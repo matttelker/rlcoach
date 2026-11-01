@@ -635,6 +635,67 @@ def test_turning_a_ball_on_target_far_from_my_net_is_not_an_own_touch():
     assert not any("turned" in line for line in reviews[0].lines)
 
 
+def _behind_line_scene(car=ME, end_y=5632.0, shot_s=0.5, shot_speed=1000.0):
+    """A ball rolls in at one post while `car` backs into the far corner."""
+    other = MATE if car == ME else ME
+    flight_s = 2420.0 / shot_speed
+
+    def players(t):
+        return [
+            _car(car, ORANGE, -100.0 - 240.0 * t, min(4000.0 + 650.0 * t, end_y)),
+            _car(other, ORANGE, 3000.0, -3000.0),
+            _car(OPP, BLUE, -600.0, 2600.0),
+        ]
+
+    def ball(t):
+        if t < shot_s:
+            return _ball(-554.0, 2650.0, vy=60.0)
+        moved = t - shot_s
+        return _ball(
+            -450.0 + 0.4 * shot_speed * moved,
+            2700.0 + shot_speed * moved,
+            vx=0.4 * shot_speed,
+            vy=shot_speed,
+        )
+
+    seconds = shot_s + flight_s + 0.1
+    frames, origin = _play(seconds, players, ball)
+    goal = GoalEvent(t=origin + seconds - 0.05, scorer=OPP, team="BLUE")
+    return frames, goal
+
+
+def test_being_behind_my_line_with_time_to_react_is_on_me():
+    """From a real goal: reversing into the net as a slow ball rolled in."""
+    frames, goal = _behind_line_scene()
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert reviews[0].on_you is True
+    assert reviews[0].summary == "You had the chance to stop this."
+    assert (
+        reviews[0].lines[0].startswith("You were behind your goal line as it went in")
+    )
+    assert [f.kind for f in flags] == ["behind_line"]
+
+
+def test_a_teammate_behind_the_line_is_named_but_not_on_me():
+    frames, goal = _behind_line_scene(car=MATE)
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert reviews[0].on_you is False
+    assert reviews[0].summary == "A teammate had the chance to stop this."
+    assert flags == []
+
+
+def test_a_keeper_on_the_line_is_not_behind_it():
+    frames, goal = _behind_line_scene(end_y=5180.0)
+    _, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert "behind_line" not in [f.kind for f in flags]
+
+
+def test_being_behind_my_line_with_no_time_to_react_is_not_on_me():
+    frames, goal = _behind_line_scene(shot_s=2.0, shot_speed=2700.0)
+    _, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert "behind_line" not in [f.kind for f in flags]
+
+
 def test_touching_a_ball_already_going_in_is_not_an_own_touch():
     def players(t):
         return [
