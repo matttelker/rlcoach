@@ -896,7 +896,10 @@ def _review_defender(
         text = "was in goal with time to react and never jumped"
         return DefenderRole("no_save_attempt", text, moment)
     if closest >= MISS_RANGE:
-        text = f"was {closest / 100:.0f} m away as it went in"
+        text = (
+            f"got no closer than {closest / 100:.0f} m to the ball "
+            f"in the last {GOAL_REVIEW_WINDOW_S:.0f} s"
+        )
         return DefenderRole("away", text, moment)
     if speed < SLOW_BALL_SPEED:
         text = "reached a slow ball and didn't clear it"

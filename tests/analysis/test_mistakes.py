@@ -519,6 +519,27 @@ def test_teammate_who_never_jumped_is_named_in_my_review():
     assert reviews[0].summary == "A teammate had the chance to stop this."
 
 
+def test_the_distance_line_gives_my_closest_distance_not_my_distance_at_the_goal():
+    """From a real goal: the report said 6 m when the car was 23 m from the net."""
+
+    def players(t):
+        return [
+            _car(ME, ORANGE, 0.0, 1000.0),
+            _car(MATE, ORANGE, 3000.0, -3000.0),
+            _car(OPP, BLUE, 3000.0, -2000.0),
+        ]
+
+    def ball(t):
+        return _ball(600.0, -200.0 + 2000.0 * t, vy=2000.0)
+
+    frames, origin = _play(2.7, players, ball)
+    goal = GoalEvent(t=origin + 2.65, scorer=OPP, team="BLUE")
+    reviews, _ = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert reviews[0].lines[0] == (
+        "You got no closer than 6 m to the ball in the last 2 s (50 boost)"
+    )
+
+
 def _own_touch_scene(toucher, opp_follows=False):
     """A cross runs across my goal, then `toucher` hits it towards the net.
 
