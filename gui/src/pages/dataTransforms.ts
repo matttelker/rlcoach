@@ -8,7 +8,10 @@ export type GameFilters = Required<Pick<GamesParams, 'playlist' | 'limit' | 'off
 };
 
 export const BENCHMARK_HINT =
-  'Bundled benchmarks cover Doubles only. Add more with rlcoach benchmarks import.';
+  'Bundled benchmarks cover C2, C3 and GC1 for Doubles and Standard. Add more with rlcoach benchmarks import.';
+
+export const BENCHMARK_SOURCE =
+  'Benchmarks are ballchasing.com averages. GC1 combines every Grand Champion tier.';
 
 // The API sends UTC timestamps with no offset, which browsers would read as local.
 export function parseUtc(value: string): Date {

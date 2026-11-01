@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { getComparison } from '../api/client';
 import { Card, CardHeader, CardContent, SkeletonChart, ErrorState, NoDataEmpty, PlaylistSelect } from '../components';
-import { BENCHMARK_HINT, buildCompareChartData, isOnTarget } from './dataTransforms';
+import { BENCHMARK_HINT, BENCHMARK_SOURCE, buildCompareChartData, isOnTarget } from './dataTransforms';
 
 const RANK_OPTIONS = ['SSL', 'GC3', 'GC2', 'GC1', 'C3', 'C2'];
 
@@ -42,6 +42,7 @@ export function Compare() {
       <div>
         <h1 className="text-2xl font-bold text-[var(--color-text)]">Compare</h1>
         <p className="text-sm text-[var(--color-text-muted)]">Compare your stats to rank benchmarks</p>
+        <p className="text-xs text-[var(--color-text-muted)] mt-1">{BENCHMARK_SOURCE}</p>
       </div>
 
       {/* Controls */}

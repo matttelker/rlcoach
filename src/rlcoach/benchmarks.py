@@ -14,7 +14,11 @@ from .db.models import Benchmark
 from .db.session import create_session
 from .metrics import VALID_PLAYLISTS, VALID_RANKS, is_valid_metric
 
-DEFAULT_BENCHMARKS_PATH = Path(__file__).parent / "data" / "benchmarks_doubles.json"
+_DATA_DIR = Path(__file__).parent / "data"
+BUNDLED_BENCHMARKS = {
+    "DOUBLES": _DATA_DIR / "benchmarks_doubles.json",
+    "STANDARD": _DATA_DIR / "benchmarks_standard.json",
+}
 
 
 class BenchmarkValidationError(Exception):
@@ -143,16 +147,19 @@ def import_benchmarks(file_path: Path, replace: bool = False) -> int:
 
 
 def seed_default_benchmarks() -> int:
-    """Load the bundled benchmarks if none have been imported yet.
+    """Load the bundled benchmarks for each playlist that has none yet.
 
     Returns:
-        Number of benchmarks loaded (0 if the table already had rows)
+        Number of benchmarks loaded (0 if every playlist already had rows)
     """
     session = create_session()
     try:
-        if session.query(Benchmark).first() is not None:
-            return 0
+        loaded = {row[0] for row in session.query(Benchmark.playlist).distinct()}
     finally:
         session.close()
 
-    return import_benchmarks(DEFAULT_BENCHMARKS_PATH)
+    return sum(
+        import_benchmarks(path)
+        for playlist, path in BUNDLED_BENCHMARKS.items()
+        if playlist not in loaded
+    )

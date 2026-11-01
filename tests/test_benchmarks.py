@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from rlcoach.benchmarks import (
-    DEFAULT_BENCHMARKS_PATH,
+    BUNDLED_BENCHMARKS,
     import_benchmarks,
     seed_default_benchmarks,
     validate_benchmark_data,
@@ -432,11 +432,21 @@ def test_parser_corpus_health_tracks_parser_event_and_provenance_metrics(monkeyp
     )
 
 
-def test_bundled_benchmarks_pass_validation():
-    data = json.loads(DEFAULT_BENCHMARKS_PATH.read_text(encoding="utf-8"))
+@pytest.mark.parametrize("playlist", sorted(BUNDLED_BENCHMARKS))
+def test_bundled_benchmarks_pass_validation(playlist):
+    text = BUNDLED_BENCHMARKS[playlist].read_text(encoding="utf-8")
+    data = json.loads(text)
 
     assert validate_benchmark_data(data) == []
-    assert {b["playlist"] for b in data["benchmarks"]} == {"DOUBLES"}
+    assert {b["playlist"] for b in data["benchmarks"]} == {playlist}
+
+
+@pytest.mark.parametrize("playlist", sorted(BUNDLED_BENCHMARKS))
+def test_bundled_benchmarks_are_ordered(playlist):
+    text = BUNDLED_BENCHMARKS[playlist].read_text(encoding="utf-8")
+
+    for b in json.loads(text)["benchmarks"]:
+        assert b["p25"] <= b["median"] <= b["p75"], b
 
 
 def test_seed_default_benchmarks_only_loads_once(tmp_path):
@@ -461,8 +471,11 @@ def test_seed_default_benchmarks_keeps_imported_rows(tmp_path):
     session.commit()
     session.close()
 
-    assert seed_default_benchmarks() == 0
+    # Standard already has rows, so only Doubles is loaded
+    assert seed_default_benchmarks() == 18
 
     session = create_session()
-    assert session.query(Benchmark).count() == 1
+    standard = session.query(Benchmark).filter_by(playlist="STANDARD").all()
+    assert [b.median_value for b in standard] == [999.0]
+    assert session.query(Benchmark).filter_by(playlist="DOUBLES").count() == 18
     session.close()

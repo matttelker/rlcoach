@@ -73,6 +73,9 @@ _PLAYLIST_ID_MAP = {
     "private": "PRIVATE",
 }
 
+# Modes with their own arenas. Team size alone would file these as core playlists.
+_EXTRA_MODE_MAP_PREFIXES = ("Hoops", "ShatterShot")
+
 _MIN_NON_EMPTY_PLAYER_FRAME_COVERAGE = 0.5
 _MIN_PLAYER_IDENTITY_COVERAGE = 0.5
 
@@ -104,6 +107,14 @@ def _normalize_playlist_id(raw_value: Any) -> tuple[str, list[str]]:
 
     warning = f"unrecognized_playlist_value:{playlist_str}"
     return "UNKNOWN", [warning]
+
+
+def _apply_map_playlist(playlist: str, map_name: str | None) -> str:
+    """Move a core playlist to EXTRA_MODE on an arena only extra modes use."""
+    is_core = playlist in {"DUEL", "DOUBLES", "STANDARD"}
+    if is_core and (map_name or "").startswith(_EXTRA_MODE_MAP_PREFIXES):
+        return "EXTRA_MODE"
+    return playlist
 
 
 def _serialize_value(obj: Any) -> Any:
@@ -328,6 +339,7 @@ def generate_report(
             if hasattr(header, "playlist_id")
             else None
         )
+        playlist_value = _apply_map_playlist(playlist_value, header.map_name)
 
         match_duration = float(
             normalized_frames[-1].timestamp if normalized_frames else 0.0

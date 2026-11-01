@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getWeaknesses, getPatterns } from '../api/client';
 import { Card, CardHeader, CardContent, SkeletonCard, ErrorState, NoDataEmpty, PlaylistSelect } from '../components';
-import { BENCHMARK_HINT } from './dataTransforms';
+import { BENCHMARK_HINT, BENCHMARK_SOURCE } from './dataTransforms';
 
 const SEVERITY_STYLES = {
   critical: 'bg-[var(--color-error)]/20 text-[var(--color-error)] border-[var(--color-error)]/50',
@@ -48,6 +48,7 @@ export function Focus() {
       <div>
         <h1 className="text-2xl font-bold text-[var(--color-text)]">Focus Areas</h1>
         <p className="text-sm text-[var(--color-text-muted)]">Areas to improve and your strengths</p>
+        <p className="text-xs text-[var(--color-text-muted)] mt-1">{BENCHMARK_SOURCE}</p>
       </div>
 
       <Card>
