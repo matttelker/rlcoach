@@ -1,5 +1,6 @@
 """Tests for boost analysis."""
 
+from dataclasses import replace
 from unittest.mock import Mock
 
 from rlcoach.analysis.boost import analyze_boost
@@ -325,11 +326,7 @@ class TestBoostAnalysis:
 
     def test_bpm_and_bcpm_calculation(self):
         """Test BPM and BCPM rate calculations."""
-        player1 = create_test_player("player1", 0)
-        frames = [
-            create_test_frame(0.0, [player1]),
-            create_test_frame(120.0, [player1]),  # 2 minute match
-        ]
+        frames = play_frames(0, 120)  # 2 minute match
 
         events = {
             "boost_pickups": [
@@ -530,3 +527,113 @@ class TestBoostAnalysis:
         assert (
             result["bpm"] == 100.0
         )  # 100 boost collected in default 1 minute duration
+
+
+MOVING = Vec3(800.0, 0.0, 0.0)
+STILL = Vec3(0.0, 0.0, 0.0)
+
+
+def play_frames(
+    start: float, end: float, velocity: Vec3 = MOVING, other: Vec3 | None = None
+) -> list[Frame]:
+    """Dense frames for one car, plus a second car moving at `other` if given."""
+    frames = []
+    for tick in range(int((end - start) * 2) + 1):
+        players = [create_test_player("player1", 0, velocity=velocity)]
+        if other is not None:
+            players.append(create_test_player("player2", 1, velocity=other))
+        frames.append(create_test_frame(start + tick * 0.5, players))
+    return frames
+
+
+def six_big_pads() -> dict:
+    return {
+        "boost_pickups": [
+            BoostPickupEvent(
+                t=10.0 + index,
+                player_id="player1",
+                pad_type="BIG",
+                stolen=False,
+                pad_id=0,
+                location=Vec3(3584, 0, 73),
+                frame=1,
+                boost_before=0.0,
+                boost_after=100.0,
+                boost_gain=100.0,
+            )
+            for index in range(6)
+        ]
+    }
+
+
+class TestRateTimeBasis:
+    """Per-minute rates count play, not raw recording time."""
+
+    def test_uninterrupted_play_uses_full_span(self):
+        result = analyze_boost(play_frames(0, 120), six_big_pads(), player_id="player1")
+
+        assert result["bpm"] == 300.0
+        assert result["bcpm"] == 3.0
+
+    def test_goal_replay_pause_is_not_play_time(self):
+        frames = play_frames(0, 60) + play_frames(80, 140)
+
+        result = analyze_boost(frames, six_big_pads(), player_id="player1")
+
+        assert result["bpm"] == 300.0  # 120s of play in a 140s recording
+        assert result["bcpm"] == 3.0
+
+    def test_kickoff_countdown_is_not_play_time(self):
+        frames = play_frames(0, 4, velocity=STILL) + play_frames(4.5, 123)
+
+        result = analyze_boost(frames, six_big_pads(), player_id="player1")
+
+        assert result["bpm"] == 300.0  # 123s recorded less one 3s countdown
+
+    def test_each_kickoff_counts_once(self):
+        frames = (
+            play_frames(0, 4, velocity=STILL)
+            + play_frames(4.5, 60)
+            + play_frames(60.5, 64.5, velocity=STILL)
+            + play_frames(65, 126)
+        )
+
+        result = analyze_boost(frames, six_big_pads(), player_id="player1")
+
+        assert result["bpm"] == 300.0  # 126s recorded less two 3s countdowns
+
+    def test_brief_stillness_is_not_a_countdown(self):
+        frames = (
+            play_frames(0, 60)
+            + play_frames(60.5, 61.5, velocity=STILL)
+            + play_frames(62, 120)
+        )
+
+        result = analyze_boost(frames, six_big_pads(), player_id="player1")
+
+        assert result["bpm"] == 300.0
+
+    def test_any_moving_car_means_no_countdown(self):
+        frames = play_frames(0, 4, velocity=STILL, other=MOVING) + play_frames(4.5, 120)
+
+        result = analyze_boost(frames, six_big_pads(), player_id="player1")
+
+        assert result["bpm"] == 300.0
+
+    def test_ball_away_from_the_spot_means_no_countdown(self):
+        frames = [
+            replace(frame, ball=replace(frame.ball, position=Vec3(500.0, 0.0, 93.15)))
+            for frame in play_frames(0, 4, velocity=STILL)
+        ] + play_frames(4.5, 120)
+
+        result = analyze_boost(frames, six_big_pads(), player_id="player1")
+
+        assert result["bpm"] == 300.0
+
+    def test_team_rates_use_the_same_basis(self):
+        frames = play_frames(0, 60) + play_frames(80, 140)
+
+        result = analyze_boost(frames, six_big_pads(), team="BLUE")
+
+        assert result["bpm"] == 300.0
+        assert result["bcpm"] == 3.0

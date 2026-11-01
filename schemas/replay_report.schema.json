@@ -426,8 +426,14 @@
       "type": "object",
       "required": ["bpm","bcpm","avg_boost","time_zero_boost_s","time_full_boost_s","boost_collected","boost_stolen","big_pads","small_pads","overfill","waste"],
       "properties": {
-        "bpm": { "type": "number" },
-        "bcpm": { "type": "number" },
+        "bpm": {
+          "type": "number",
+          "description": "Boost amount collected per minute of play. Play is recording time less goal replay pauses and 3 seconds per kickoff countdown, matching Ballchasing's bcpm."
+        },
+        "bcpm": {
+          "type": "number",
+          "description": "Boost pads collected per minute of play, on the same time basis as bpm. Not the same measure as Ballchasing's bcpm."
+        },
         "avg_boost": { "type": "number" },
         "time_zero_boost_s": { "type": "number" },
         "time_full_boost_s": { "type": "number" },
