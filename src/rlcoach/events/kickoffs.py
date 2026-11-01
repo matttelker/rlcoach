@@ -6,16 +6,20 @@ roles, approach types, and timing analysis.
 
 from __future__ import annotations
 
+from itertools import groupby
 from typing import Any
 
 from ..field_constants import Vec3
-from ..parser.types import Frame, Header
+from ..parser.types import BallFrame, Frame, Header
 from .constants import (
     BALL_STATIONARY_THRESHOLD,
+    KICKOFF_CAR_STILL_SPEED,
     KICKOFF_CENTER_POSITION,
+    KICKOFF_HOLD_MIN_S,
     KICKOFF_MAX_DURATION,
     KICKOFF_MIN_COOLDOWN,
     KICKOFF_POSITION_TOLERANCE,
+    KICKOFF_RESET_LEAD_S,
     TOUCH_PROXIMITY_THRESHOLD,
 )
 from .types import KickoffEvent
@@ -27,8 +31,8 @@ def detect_kickoffs(
 ) -> list[KickoffEvent]:
     """Detect kickoff events with enriched per-player metrics.
 
-    The detector tracks the full kickoff window (ball at center -> first
-    significant movement) and records:
+    The detector tracks the kickoff window (cars released -> ball leaves the spot),
+    so ``t_start`` and every time in the event count from the release. It records:
     - Player roles (GO/CHEAT/WING/BACK) inferred from spawn positions
     - Boost consumption prior to the first meaningful action
     - Time-to-first-touch per player and overall first possession outcome
@@ -43,6 +47,52 @@ def detect_kickoffs(
     return heuristic_kickoffs
 
 
+def _is_ball_on_spot(ball: BallFrame) -> bool:
+    """True while the ball sits on the centre spot."""
+    return (
+        abs(ball.position.x - KICKOFF_CENTER_POSITION.x) <= KICKOFF_POSITION_TOLERANCE
+        and abs(ball.position.y - KICKOFF_CENTER_POSITION.y)
+        <= KICKOFF_POSITION_TOLERANCE
+        and abs(ball.position.z - KICKOFF_CENTER_POSITION.z) <= 60.0
+    )
+
+
+def _is_held_for_countdown(frame: Frame) -> bool:
+    """True while the ball is at rest and every car waits for the countdown."""
+    return (
+        vector_magnitude(frame.ball.velocity) < BALL_STATIONARY_THRESHOLD
+        and bool(frame.players)
+        and all(
+            vector_magnitude(player.velocity) < KICKOFF_CAR_STILL_SPEED
+            for player in frame.players
+        )
+    )
+
+
+def _find_kickoff_releases(frames: list[Frame]) -> set[int]:
+    """Find the frame index where each kickoff countdown releases the cars.
+
+    Only a countdown keeps the ball on the spot with every car still for this long.
+    The ball settles and the cars land just after a reset, so the hold is judged
+    between its first and last still frames, and a car that twitches mid-countdown
+    can't end it early. Passing through the spot, or a placeholder frame with the
+    ball at its default position, never adds up to a hold.
+    """
+    releases: set[int] = set()
+    for on_spot, stretch in groupby(
+        range(len(frames)), key=lambda index: _is_ball_on_spot(frames[index].ball)
+    ):
+        if not on_spot:
+            continue
+        held = [index for index in stretch if _is_held_for_countdown(frames[index])]
+        if not held:
+            continue
+        hold_length = frames[held[-1]].timestamp - frames[held[0]].timestamp
+        if hold_length >= KICKOFF_HOLD_MIN_S:
+            releases.add(held[-1])
+    return releases
+
+
 def _detect_heuristic_kickoffs(
     frames: list[Frame], header: Header | None = None
 ) -> list[KickoffEvent]:
@@ -51,28 +101,28 @@ def _detect_heuristic_kickoffs(
     kickoffs: list[KickoffEvent] = []
     kickoff_state: dict[str, Any] | None = None
     last_kickoff_end_time = -KICKOFF_MIN_COOLDOWN
+    releases = _find_kickoff_releases(frames)
 
-    for frame in frames:
+    for index, frame in enumerate(frames):
         ball = frame.ball
 
-        at_center = (
-            abs(ball.position.x - KICKOFF_CENTER_POSITION.x)
-            <= KICKOFF_POSITION_TOLERANCE
-            and abs(ball.position.y - KICKOFF_CENTER_POSITION.y)
-            <= KICKOFF_POSITION_TOLERANCE
-            and abs(ball.position.z - KICKOFF_CENTER_POSITION.z) <= 60.0
-        )
+        at_center = _is_ball_on_spot(ball)
         ball_speed = vector_magnitude(ball.velocity)
         is_stationary = ball_speed < BALL_STATIONARY_THRESHOLD
 
-        # Start a new kickoff window when the ball is reset to centre and the
+        # A kickoff starts when the countdown releases the cars. Frames that never
+        # show a countdown fall back to the ball being reset to centre once the
         # previous kickoff has fully completed.
-        if (
-            kickoff_state is None
-            and at_center
-            and is_stationary
-            and (frame.timestamp - last_kickoff_end_time) >= KICKOFF_MIN_COOLDOWN
-        ):
+        if releases:
+            starts_kickoff = index in releases
+        else:
+            starts_kickoff = (
+                at_center
+                and is_stationary
+                and (frame.timestamp - last_kickoff_end_time) >= KICKOFF_MIN_COOLDOWN
+            )
+
+        if kickoff_state is None and starts_kickoff:
             kickoff_state = _start_kickoff(frame)
             continue
 
@@ -152,7 +202,12 @@ def _merge_kickoff_sources(
     heuristic_kickoffs: list[KickoffEvent],
     parser_kickoffs: list[KickoffEvent],
 ) -> list[KickoffEvent]:
-    """Prefer parser timing/phase while preserving heuristic enrichment."""
+    """Prefer parser phase while preserving heuristic timing and enrichment.
+
+    Markers fire on every ball reset, usually twice as the ball settles, and on
+    placeholder frames during a goal. So they confirm a kickoff the heuristic pass
+    found, and only stand alone when it found nothing at all.
+    """
     if not heuristic_kickoffs:
         return parser_kickoffs
     if not parser_kickoffs:
@@ -168,7 +223,6 @@ def _merge_kickoff_sources(
             used_heuristics,
         )
         if match_index is None:
-            merged.append(parser_kickoff)
             continue
 
         used_heuristics.add(match_index)
@@ -176,7 +230,7 @@ def _merge_kickoff_sources(
         merged.append(
             KickoffEvent(
                 phase=parser_kickoff.phase or heuristic.phase,
-                t_start=parser_kickoff.t_start,
+                t_start=heuristic.t_start,
                 players=heuristic.players,
                 outcome=heuristic.outcome,
                 first_touch_player=heuristic.first_touch_player,
@@ -198,7 +252,11 @@ def _find_matching_kickoff(
     heuristic_kickoffs: list[KickoffEvent],
     used_heuristics: set[int],
 ) -> int | None:
-    """Match a parser kickoff marker to the nearest heuristic kickoff."""
+    """Match a parser kickoff marker to the nearest heuristic kickoff.
+
+    A marker fires at the ball reset, so on a replay with a countdown it comes
+    ``KICKOFF_RESET_LEAD_S`` before the kickoff it belongs to.
+    """
     best_index: int | None = None
     best_delta: float | None = None
     max_delta = 1.0
@@ -206,9 +264,10 @@ def _find_matching_kickoff(
     for index, heuristic in enumerate(heuristic_kickoffs):
         if index in used_heuristics:
             continue
-        delta = abs(heuristic.t_start - parser_kickoff.t_start)
-        if delta > max_delta:
+        lead = heuristic.t_start - parser_kickoff.t_start
+        if not -max_delta <= lead <= KICKOFF_RESET_LEAD_S + max_delta:
             continue
+        delta = abs(lead)
         if best_delta is None or delta < best_delta:
             best_delta = delta
             best_index = index

@@ -1,5 +1,10 @@
 """Tests for event detection and timeline aggregation."""
 
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
 from rlcoach.events import (
     GOAL_LINE_THRESHOLD,
     DemoEvent,
@@ -15,6 +20,8 @@ from rlcoach.events import (
     detect_touches,
 )
 from rlcoach.field_constants import FIELD, Vec3
+from rlcoach.normalize import build_timeline as build_normalized_frames
+from rlcoach.parser import get_adapter
 from rlcoach.parser.types import (
     BallFrame,
     Frame,
@@ -59,6 +66,81 @@ def create_test_player(
         is_on_ground=on_ground,
         is_demolished=demolished,
     )
+
+
+FRAME_STEP = 1 / 30
+
+
+def countdown_frames(reset: float, phase: str = "INITIAL") -> list[Frame]:
+    """One kickoff as real replays record it, from ball reset to contact.
+
+    The ball drops onto the spot, which fires a second parser marker once it stops,
+    and the cars settle before the countdown holds them still. They are released 4s
+    after the reset, and the blue car reaches the ball about 2.1s later.
+    """
+    release = reset + 4.0
+    contact = release + 2.1
+    ball_drop = {0: (100.5, 0.0), 1: (98.8, -43.0), 2: (96.9, -65.0), 3: (94.3, -86.0)}
+
+    frames = []
+    for step in range(int((contact + 0.3 - reset) / FRAME_STEP)):
+        t = reset + step * FRAME_STEP
+        driving = max(0.0, t - release)
+        held_speed = 120.0 if step <= 10 else 8.0
+        blue_speed = 920.0 if driving else held_speed
+        orange_speed = 800.0 if driving else held_speed
+        players = [
+            replace(
+                create_test_player(
+                    "blue",
+                    0,
+                    Vec3(0.0, -2048.0 + 920.0 * driving, 17.0),
+                    boost=max(0, 33 - int(20.0 * driving)),
+                ),
+                velocity=Vec3(0.0, blue_speed, 0.0),
+            ),
+            replace(
+                create_test_player(
+                    "orange", 1, Vec3(0.0, 2048.0 - 800.0 * driving, 17.0)
+                ),
+                velocity=Vec3(0.0, -orange_speed, 0.0),
+            ),
+        ]
+
+        if t >= contact:
+            ball_pos = Vec3(0.0, 1500.0 * (t - contact), 92.8)
+            ball_vel = Vec3(0.0, 1500.0, 0.0)
+        else:
+            height, drop_speed = ball_drop.get(step, (92.8, 0.0))
+            ball_pos = Vec3(0.0, 0.0, height)
+            ball_vel = Vec3(0.0, 0.0, drop_speed)
+
+        frame = create_test_frame(t, ball_pos, ball_vel, players)
+        if step in (0, 4):
+            marker = ParserKickoffMarker(timestamp=t, phase=phase)
+            frame = replace(frame, parser_kickoff_markers=[marker])
+        frames.append(frame)
+    return frames
+
+
+def open_play_frames(start: float, count: int = 30) -> list[Frame]:
+    """Frames away from the spot with every car moving."""
+    players = [
+        replace(
+            create_test_player(pid, team, Vec3(500.0, 1000.0, 17.0)),
+            velocity=Vec3(1000.0, 0.0, 0.0),
+        )
+        for pid, team in (("blue", 0), ("orange", 1))
+    ]
+    return [
+        create_test_frame(
+            start + step * FRAME_STEP,
+            Vec3(1500.0, 2500.0, 300.0),
+            Vec3(800.0, 0.0, 0.0),
+            players,
+        )
+        for step in range(count)
+    ]
 
 
 class TestGoalDetection:
@@ -488,6 +570,121 @@ class TestKickoffDetection:
 
         kickoffs = detect_kickoffs(frames)
         assert kickoffs == []
+
+
+class TestKickoffCountdown:
+    """Kickoffs on frames shaped like real replays, with a countdown."""
+
+    def test_one_event_per_kickoff(self):
+        """Two markers, a settling ball and a countdown are still one kickoff."""
+        kickoffs = detect_kickoffs(countdown_frames(10.0))
+
+        assert len(kickoffs) == 1
+        kickoff = kickoffs[0]
+        assert kickoff.source == "parser"
+        assert kickoff.t_start == pytest.approx(14.0, abs=2 * FRAME_STEP)
+        assert kickoff.outcome == "FIRST_POSSESSION_BLUE"
+        assert kickoff.first_touch_player == "blue"
+
+    def test_one_event_without_parser_markers(self):
+        """Gameplay state alone doesn't split a kickoff either."""
+        frames = [
+            replace(frame, parser_kickoff_markers=[])
+            for frame in countdown_frames(10.0)
+        ]
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].source == "inferred"
+
+    def test_times_count_from_release(self):
+        """The approach is timed from the release, not the ball reset."""
+        kickoff = detect_kickoffs(countdown_frames(10.0))[0]
+
+        assert kickoff.time_to_first_touch == pytest.approx(2.05, abs=0.1)
+        blue = next(p for p in kickoff.players if p["player_id"] == "blue")
+        assert blue["boost_used"] == 33
+        assert blue["time_to_first_touch"] == pytest.approx(2.05, abs=0.1)
+
+    def test_opening_kickoff_reaches_first_touch(self):
+        """The contact 6s into a replay falls inside the kickoff window."""
+        kickoffs = detect_kickoffs(countdown_frames(0.0))
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].first_touch_player == "blue"
+
+    def test_each_kickoff_counts_once(self):
+        frames = countdown_frames(0.0) + open_play_frames(7.0) + countdown_frames(30.0)
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert [round(kickoff.t_start) for kickoff in kickoffs] == [4, 34]
+        assert all(kickoff.first_touch_player == "blue" for kickoff in kickoffs)
+
+    def test_placeholder_frame_is_not_a_kickoff(self):
+        """With no ball, the parser reports a default ball on an empty frame."""
+        marker = ParserKickoffMarker(timestamp=8.0, phase="INITIAL")
+        placeholder = replace(
+            create_test_frame(8.0, Vec3(0.0, 0.0, 93.15), Vec3(0.0, 0.0, 0.0), []),
+            parser_kickoff_markers=[marker],
+        )
+        frames = (
+            countdown_frames(0.0)
+            + open_play_frames(7.0, count=15)
+            + [placeholder]
+            + open_play_frames(8.1)
+        )
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].t_start == pytest.approx(4.0, abs=2 * FRAME_STEP)
+
+    def test_twitch_during_countdown_keeps_the_release(self):
+        """One car jostling mid-countdown doesn't release the others."""
+
+        def twitch(frame: Frame) -> Frame:
+            if not 13.4 <= frame.timestamp <= 13.9:
+                return frame
+            jostled = replace(frame.players[0], velocity=Vec3(0.0, 97.0, 0.0))
+            return replace(frame, players=[jostled, frame.players[1]])
+
+        frames = [twitch(frame) for frame in countdown_frames(10.0)]
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].t_start == pytest.approx(14.0, abs=2 * FRAME_STEP)
+
+    def test_parser_phase_applies_to_the_kickoff(self):
+        kickoffs = detect_kickoffs(countdown_frames(310.0, phase="OT"))
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].phase == "OT"
+        assert kickoffs[0].t_start == pytest.approx(314.0, abs=2 * FRAME_STEP)
+
+    def test_real_replay_has_one_kickoff_per_countdown(self):
+        """Expected times are the stream's own countdown reaching zero."""
+        rlreplay_rust = pytest.importorskip("rlreplay_rust")
+        if not getattr(rlreplay_rust, "RUST_CORE", False):
+            pytest.skip("Rust core not available")
+        replay = Path("Replay_files/testing_replay.replay")
+        if not replay.exists():
+            pytest.skip("testing_replay.replay not found")
+
+        adapter = get_adapter("rust")
+        header = adapter.parse_header(replay)
+        network = adapter.parse_network(replay)
+        frames = build_normalized_frames(header, network.frames)
+
+        kickoffs = detect_kickoffs(frames, header)
+
+        released = [4.02, 28.97, 53.28, 82.44, 110.79, 250.21, 289.87, 341.90]
+        released += [398.72, 428.54]
+        assert [kickoff.t_start for kickoff in kickoffs] == pytest.approx(
+            released, abs=0.1
+        )
 
 
 class TestBoostPickupDetection:

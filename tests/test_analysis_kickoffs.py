@@ -1,7 +1,9 @@
 """Tests for kickoff analysis."""
 
+from dataclasses import replace
+
 from rlcoach.analysis.kickoffs import APPROACH_KEYS, analyze_kickoffs
-from rlcoach.events import GoalEvent, KickoffEvent
+from rlcoach.events import GoalEvent, KickoffEvent, detect_kickoffs
 from rlcoach.field_constants import Vec3
 from rlcoach.parser.types import BallFrame, Frame, PlayerFrame
 
@@ -312,6 +314,38 @@ class TestKickoffGoalAttribution:
         blue = analyze_kickoffs(frames, events, team="BLUE")
         assert blue["goals_for"] == 0
         assert blue["goals_against"] == 0
+
+
+class TestKickoffGoalsFromRelease:
+    """Goal windows on events from detect_kickoffs, where a countdown comes first."""
+
+    def _frames(self) -> list[Frame]:
+        players = [make_player("b1", 0), make_player("o1", 1)]
+        held = [make_frame(step / 10, players) for step in range(41)]
+        struck = BallFrame(
+            position=Vec3(800.0, 0.0, 93.15),
+            velocity=Vec3(1500.0, 0.0, 0.0),
+            angular_velocity=Vec3(0.0, 0.0, 0.0),
+        )
+        return [*held, replace(make_frame(4.1, players), ball=struck)]
+
+    def _events(self, goal_time: float) -> dict[str, list]:
+        return {
+            "kickoffs": detect_kickoffs(self._frames()),
+            "goals": [GoalEvent(t=goal_time, team="BLUE", scorer="b1")],
+        }
+
+    def test_goal_window_runs_from_the_release(self):
+        # 13s after the ball reset, but only 9s of play after the 4s countdown.
+        blue = analyze_kickoffs(self._frames(), self._events(13.0), team="BLUE")
+
+        assert blue["count"] == 1
+        assert blue["goals_for"] == 1
+
+    def test_goal_after_the_window_not_counted(self):
+        blue = analyze_kickoffs(self._frames(), self._events(14.5), team="BLUE")
+
+        assert blue["goals_for"] == 0
 
 
 class TestKickoffPlayerFirstPossession:

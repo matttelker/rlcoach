@@ -46,7 +46,7 @@ class KickoffEvent:
     """Kickoff event with player analysis."""
 
     phase: str  # "INITIAL" or "OT"
-    t_start: float
+    t_start: float  # Cars released; the ball reset if frames show no countdown
     players: list[dict[str, Any]]  # Player kickoff analysis
     outcome: str = "NEUTRAL"  # Simplified outcome
     first_touch_player: str | None = None

@@ -272,7 +272,7 @@
       "required": ["phase","t_start","players","outcome"],
       "properties": {
         "phase": { "type": "string", "enum": ["INITIAL","OT"] },
-        "t_start": { "type": "number" },
+        "t_start": { "type": "number", "description": "When the countdown releases the cars; kickoff times count from here" },
         "players": {
           "type": "array",
           "items": {
