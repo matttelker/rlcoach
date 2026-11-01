@@ -302,10 +302,10 @@
 ## Event Timeline
 
 
-| Time (s) | Frame | Event   | Player | Details                                                                      |
-| -------- | ----- | ------- | ------ | ---------------------------------------------------------------------------- |
-| 0        | -     | KICKOFF | -      | outcome:NEUTRAL, phase:INITIAL, players:2 items, source:inferred             |
-| 1.10     | 2     | TOUCH   | A      | ball_speed_kph:61.56, location:0.0/160.0/17.0, outcome:PASS, source:inferred |
+| Time (s) | Frame | Event   | Player | Details                                                                     |
+| -------- | ----- | ------- | ------ | --------------------------------------------------------------------------- |
+| 0        | -     | KICKOFF | -      | outcome:NEUTRAL, phase:INITIAL, players:2 items, source:inferred            |
+| 1.10     | 2     | TOUCH   | A      | ball_speed_kph:32.4, location:0.0/160.0/17.0, outcome:PASS, source:inferred |
 
 
 ### Goals
@@ -331,7 +331,7 @@
 
 | Time (s) | Player | Outcome | Ball Speed (kph) | Location           |
 | -------- | ------ | ------- | ---------------- | ------------------ |
-| 1.10     | A      | PASS    | 61.56            | (x:0, y:160, z:17) |
+| 1.10     | A      | PASS    | 32.40            | (x:0, y:160, z:17) |
 
 
 ## Heatmap Summaries
@@ -1241,7 +1241,7 @@
       },
       {
         "data": {
-          "ball_speed_kph": 61.56,
+          "ball_speed_kph": 32.4,
           "location": {
             "x": 0.0,
             "y": 160.0,
@@ -1258,7 +1258,7 @@
     ],
     "touches": [
       {
-        "ball_speed_kph": 61.56,
+        "ball_speed_kph": 32.4,
         "car_height": 17.0,
         "frame": 2,
         "is_first_touch": true,

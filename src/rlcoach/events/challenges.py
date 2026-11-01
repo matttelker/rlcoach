@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from ..field_constants import Vec3
 from ..parser.types import Frame, PlayerFrame
+from ..physics_constants import UU_TO_METERS
 from .constants import (
     CHALLENGE_MIN_BALL_SPEED_KPH,
     CHALLENGE_MIN_DISTANCE_UU,
@@ -101,7 +102,7 @@ def detect_challenge_events(
             winner_team = None
 
         depth_y = (first.location.y + second.location.y) / 2.0
-        depth_m = abs(depth_y) * 0.019
+        depth_m = abs(depth_y) * UU_TO_METERS
 
         midpoint = Vec3(
             (first.location.x + second.location.x) / 2.0,

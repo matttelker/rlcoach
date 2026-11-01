@@ -11,6 +11,7 @@ from typing import Any
 from ..field_constants import FIELD, Vec3
 from ..normalize import measure_frame_rate
 from ..parser.types import Frame, Header, PlayerFrame
+from ..physics_constants import UU_S_TO_KPH
 from ..utils.identity import (
     build_alias_lookup,
     build_player_identities,
@@ -167,7 +168,7 @@ def _detect_goals_from_header(frames: list[Frame], header: Header) -> list[GoalE
                 FIELD.BACK_WALL_Y if scorer_team == "BLUE" else -FIELD.BACK_WALL_Y
             )
             distance_m = abs(goal_line_y - ball_pos.y) / 100.0
-            shot_speed_kph = vector_magnitude(ball_velocity) * 3.6
+            shot_speed_kph = vector_magnitude(ball_velocity) * UU_S_TO_KPH
 
             highlight_frame = (
                 highlight_frames[goal_index]
@@ -238,7 +239,7 @@ def _detect_goals_from_header(frames: list[Frame], header: Header) -> list[GoalE
                 scorer=scorer,
                 team=scorer_team,
                 assist=None,
-                shot_speed_kph=vector_magnitude(ball_velocity) * 3.6,
+                shot_speed_kph=vector_magnitude(ball_velocity) * UU_S_TO_KPH,
                 distance_m=distance_m,
                 on_target=scorer is not None,
                 tickmark_lead_seconds=round(tickmark_lead, 3),
@@ -374,7 +375,7 @@ def _detect_goals_from_ball_path(
             # Use lookback to find actual shot velocity (avoids post-goal physics reset)
             ball_velocity = _find_shot_velocity_before_goal(frames, i, frame_rate)
             ball_speed = vector_magnitude(ball_velocity)
-            shot_speed_kph = ball_speed * 3.6
+            shot_speed_kph = ball_speed * UU_S_TO_KPH
 
             goal_line_y = (
                 GOAL_LINE_THRESHOLD if goal_team == "BLUE" else -GOAL_LINE_THRESHOLD

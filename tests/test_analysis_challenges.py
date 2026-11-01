@@ -1,5 +1,7 @@
 """Tests for challenges/50-50s analysis."""
 
+import pytest
+
 from rlcoach.analysis.challenges import analyze_challenges
 from rlcoach.events import TouchEvent
 from rlcoach.field_constants import Vec3
@@ -86,8 +88,8 @@ class TestChallengesAnalysis:
         assert blue["first_to_ball_pct"] == 100.0
         assert orange["first_to_ball_pct"] == 0.0
 
-        # Depth is around average of -500 and -460 => ~ -480 UU => ~9.12 m
-        assert 8.0 < blue["challenge_depth_m"] < 11.0
+        # Depth is around average of -600 and -350 => -475 UU => 4.75 m
+        assert blue["challenge_depth_m"] == pytest.approx(4.75, abs=0.01)
 
         # Risk is bounded [0,1]
         assert 0.0 <= blue["risk_index_avg"] <= 1.0

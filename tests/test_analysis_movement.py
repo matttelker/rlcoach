@@ -1,6 +1,7 @@
 """Tests for movement analysis."""
 
 import math
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,7 @@ from rlcoach.analysis.movement import (
 )
 from rlcoach.field_constants import Vec3
 from rlcoach.parser.types import BallFrame, Frame, PlayerFrame
+from rlcoach.report import generate_report
 
 
 def create_test_frame(timestamp: float, players: list[PlayerFrame]) -> Frame:
@@ -57,6 +59,31 @@ def create_test_player(
         is_on_ground=is_on_ground,
         is_demolished=is_demolished,
     )
+
+
+def _sparse_position_frames(speed_uu_s: float) -> list[Frame]:
+    """Build 3s at 30 Hz with constant velocity and positions updated every 3rd frame.
+
+    Mirrors real replays, where a car's rigid body is not replicated every frame.
+    """
+    frame_dt = 1.0 / 30.0
+    frames = []
+    for idx in range(90):
+        refreshed = idx - idx % 3
+        frames.append(
+            create_test_frame(
+                idx * frame_dt,
+                [
+                    create_test_player(
+                        "player1",
+                        0,
+                        position=Vec3(refreshed * frame_dt * speed_uu_s, 0.0, 17.0),
+                        velocity=Vec3(speed_uu_s, 0.0, 0.0),
+                    )
+                ],
+            )
+        )
+    return frames
 
 
 class TestMovementAnalysis:
@@ -133,8 +160,29 @@ class TestMovementAnalysis:
         expected_distance_km = round(_uu_to_km(2000.0), 2)
         assert result["distance_km"] == pytest.approx(expected_distance_km, rel=1e-3)
 
-    def test_position_delta_speed_preferred_when_velocity_disagrees(self):
-        """Real replay velocity can be noisy; movement speed follows position deltas."""
+    def test_speed_uses_velocity_when_positions_refresh_every_third_frame(self):
+        """Real replays repeat positions between updates; speed must not spike."""
+        result = analyze_movement(
+            _sparse_position_frames(speed_uu_s=2000.0), {}, player_id="player1"
+        )
+
+        assert result["avg_speed_kph"] == pytest.approx(72.0, abs=0.01)
+        assert result["max_speed_kph"] == pytest.approx(72.0, abs=0.01)
+
+    def test_sparse_positions_do_not_interrupt_supersonic_time(self):
+        """Without a parser flag, supersonic time still counts every frame."""
+        frames = _sparse_position_frames(speed_uu_s=2300.0)
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["max_speed_kph"] == pytest.approx(82.8, abs=0.01)
+        assert result["time_supersonic_s"] == pytest.approx(
+            frames[-1].timestamp + 1.0 / 30.0, rel=1e-3
+        )
+        assert result["time_boost_speed_s"] == 0.0
+
+    def test_teleport_does_not_affect_speed(self):
+        """A respawn jump in position must not show up as car speed."""
         frames = [
             create_test_frame(
                 0.0,
@@ -143,29 +191,18 @@ class TestMovementAnalysis:
                         "player1",
                         0,
                         position=Vec3(0.0, 0.0, 17.0),
-                        velocity=Vec3(3000.0, 0.0, 0.0),
+                        velocity=Vec3(1000.0, 0.0, 0.0),
                     )
                 ],
             ),
             create_test_frame(
-                1.0,
+                1.0 / 30.0,
                 [
                     create_test_player(
                         "player1",
                         0,
-                        position=Vec3(1000.0, 0.0, 17.0),
-                        velocity=Vec3(3000.0, 0.0, 0.0),
-                    )
-                ],
-            ),
-            create_test_frame(
-                2.0,
-                [
-                    create_test_player(
-                        "player1",
-                        0,
-                        position=Vec3(2000.0, 0.0, 17.0),
-                        velocity=Vec3(3000.0, 0.0, 0.0),
+                        position=Vec3(-2304.0, -4608.0, 17.0),
+                        velocity=Vec3(1000.0, 0.0, 0.0),
                     )
                 ],
             ),
@@ -173,14 +210,10 @@ class TestMovementAnalysis:
 
         result = analyze_movement(frames, {}, player_id="player1")
 
-        assert result["avg_speed_kph"] == pytest.approx(
-            round(_uu_s_to_kph(1000.0), 2), rel=1e-3
-        )
-        assert result["time_boost_speed_s"] == pytest.approx(3.0, rel=1e-3)
-        assert result["time_supersonic_s"] == 0.0
+        assert result["max_speed_kph"] == pytest.approx(36.0, abs=0.01)
 
-    def test_position_delta_speed_does_not_suppress_supersonic_flag(self):
-        """Position-derived average speed must not suppress replicated supersonic."""
+    def test_supersonic_flag_counts_alongside_speed_hysteresis(self):
+        """A single parser flag must not switch off speed-based detection."""
         frames = [
             create_test_frame(
                 0.0,
@@ -188,23 +221,14 @@ class TestMovementAnalysis:
                     create_test_player(
                         "player1",
                         0,
-                        position=Vec3(0.0, 0.0, 17.0),
-                        velocity=Vec3(3000.0, 0.0, 0.0),
+                        velocity=Vec3(1500.0, 0.0, 0.0),
                         is_supersonic=True,
                     )
                 ],
             ),
             create_test_frame(
                 1.0,
-                [
-                    create_test_player(
-                        "player1",
-                        0,
-                        position=Vec3(900.0, 0.0, 17.0),
-                        velocity=Vec3(3000.0, 0.0, 0.0),
-                        is_supersonic=True,
-                    )
-                ],
+                [create_test_player("player1", 0, velocity=Vec3(2300.0, 0.0, 0.0))],
             ),
         ]
 
@@ -428,10 +452,13 @@ class TestMovementAnalysis:
         # Test zero
         assert _uu_s_to_kph(0.0) == 0.0
 
-        # Test known conversion (approximately 1 UU = 1.9 cm)
-        # 1000 UU/s should be about 68.4 km/h
-        result = _uu_s_to_kph(1000.0)
-        assert 68.0 < result < 69.0
+        # 1 UU = 1 cm, so the 2300 UU/s car speed cap is 82.8 km/h
+        assert _uu_s_to_kph(2300.0) == pytest.approx(82.8)
+        assert _uu_s_to_kph(2778.0) == pytest.approx(100.0, abs=0.01)
+
+    def test_uu_to_km_conversion(self):
+        """Test Unreal Units to km conversion (1 UU = 1 cm)."""
+        assert _uu_to_km(100_000.0) == pytest.approx(1.0)
 
     def test_frame_duration_handling(self):
         """Test proper handling of variable frame durations."""
@@ -589,3 +616,20 @@ class TestMovementAnalysis:
         expected_avg_uu_s = sum(speeds) / len(speeds)
         expected_avg_kph = _uu_s_to_kph(expected_avg_uu_s)
         assert abs(result["avg_speed_kph"] - expected_avg_kph) < 0.01
+
+
+def test_real_replay_speeds_stay_within_the_car_speed_cap():
+    """End to end, reported speeds must respect the 2300 UU/s (82.8 km/h) cap."""
+    pytest.importorskip("rlreplay_rust")
+    replay = Path("testing_replay.replay")
+    if not replay.exists() or replay.stat().st_size < 1024:
+        pytest.skip("real testing_replay.replay not available")
+
+    report = generate_report(replay)
+
+    per_player = report["analysis"]["per_player"]
+    assert per_player
+    for stats in per_player.values():
+        movement = stats["movement"]
+        assert 0.0 < movement["avg_speed_kph"] < 70.0
+        assert 0.0 < movement["max_speed_kph"] <= 83.0

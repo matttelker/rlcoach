@@ -21,6 +21,7 @@ from enum import Enum
 from ..events import TouchContext, TouchEvent
 from ..field_constants import FIELD, Vec3
 from ..parser.types import Frame, PlayerFrame
+from ..physics_constants import UU_S_TO_KPH
 from .protocol import get_player_teams
 
 
@@ -35,11 +36,6 @@ class ShotType(Enum):
     POWER_SHOT = "power_shot"  # High speed ground shot
     LOB = "lob"  # High arcing shot
     UNKNOWN = "unknown"
-
-
-# Unit conversion constant: 1 UU ≈ 1.9 cm = 0.019 m
-# To convert UU/s to km/h: multiply by 0.019 (m per UU) * 3.6 (s/h / m/km)
-UU_S_TO_KPH = 0.019 * 3.6  # ≈ 0.0684
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,8 @@
 
 from dataclasses import replace
 
+import pytest
+
 from rlcoach.events import (
     GOAL_LINE_THRESHOLD,
     DemoEvent,
@@ -99,7 +101,7 @@ class TestGoalDetection:
         assert goal.t == 1.1
         assert goal.scorer == "player_1"
         assert goal.team == "BLUE"
-        assert goal.shot_speed_kph > 0
+        assert goal.shot_speed_kph == pytest.approx(18.0)
 
     def test_orange_team_goal(self):
         """Orange team scoring in blue goal (negative Y)."""
