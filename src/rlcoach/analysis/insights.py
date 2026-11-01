@@ -200,12 +200,12 @@ def _analyze_boost_insights(boost: dict, player_id: str) -> list[dict[str, Any]]
                 "priority": PRIORITY_LOW,
                 "message": "Boost efficiency can improve",
                 "contributing_factors": [
-                    f"Wasted {waste:.0f} units of boost",
-                    "Waste = collecting boost when nearly full",
+                    f"Estimated {waste:.0f} units of boost wasted",
+                    "Waste = boost spent at top speed or with little speed gain",
                 ],
                 "recommendation": (
-                    "Before grabbing big boost, check your meter. "
-                    "If above 70, small pads may be more efficient."
+                    "Let go of boost once you reach top speed, where it adds "
+                    "nothing. Save it for challenges and aerials."
                 ),
                 "evidence": {"boost_waste": waste},
             }

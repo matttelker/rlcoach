@@ -810,7 +810,7 @@ Insights are human-readable observations about gameplay. They come from two sour
 ### Pipeline Insights (Existing)
 
 Already implemented in `src/rlcoach/analysis/insights.py`. Stored in JSON report under `analysis.coaching_insights`. Examples:
-- "High boost waste (32%) - consider using small pads more"
+- "High boost waste (32%) - let go of boost at top speed"
 - "Strong kickoff presence - won first touch 78% of the time"
 - "Low recovery momentum (45%) - practice wavedash landings"
 
