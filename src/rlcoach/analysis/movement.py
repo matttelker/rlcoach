@@ -21,17 +21,16 @@ from ..field_constants import Vec3
 from ..parser.types import Frame, Header, PlayerFrame
 from ..physics_constants import UU_S_TO_KPH, UU_TO_METERS
 
-# Movement analysis thresholds mirror common community definitions:
-# - slow speed: < 1400 uu/s
-# - boost speed: 1400–2200 uu/s
-# - supersonic: >= 2200 uu/s (flag aware with graceful hysteresis)
-SLOW_SPEED_MAX_UU_S = 1400.0
+# Movement analysis thresholds match Ballchasing's own figures:
+# - slow speed: < 1410 uu/s, the top speed without boost
+# - boost speed: 1410–2200 uu/s
+# - supersonic: >= 2200 uu/s
+SLOW_SPEED_MAX_UU_S = 1410.0
 BOOST_SPEED_MAX_UU_S = 2200.0
-SUPERSONIC_ENTRY_UU_S = 2200.0
-SUPERSONIC_EXIT_UU_S = 2100.0  # tolerate brief dips without dropping the state
+MOVING_SPEED_MIN_UU_S = 10.0  # Average speed leaves out a parked car
 
 # Height thresholds for air/ground classification (from project plan)
-GROUND_HEIGHT = 25.0
+GROUND_HEIGHT = 20.0  # Cars rest at 17-18.4uu depending on the body
 LOW_AIR_HEIGHT = 200.0
 HIGH_AIR_HEIGHT = 840.0  # Ballchasing's "above the crossbar" line
 
@@ -121,9 +120,8 @@ def _analyze_player_movement(frames: list[Frame], player_id: str) -> dict[str, A
 
     frame_durations = _compute_frame_durations(frames)
 
-    total_speed_distance = 0.0
     total_distance_uu = 0.0
-    total_time = 0.0
+    moving_time = 0.0
     max_speed_uu_s = 0.0
 
     time_slow = 0.0
@@ -135,16 +133,13 @@ def _analyze_player_movement(frames: list[Frame], player_id: str) -> dict[str, A
 
     powerslide_count = 0
     powerslide_duration = 0.0
+    slide_time = 0.0
     aerial_count = 0
     aerial_time = 0.0
 
-    prev_player_frame = None
     prev_timestamp = None
-    in_powerslide = False
-    powerslide_start = 0.0
     in_aerial = False
     aerial_start = 0.0
-    supersonic_active = False
 
     for idx, frame in enumerate(frames):
         player_frame = frame.get_player_by_id(player_id)
@@ -153,62 +148,44 @@ def _analyze_player_movement(frames: list[Frame], player_id: str) -> dict[str, A
 
         # Speed comes from replicated velocity, never position deltas: car
         # positions only refresh every 2-3 frames, so a delta over one frame
-        # reads 2-3x the true speed on the frames where they do change.
+        # reads 2-3x the true speed on the frames where they do change, and a
+        # kickoff or a respawn teleports the car.
         speed = _calculate_speed(player_frame.velocity)
-        ground_speed = _horizontal_speed(player_frame.velocity)
         height = player_frame.position.z
         frame_dt = frame_durations[idx]
 
-        total_speed_distance += speed * frame_dt
-        total_time += frame_dt
         max_speed_uu_s = max(max_speed_uu_s, speed)
 
-        if prev_player_frame is not None:
-            total_distance_uu += _distance_between_positions(
-                player_frame.position, prev_player_frame.position
-            )
+        # A demolished car is off the field, so its time goes in no bucket
+        if not player_frame.is_demolished:
+            total_distance_uu += speed * frame_dt
+            if speed >= MOVING_SPEED_MIN_UU_S:
+                moving_time += frame_dt
 
-        # Speed bucket classification using current frame's state
-        supersonic_active = _update_supersonic_state(
-            supersonic_active,
-            speed,
-            ground_speed,
-            player_frame.is_supersonic,
-        )
+            # Speed bucket classification using current frame's state
+            if speed < SLOW_SPEED_MAX_UU_S:
+                time_slow += frame_dt
+            elif speed < BOOST_SPEED_MAX_UU_S:
+                time_boost_speed += frame_dt
+            else:
+                time_supersonic += frame_dt
 
-        if supersonic_active:
-            time_supersonic += frame_dt
-        elif speed < SLOW_SPEED_MAX_UU_S:
-            time_slow += frame_dt
-        elif speed < BOOST_SPEED_MAX_UU_S:
-            time_boost_speed += frame_dt
-        else:
-            # When we cross BOOST_SPEED_MAX_UU_S without supersonic state,
-            # treat the frame as boost-speed. This happens when the flag
-            # flickers off mid-transition.
-            time_boost_speed += frame_dt
-
-        # Height classification using current frame's state
-        if height <= GROUND_HEIGHT or player_frame.is_on_ground:
-            time_ground += frame_dt
-        elif height <= HIGH_AIR_HEIGHT:
-            time_low_air += frame_dt
-        else:
-            time_high_air += frame_dt
+            # Height classification using current frame's state
+            if _is_on_ground(player_frame):
+                time_ground += frame_dt
+            elif height <= HIGH_AIR_HEIGHT:
+                time_low_air += frame_dt
+            else:
+                time_high_air += frame_dt
 
         # Powerslide detection
-        is_powersliding = _detect_powerslide(player_frame)
-        if is_powersliding and not in_powerslide:
-            # Starting powerslide
-            in_powerslide = True
-            powerslide_start = frame.timestamp
-        elif not is_powersliding and in_powerslide:
-            # Ending powerslide
-            slide_duration = frame.timestamp - powerslide_start
-            if slide_duration >= MIN_POWERSLIDE_DURATION:
+        if _detect_powerslide(player_frame):
+            slide_time += frame_dt
+        elif slide_time:
+            if slide_time >= MIN_POWERSLIDE_DURATION:
                 powerslide_count += 1
-                powerslide_duration += slide_duration
-            in_powerslide = False
+                powerslide_duration += slide_time
+            slide_time = 0.0
 
         # Aerial detection
         is_aerial = height >= MIN_AERIAL_HEIGHT and not player_frame.is_on_ground
@@ -224,14 +201,11 @@ def _analyze_player_movement(frames: list[Frame], player_id: str) -> dict[str, A
                 aerial_time,
             )
 
-        prev_player_frame = player_frame
         prev_timestamp = frame.timestamp
 
-    if in_powerslide and prev_timestamp is not None:
-        slide_duration = prev_timestamp - powerslide_start
-        if slide_duration >= MIN_POWERSLIDE_DURATION:
-            powerslide_count += 1
-            powerslide_duration += slide_duration
+    if slide_time >= MIN_POWERSLIDE_DURATION:
+        powerslide_count += 1
+        powerslide_duration += slide_time
 
     if in_aerial and prev_timestamp is not None:
         aerial_count, aerial_time, _ = _close_aerial(
@@ -242,9 +216,8 @@ def _analyze_player_movement(frames: list[Frame], player_id: str) -> dict[str, A
         )
 
     avg_speed_kph = 0.0
-    if total_time > 0:
-        avg_speed_uu_s = total_speed_distance / total_time
-        avg_speed_kph = _uu_s_to_kph(avg_speed_uu_s)
+    if moving_time > 0:
+        avg_speed_kph = _uu_s_to_kph(total_distance_uu / moving_time)
 
     distance_km = _uu_to_km(total_distance_uu)
     max_speed_kph = _uu_s_to_kph(max_speed_uu_s)
@@ -321,22 +294,14 @@ def _calculate_speed(velocity: Vec3) -> float:
     return math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
 
 
-def _horizontal_speed(velocity: Vec3) -> float:
-    """Ground-plane speed magnitude."""
-    return math.hypot(velocity.x, velocity.y)
-
-
-def _distance_between_positions(current: Vec3, previous: Vec3) -> float:
-    """Compute Euclidean distance between two positions in UU."""
-    dx = current.x - previous.x
-    dy = current.y - previous.y
-    dz = current.z - previous.z
-    return math.sqrt(dx * dx + dy * dy + dz * dz)
+def _is_on_ground(player: PlayerFrame) -> bool:
+    """Judge by height: the parser's flag stops at 18uu, under some cars at rest."""
+    return player.position.z <= GROUND_HEIGHT or player.sleeping
 
 
 def _detect_powerslide(current: PlayerFrame) -> bool:
     """A powerslide is the handbrake held on the ground; held in the air it's not."""
-    return bool(current.handbrake) and current.is_on_ground
+    return bool(current.handbrake) and _is_on_ground(current)
 
 
 def _close_aerial(
@@ -351,27 +316,6 @@ def _close_aerial(
         aerial_count += 1
         aerial_time += air_duration
     return aerial_count, aerial_time, False
-
-
-def _update_supersonic_state(
-    supersonic_active: bool,
-    linear_speed: float,
-    horizontal_speed: float,
-    supersonic_flag: bool,
-) -> bool:
-    """Return updated supersonic state with hysteresis and flag awareness."""
-    if supersonic_flag:
-        return True
-    if horizontal_speed >= SUPERSONIC_ENTRY_UU_S:
-        return True
-    if (
-        linear_speed >= SUPERSONIC_ENTRY_UU_S
-        and horizontal_speed >= SUPERSONIC_EXIT_UU_S
-    ):
-        return True
-    if supersonic_active and horizontal_speed >= SUPERSONIC_EXIT_UU_S:
-        return True
-    return False
 
 
 def _uu_s_to_kph(speed_uu_s: float) -> float:

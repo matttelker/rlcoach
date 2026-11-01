@@ -32,8 +32,6 @@ from ..parser.types import Frame, Header
 # Boost analysis thresholds (zero and full match Ballchasing's benchmarks)
 ZERO_BOOST_THRESHOLD = 0.0
 FULL_BOOST_THRESHOLD = 100.0
-OVERFILL_THRESHOLD = 80.0  # Overfill when collecting above this amount
-OVERFILL_BASELINE = 85.0  # Baseline boost level for wasted big-pad capacity
 SUPERSONIC_SPEED_THRESHOLD = 2300.0  # Speed at which boost provides minimal benefit
 WASTE_DETECTION_MIN_BOOST = 10.0  # Minimum boost to consider for waste detection
 BIG_GAIN_THRESHOLD = 70.0
@@ -158,9 +156,11 @@ def _analyze_player_boost(
 
     time_zero_boost = 0.0
     time_hundred_boost = 0.0
-    total_boost_sum = 0.0
-    frame_count = 0
+    update_sum = 0.0
+    update_count = 0
     waste = 0.0
+    stretch_seconds = 0.0
+    stretch_cut_short = False
 
     prev_boost = None
     prev_speed = None
@@ -171,22 +171,15 @@ def _analyze_player_boost(
         if not player_frame:
             continue
 
-        frame_count += 1
         boost_amount = player_frame.boost_amount
-        total_boost_sum += boost_amount
+        stretch_cut_short = stretch_cut_short or player_frame.is_demolished
 
         if prev_timestamp is not None:
             time_delta = frame.timestamp - prev_timestamp
             if time_delta > PAUSE_GAP_SECONDS:
                 time_delta = 0.0
-
-            # Time at zero boost (use previous boost level)
-            if prev_boost is not None and prev_boost <= ZERO_BOOST_THRESHOLD:
-                time_zero_boost += time_delta
-
-            # Time at full boost (use previous boost level)
-            if prev_boost is not None and prev_boost >= FULL_BOOST_THRESHOLD:
-                time_hundred_boost += time_delta
+                stretch_cut_short = True
+            stretch_seconds += time_delta
 
             # Waste detection - boost spent at supersonic or with minimal benefit
             if prev_boost is not None and prev_boost > boost_amount:
@@ -207,6 +200,20 @@ def _analyze_player_boost(
                     and boost_consumed > WASTE_DETECTION_MIN_BOOST
                 ):
                     waste += boost_consumed * 0.3  # Partial waste
+
+        # Ballchasing averages over updates, not time, and only counts a stretch
+        # at empty or full that the next update closed. One cut short by a goal,
+        # a demo or the end of the game counts for nothing.
+        if boost_amount != prev_boost:
+            update_sum += boost_amount
+            update_count += 1
+            if not stretch_cut_short and not _is_kickoff_hold(frame):
+                if prev_boost is not None and prev_boost <= ZERO_BOOST_THRESHOLD:
+                    time_zero_boost += stretch_seconds
+                if prev_boost is not None and prev_boost >= FULL_BOOST_THRESHOLD:
+                    time_hundred_boost += stretch_seconds
+            stretch_seconds = 0.0
+            stretch_cut_short = player_frame.is_demolished
 
         prev_boost = boost_amount
         prev_speed = (
@@ -245,8 +252,6 @@ def _analyze_player_boost(
             overfill += _compute_overfill(
                 pickup.pad_type,
                 _to_float(pickup.boost_before),
-                _to_float(pickup.boost_after),
-                gain,
             )
 
     elif delta_events:
@@ -265,7 +270,6 @@ def _analyze_player_boost(
 
             pickup_match: BoostPickupEvent | None = None
             match_before = None
-            match_after = None
             event_pos = event.get("position")
             pos_y: float | None = event_pos.y if event_pos is not None else None
 
@@ -283,7 +287,6 @@ def _analyze_player_boost(
                     used_pickups.add(match_idx)
                     pickup_match = candidate
                     match_before = candidate.boost_before
-                    match_after = candidate.boost_after
 
             if pickup_match is not None:
                 pad_type = pickup_match.pad_type
@@ -324,7 +327,6 @@ def _analyze_player_boost(
                 if pos_y is None:
                     pos_y = 0.0
                 match_before = event["before"]
-                match_after = event["after"]
 
             if pos_y is None:
                 pos_y = 0.0
@@ -347,23 +349,15 @@ def _analyze_player_boost(
                     stolen_small_pads += small_count
 
             before_val = _to_float(match_before)
-            after_val = _to_float(match_after)
             if before_val is None:
                 before_val = event["before"]
-            if after_val is None:
-                after_val = event["after"]
-            overfill += _compute_overfill(
-                pad_type,
-                before_val,
-                after_val,
-                gain,
-            )
+            overfill += _compute_overfill(pad_type, before_val)
 
     minutes = max(play_seconds / 60.0, 1.0)  # Avoid division by zero
     bpm = amount_collected / minutes
     bcpm = (big_pads + small_pads) / minutes
 
-    avg_boost = total_boost_sum / frame_count if frame_count > 0 else 0.0
+    avg_boost = update_sum / update_count if update_count > 0 else 0.0
 
     return {
         "bpm": round(bpm, 2),
@@ -426,29 +420,14 @@ def _resolve_pickup_gain(pickup: BoostPickupEvent) -> float:
 # Boost pickup helpers --------------------------------------------------------
 
 
-def _compute_overfill(
-    pad_type: str,
-    boost_before: float | None,
-    boost_after: float | None,
-    gain: float,
-) -> float:
-    """Estimate wasted pad capacity (unused potential from the collected pad)."""
-    pad_capacity = 100.0 if pad_type == "BIG" else SMALL_PAD_UNIT
-    before = boost_before if boost_before is not None else 0.0
-    after = boost_after if boost_after is not None else before + gain
+def _compute_overfill(pad_type: str, boost_before: float | None) -> float:
+    """Boost a big pad had no room for, which is all the tank held before it.
 
-    if pad_type != "BIG":
-        if before >= OVERFILL_THRESHOLD:
-            return max(0.0, pad_capacity - gain)
+    Small pads are left out, as Ballchasing's overfill mostly leaves them out too.
+    """
+    if pad_type != "BIG" or boost_before is None:
         return 0.0
-
-    if before < OVERFILL_THRESHOLD:
-        return 0.0
-
-    baseline = max(before, OVERFILL_BASELINE)
-    used = max(0.0, after - baseline)
-    wasted = max(0.0, pad_capacity - used)
-    return wasted
+    return boost_before
 
 
 def _infer_pad_from_position(position: Vec3 | None) -> tuple[Any | None, float]:

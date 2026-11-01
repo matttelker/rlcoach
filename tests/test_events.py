@@ -1384,6 +1384,39 @@ class TestParserAuthorityPreference:
         assert demos[0].attacker is None
         assert demos[0].source == "parser"
 
+    def test_parser_demos_drop_late_echo_at_the_same_spot(self):
+        """Seen 4.1s after a real demo, past the respawn, at the car's old spot."""
+
+        def demo_frame(timestamp: float) -> Frame:
+            frame = create_test_frame(
+                timestamp,
+                Vec3(0.0, 0.0, 93.15),
+                Vec3(0.0, 0.0, 0.0),
+                [
+                    create_test_player("victim", 0, Vec3(500.0, 0.0, 17.0)),
+                    create_test_player("attacker", 1, Vec3(540.0, 0.0, 17.0)),
+                ],
+            )
+            return Frame(
+                timestamp=frame.timestamp,
+                ball=frame.ball,
+                players=frame.players,
+                parser_demo_events=[
+                    ParserDemoEvent(
+                        timestamp=timestamp,
+                        victim_id="victim",
+                        attacker_id="attacker",
+                        victim_team=0,
+                        attacker_team=1,
+                    )
+                ],
+            )
+
+        demos = detect_demos([demo_frame(388.1), demo_frame(392.2)])
+
+        assert len(demos) == 1
+        assert demos[0].t == 388.1
+
     def test_parser_demos_drop_same_victim_location_echoes(self):
         frames = [
             create_test_frame(

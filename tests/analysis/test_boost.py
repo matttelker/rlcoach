@@ -255,9 +255,7 @@ def test_overfill_and_waste_metrics():
     events = {"boost_pickups": pickups}
     result = analyze_boost(frames, events, player_id="p1")
 
-    assert (
-        result["overfill"] == 95.0
-    )  # Big pad waste: 100 capacity - 5 gain = 95 wasted units
+    assert result["overfill"] == 95.0  # 95 in the tank; the small pad doesn't count
     assert result["waste"] > 0.0  # Supersonic consumption detected between 0-5 seconds
 
 

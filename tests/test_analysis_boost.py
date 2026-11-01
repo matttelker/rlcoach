@@ -1,5 +1,6 @@
 """Tests for boost analysis."""
 
+from dataclasses import replace
 from unittest.mock import Mock
 
 from rlcoach.analysis.boost import analyze_boost
@@ -19,6 +20,9 @@ def create_test_frame(timestamp: float, players: list[PlayerFrame]) -> Frame:
         ),
         players=players,
     )
+
+
+MOVING = Vec3(500.0, 0.0, 0.0)  # A parked car and a still ball read as a kickoff
 
 
 def create_test_player(
@@ -197,7 +201,8 @@ class TestBoostAnalysis:
         boosts = [0, 0, 50, 100, 100, 100, 30]
         frames = [
             create_test_frame(
-                float(second), [create_test_player("player1", 0, boost=b)]
+                float(second),
+                [create_test_player("player1", 0, boost=b, velocity=MOVING)],
             )
             for second, b in enumerate(boosts)
         ]
@@ -208,9 +213,7 @@ class TestBoostAnalysis:
 
         assert result["time_zero_boost_s"] == 2.0  # 0-2s at zero boost
         assert result["time_full_boost_s"] == 3.0  # 3-6s at full boost
-        assert (
-            abs(result["avg_boost"] - 54.29) < 0.1
-        )  # Average of all boost amounts (allow small rounding)
+        assert result["avg_boost"] == 45.0  # Over updates: 0, 50, 100, 30
 
     def test_almost_empty_or_full_does_not_count(self):
         """Zero and full mean exactly that, as Ballchasing counts them."""
@@ -227,24 +230,80 @@ class TestBoostAnalysis:
         assert result["time_zero_boost_s"] == 0.0
         assert result["time_full_boost_s"] == 0.0
 
-    def test_goal_replay_pause_is_not_time_at_zero_or_full(self):
-        empty = [create_test_player("player1", 0, boost=0)]
-        full = [create_test_player("player1", 0, boost=100)]
+    def test_stretch_cut_short_by_a_goal_does_not_count(self):
+        empty = [create_test_player("player1", 0, boost=0, velocity=MOVING)]
+        reset = [create_test_player("player1", 0, boost=33, velocity=MOVING)]
         frames = [
             create_test_frame(0.0, empty),
             create_test_frame(1.0, empty),
-            create_test_frame(11.0, full),
-            create_test_frame(12.0, full),
-            create_test_frame(22.0, full),
+            create_test_frame(11.0, reset),
+            create_test_frame(12.0, reset),
         ]
 
         result = analyze_boost(frames, {}, player_id="player1")
 
-        assert result["time_zero_boost_s"] == 1.0
-        assert result["time_full_boost_s"] == 1.0
+        assert result["time_zero_boost_s"] == 0.0
+
+    def test_stretch_cut_short_at_the_kickoff_does_not_count(self):
+        full = [create_test_player("player1", 0, boost=100, velocity=MOVING)]
+        reset = [create_test_player("player1", 0, boost=33)]
+        frames = [
+            create_test_frame(0.0, full),
+            create_test_frame(1.0, full),
+            create_test_frame(2.0, reset),
+            create_test_frame(3.0, reset),
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["time_full_boost_s"] == 0.0
+
+    def test_stretch_cut_short_by_a_demo_does_not_count(self):
+        full = create_test_player("player1", 0, boost=100, velocity=MOVING)
+        dead = replace(full, is_demolished=True)
+        reset = create_test_player("player1", 0, boost=33, velocity=MOVING)
+        frames = [
+            create_test_frame(0.0, [full]),
+            create_test_frame(1.0, [full]),
+            create_test_frame(2.0, [dead]),
+            create_test_frame(3.0, [reset]),
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["time_full_boost_s"] == 0.0
+
+    def test_stretch_open_at_the_end_of_the_game_does_not_count(self):
+        boosts = [50, 0, 0, 0]
+        frames = [
+            create_test_frame(
+                float(second),
+                [create_test_player("player1", 0, boost=b, velocity=MOVING)],
+            )
+            for second, b in enumerate(boosts)
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["time_zero_boost_s"] == 0.0
+
+    def test_avg_boost_counts_a_tank_sitting_still_once(self):
+        """Ballchasing averages over updates, not over time."""
+        boosts = [100, 100, 100, 100, 50]
+        frames = [
+            create_test_frame(
+                float(second),
+                [create_test_player("player1", 0, boost=b, velocity=MOVING)],
+            )
+            for second, b in enumerate(boosts)
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["avg_boost"] == 75.0
 
     def test_overfill_detection(self):
-        """Test overfill calculation when collecting boost above threshold."""
+        """A big pad overfills by everything already in the tank."""
         frames = [
             create_test_frame(
                 0.0, [create_test_player("player1", 0, boost=85)]
@@ -299,9 +358,7 @@ class TestBoostAnalysis:
 
         result = analyze_boost(frames, events, player_id="player1")
 
-        assert (
-            result["overfill"] == 180.0
-        )  # 85 wasted + 95 wasted on two big-pad pickups
+        assert result["overfill"] == 200.0  # 85 + 95 + 20 already in the tank
 
     def test_boost_waste_detection(self):
         """Test boost waste detection during supersonic speeds."""
