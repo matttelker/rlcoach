@@ -4,9 +4,7 @@
 # MAJOR: Breaking changes to schema structure
 # MINOR: New fields added (backward compatible)
 # PATCH: Bug fixes and clarifications
-SCHEMA_VERSION = (
-    "1.0.1"  # Bumped for boost key renames (amount_collected -> boost_collected, etc.)
-)
+SCHEMA_VERSION = "1.0.2"  # Bumped for UU fix: km/h, km and depth values rescaled
 
 # Package version
 PACKAGE_VERSION = "0.1.0"

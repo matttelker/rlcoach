@@ -4,17 +4,17 @@ This module centralizes game physics constants used across analysis modules.
 All values are in Unreal Units (UU) unless otherwise noted.
 
 References:
-- RLBot wiki: https://wiki.rlbot.org/botmaking/useful-game-values/
+- RLBot wiki: https://wiki.rlbot.org/v4/botmaking/useful-game-values/
 - Community research and empirical measurements
 """
 
 from __future__ import annotations
 
-# 1 UU ≈ 1.9 cm = 0.019 m (empirical measurement)
-UU_TO_METERS: float = 0.019
+# 1 UU = 1 cm = 0.01 m (RLBot wiki: 2778 UU/s = 100 km/h)
+UU_TO_METERS: float = 0.01
 
-# Convert UU/s to km/h: multiply by 0.019 (m per UU) * 3.6 (s/h / m/km)
-UU_S_TO_KPH: float = UU_TO_METERS * 3.6  # ≈ 0.0684
+# Convert UU/s to km/h: multiply by 0.01 (m per UU) * 3.6 (km/h per m/s)
+UU_S_TO_KPH: float = UU_TO_METERS * 3.6  # = 0.036, so 2300 UU/s = 82.8 km/h
 
 
 # Speed categories aligned with community standards

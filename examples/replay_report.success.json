@@ -228,9 +228,9 @@
           "waste": 95
         },
         "movement": {
-          "avg_speed_kph": 117.4,
-          "distance_km": 12.51,
-          "max_speed_kph": 199.58,
+          "avg_speed_kph": 44.2,
+          "distance_km": 6.58,
+          "max_speed_kph": 82.8,
           "time_slow_s": 498.1,
           "time_boost_speed_s": 402.7,
           "time_supersonic_s": 95.3,
@@ -270,7 +270,7 @@
           "losses": 12,
           "neutral": 7,
           "first_to_ball_pct": 56.8,
-          "challenge_depth_m": 12.3,
+          "challenge_depth_m": 6.47,
           "risk_index_avg": 0.31
         },
         "kickoffs": {
@@ -316,9 +316,9 @@
           "waste": 110
         },
         "movement": {
-          "avg_speed_kph": 115.8,
-          "distance_km": 12.34,
-          "max_speed_kph": 196.86,
+          "avg_speed_kph": 43.6,
+          "distance_km": 6.49,
+          "max_speed_kph": 82.8,
           "time_slow_s": 512.4,
           "time_boost_speed_s": 387.2,
           "time_supersonic_s": 88.7,
@@ -358,7 +358,7 @@
           "losses": 18,
           "neutral": 2,
           "first_to_ball_pct": 43.2,
-          "challenge_depth_m": -8.7,
+          "challenge_depth_m": -4.58,
           "risk_index_avg": 0.38
         },
         "kickoffs": {
@@ -407,9 +407,9 @@
           "waste": 23
         },
         "movement": {
-          "avg_speed_kph": 118.9,
-          "distance_km": 12.67,
-          "max_speed_kph": 202.13,
+          "avg_speed_kph": 44.8,
+          "distance_km": 6.67,
+          "max_speed_kph": 82.8,
           "time_slow_s": 165.4,
           "time_boost_speed_s": 138.2,
           "time_supersonic_s": 31.1,
@@ -449,7 +449,7 @@
           "losses": 3,
           "neutral": 3,
           "first_to_ball_pct": 61.5,
-          "challenge_depth_m": 10.8,
+          "challenge_depth_m": 5.68,
           "risk_index_avg": 0.28
         },
         "kickoffs": {
