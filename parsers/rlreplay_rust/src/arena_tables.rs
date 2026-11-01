@@ -9,9 +9,12 @@
 ///   "orange" — pad is in the orange team's half (y > 2000 approximately)
 ///   "mid"    — pad is in the midfield zone (abs(y) <= 2000)
 ///
-/// Snap tolerances (default):
-///   big pads:   200 uu
-///   small pads: 160 uu
+/// Snap tolerances (default): 450 uu for both pad types.
+///
+/// Pads never replicate a position, so they are located from the instigating
+/// car, whose centre is well outside the pad radius when its hitbox touches it
+/// (p50 183/216 uu, p99.9 428/412 uu for small/big across 3590 real pickups).
+/// The nearest pad is unambiguous below half the 1061 uu minimum pad separation.
 
 #[derive(Clone, Copy, Debug)]
 pub struct ArenaPadDef {
@@ -31,8 +34,8 @@ pub struct SnapResult {
 }
 
 /// Default snap tolerances in uu.
-pub const SNAP_TOLERANCE_BIG_UU: f32 = 200.0;
-pub const SNAP_TOLERANCE_SMALL_UU: f32 = 160.0;
+pub const SNAP_TOLERANCE_BIG_UU: f32 = 450.0;
+pub const SNAP_TOLERANCE_SMALL_UU: f32 = 450.0;
 
 fn distance_3d(ax: f32, ay: f32, az: f32, b: &ArenaPadDef) -> f32 {
     let dx = ax - b.x;
@@ -41,18 +44,23 @@ fn distance_3d(ax: f32, ay: f32, az: f32, b: &ArenaPadDef) -> f32 {
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
+/// Whether a point is close enough to `pad` to have touched it.
+pub fn within_snap_tolerance(pad: &ArenaPadDef, x: f32, y: f32, z: f32) -> bool {
+    let tolerance = if pad.is_big {
+        SNAP_TOLERANCE_BIG_UU
+    } else {
+        SNAP_TOLERANCE_SMALL_UU
+    };
+    distance_3d(x, y, z, pad) <= tolerance
+}
+
 /// Try to snap an observed pad position to the nearest canonical pad definition.
 /// Returns `None` if no candidate is within the snap tolerance.
 pub fn snap_to_pad(pads: &[ArenaPadDef], x: f32, y: f32, z: f32) -> Option<SnapResult> {
     let mut best: Option<(f32, usize)> = None;
     for (idx, pad) in pads.iter().enumerate() {
         let dist = distance_3d(x, y, z, pad);
-        let tolerance = if pad.is_big {
-            SNAP_TOLERANCE_BIG_UU
-        } else {
-            SNAP_TOLERANCE_SMALL_UU
-        };
-        if dist <= tolerance {
+        if within_snap_tolerance(pad, x, y, z) {
             match best {
                 None => best = Some((dist, idx)),
                 Some((best_dist, _)) if dist < best_dist => best = Some((dist, idx)),
@@ -99,7 +107,7 @@ pub fn pad_table_for_slug(slug: &str) -> Option<&'static [ArenaPadDef]> {
 pub static SOCCAR_PADS: &[ArenaPadDef] = &[
     ArenaPadDef {
         id: 0,
-        x: -3584.0,
+        x: -3072.0,
         y: -4096.0,
         z: 73.0,
         is_big: true,
@@ -107,7 +115,7 @@ pub static SOCCAR_PADS: &[ArenaPadDef] = &[
     },
     ArenaPadDef {
         id: 1,
-        x: 3584.0,
+        x: 3072.0,
         y: -4096.0,
         z: 73.0,
         is_big: true,
@@ -115,7 +123,7 @@ pub static SOCCAR_PADS: &[ArenaPadDef] = &[
     },
     ArenaPadDef {
         id: 2,
-        x: -3584.0,
+        x: -3072.0,
         y: 4096.0,
         z: 73.0,
         is_big: true,
@@ -123,7 +131,7 @@ pub static SOCCAR_PADS: &[ArenaPadDef] = &[
     },
     ArenaPadDef {
         id: 3,
-        x: 3584.0,
+        x: 3072.0,
         y: 4096.0,
         z: 73.0,
         is_big: true,
@@ -131,19 +139,19 @@ pub static SOCCAR_PADS: &[ArenaPadDef] = &[
     },
     ArenaPadDef {
         id: 4,
-        x: 0.0,
-        y: -4608.0,
+        x: -3584.0,
+        y: 0.0,
         z: 73.0,
         is_big: true,
-        side: "blue",
+        side: "mid",
     },
     ArenaPadDef {
         id: 5,
-        x: 0.0,
-        y: 4608.0,
+        x: 3584.0,
+        y: 0.0,
         z: 73.0,
         is_big: true,
-        side: "orange",
+        side: "mid",
     },
     ArenaPadDef {
         id: 6,
@@ -415,12 +423,53 @@ mod tests {
 
     #[test]
     fn test_snap_within_tolerance() {
-        // Slight offset from big pad 0 — within 200 uu
-        let result = snap_to_pad(SOCCAR_PADS, -3584.0 + 50.0, -4096.0 + 50.0, 73.0);
+        // Slight offset from big pad 0
+        let result = snap_to_pad(SOCCAR_PADS, -3072.0 + 50.0, -4096.0 + 50.0, 73.0);
         assert!(result.is_some());
         let r = result.unwrap();
         assert_eq!(r.pad_def.id, 0);
         assert!(r.snap_error_uu < SNAP_TOLERANCE_BIG_UU);
+    }
+
+    #[test]
+    fn test_big_pads_match_game_positions() {
+        // Six objects respawn in 10s and cars cluster at these points in real
+        // replays; matches the RLBot field reference.
+        let big: Vec<(f32, f32)> = SOCCAR_PADS
+            .iter()
+            .filter(|p| p.is_big)
+            .map(|p| (p.x, p.y))
+            .collect();
+        for expected in [
+            (-3072.0, -4096.0),
+            (3072.0, -4096.0),
+            (-3072.0, 4096.0),
+            (3072.0, 4096.0),
+            (-3584.0, 0.0),
+            (3584.0, 0.0),
+        ] {
+            assert!(big.contains(&expected), "missing big pad {expected:?}");
+        }
+    }
+
+    #[test]
+    fn test_snap_tolerance_cannot_be_ambiguous() {
+        // No point may sit inside the tolerance of two pads.
+        let mut min_separation = f32::MAX;
+        for (i, a) in SOCCAR_PADS.iter().enumerate() {
+            for b in &SOCCAR_PADS[i + 1..] {
+                min_separation = min_separation.min(distance_3d(a.x, a.y, a.z, b));
+            }
+        }
+        assert!(SNAP_TOLERANCE_BIG_UU < min_separation / 2.0);
+        assert!(SNAP_TOLERANCE_SMALL_UU < min_separation / 2.0);
+    }
+
+    #[test]
+    fn test_snap_pickup_distance_car_centre() {
+        // Median car-centre distance at a real small pad pickup.
+        let result = snap_to_pad(SOCCAR_PADS, 183.0, -4240.0, 70.0);
+        assert_eq!(result.unwrap().pad_def.id, 6);
     }
 
     #[test]

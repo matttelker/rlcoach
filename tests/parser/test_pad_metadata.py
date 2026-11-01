@@ -2,16 +2,19 @@
 
 Verifies that schemas/boost_pad_tables.json is well-formed and that sample
 positions from known arenas snap within the documented tolerances:
-  - big pads  : < 120 uu (stricter than the 200 uu default)
-  - small pads: < 180 uu (stricter than the 160 uu default)
+  - big pads  : < 120 uu (stricter than the 450 uu default)
+  - small pads: < 180 uu (stricter than the 450 uu default)
 """
 
 from __future__ import annotations
 
 import json
+from itertools import combinations
 from pathlib import Path
 
 import pytest
+
+from rlcoach.field_constants import FieldConstants
 
 
 def _schema_path() -> Path:
@@ -79,20 +82,46 @@ class TestBoostPadTablesSchema:
         sides = {p["side"] for p in pads}
         assert sides == {"blue", "orange", "mid"}
 
-    def test_big_pads_have_no_mid_side(self, pad_tables: dict) -> None:
+    def test_big_pads_match_game_positions(self, pad_tables: dict) -> None:
+        """Four corners plus two midfield side pads, as measured from replays."""
         pads = pad_tables["arenas"]["_default_soccar"]["pads"]
-        for pad in pads:
-            if pad["is_big"]:
-                assert (
-                    pad["side"] != "mid"
-                ), f"Big pad {pad['id']} incorrectly classified as mid"
+        big = {(p["x"], p["y"]): p["side"] for p in pads if p["is_big"]}
+        assert big == {
+            (-3072.0, -4096.0): "blue",
+            (3072.0, -4096.0): "blue",
+            (-3072.0, 4096.0): "orange",
+            (3072.0, 4096.0): "orange",
+            (-3584.0, 0.0): "mid",
+            (3584.0, 0.0): "mid",
+        }
+
+    def test_python_table_matches_schema(self, pad_tables: dict) -> None:
+        """The hard-coded fallback must not drift from the canonical table."""
+        pads = pad_tables["arenas"]["_default_soccar"]["pads"]
+        big = [(p["x"], p["y"], p["z"]) for p in pads if p["is_big"]]
+        fallback = [(v.x, v.y, v.z) for v in FieldConstants.BIG_BOOST_POSITIONS]
+        assert fallback == big
 
     def test_snap_tolerances_present(self, pad_tables: dict) -> None:
         tols = pad_tables.get("snap_tolerances", {})
         assert "small_uu" in tols
         assert "big_uu" in tols
-        assert tols["small_uu"] <= 200
-        assert tols["big_uu"] <= 200
+
+    def test_snap_tolerances_reach_real_pickups(self, pad_tables: dict) -> None:
+        """Car centres sit up to 428 uu out at p99.9, so tolerances must cover it."""
+        tols = pad_tables["snap_tolerances"]
+        assert tols["small_uu"] >= 428
+        assert tols["big_uu"] >= 412
+
+    def test_snap_tolerances_cannot_be_ambiguous(self, pad_tables: dict) -> None:
+        """No point may sit inside the tolerance of two pads."""
+        pads = pad_tables["arenas"]["_default_soccar"]["pads"]
+        min_separation = min(
+            _distance(a["x"], a["y"], a["z"], b["x"], b["y"], b["z"])
+            for a, b in combinations(pads, 2)
+        )
+        tols = pad_tables["snap_tolerances"]
+        assert max(tols["small_uu"], tols["big_uu"]) < min_separation / 2
 
     def test_arena_map_keys(self, pad_tables: dict) -> None:
         arena_map = pad_tables.get("arena_map", {})

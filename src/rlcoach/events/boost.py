@@ -123,10 +123,9 @@ def _detect_boost_pickups_from_pad_events(
                 if candidate in players_by_id:
                     player_id = candidate
             if player_id is None:
-                raise ValueError(
-                    "Missing player attribution for boost pad event; "
-                    "falling back to legacy detection"
-                )
+                # A car can collect before its player binding arrives (about 0.3%
+                # of pickups). Dropping one beats discarding every pad event.
+                continue
 
             player_frame = players_by_id.get(player_id)
             player_team = getattr(event, "player_team", None)

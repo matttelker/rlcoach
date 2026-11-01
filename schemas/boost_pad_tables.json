@@ -1,9 +1,9 @@
 {
   "_comment": "Canonical boost pad tables for Rocket League arenas. Coordinates in Unreal Units (uu). Source: RLBot community pad tables (https://github.com/RLBot/RLBot) cross-referenced with Rocket League network telemetry. Blue team defends negative Y (y < 0). Orange team defends positive Y (y > 0). Midfield pads have abs(y) < 2000. Non-Soccar arenas (Hoops, Dropshot) are not supported; document only.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "snap_tolerances": {
-    "small_uu": 160,
-    "big_uu": 200
+    "small_uu": 450,
+    "big_uu": 450
   },
   "supported_arenas": [
     "DFHStadium",
@@ -28,12 +28,12 @@
     "_default_soccar": {
       "description": "Standard Soccar field layout shared by DFH Stadium, Champions Field, Mannfield, Beckwith Park, Urban Central, Utopia Coliseum, Wasteland, Neo Tokyo, Aqua Dome, Farmstead, Sunset Stadium, and Sovereign. All use the same canonical pad positions.",
       "pads": [
-        {"id": 0,  "x": -3584.0, "y": -4096.0, "z": 73.0, "is_big": true,  "side": "blue"},
-        {"id": 1,  "x":  3584.0, "y": -4096.0, "z": 73.0, "is_big": true,  "side": "blue"},
-        {"id": 2,  "x": -3584.0, "y":  4096.0, "z": 73.0, "is_big": true,  "side": "orange"},
-        {"id": 3,  "x":  3584.0, "y":  4096.0, "z": 73.0, "is_big": true,  "side": "orange"},
-        {"id": 4,  "x":     0.0, "y": -4608.0, "z": 73.0, "is_big": true,  "side": "blue"},
-        {"id": 5,  "x":     0.0, "y":  4608.0, "z": 73.0, "is_big": true,  "side": "orange"},
+        {"id": 0,  "x": -3072.0, "y": -4096.0, "z": 73.0, "is_big": true,  "side": "blue"},
+        {"id": 1,  "x":  3072.0, "y": -4096.0, "z": 73.0, "is_big": true,  "side": "blue"},
+        {"id": 2,  "x": -3072.0, "y":  4096.0, "z": 73.0, "is_big": true,  "side": "orange"},
+        {"id": 3,  "x":  3072.0, "y":  4096.0, "z": 73.0, "is_big": true,  "side": "orange"},
+        {"id": 4,  "x": -3584.0, "y":     0.0, "z": 73.0, "is_big": true,  "side": "mid"},
+        {"id": 5,  "x":  3584.0, "y":     0.0, "z": 73.0, "is_big": true,  "side": "mid"},
         {"id": 6,  "x":     0.0, "y": -4240.0, "z": 70.0, "is_big": false, "side": "blue"},
         {"id": 7,  "x": -1792.0, "y": -4184.0, "z": 70.0, "is_big": false, "side": "blue"},
         {"id": 8,  "x":  1792.0, "y": -4184.0, "z": 70.0, "is_big": false, "side": "blue"},
