@@ -15,9 +15,16 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from itertools import groupby, pairwise
 from typing import Any
 
 from ..events import PAD_NEUTRAL_TOLERANCE, BoostPickupEvent
+from ..events.constants import (
+    BALL_STATIONARY_THRESHOLD,
+    KICKOFF_CENTER_POSITION,
+    KICKOFF_POSITION_TOLERANCE,
+)
+from ..events.utils import vector_magnitude
 from ..field_constants import FIELD, Vec3
 from ..parser.types import Frame, Header
 
@@ -35,6 +42,12 @@ PAD_EVENT_MATCH_WINDOW = 1.1
 PAD_GAIN_MISMATCH_TOLERANCE = 24.0
 FALLBACK_BIG_GAIN_THRESHOLD = 45.0
 PAD_POSITION_TRUST_RADIUS_SQ = 600.0 * 600.0
+PAUSE_GAP_SECONDS = 1.0  # A longer gap between frames is a goal replay
+KICKOFF_COUNTDOWN_SECONDS = 3.0
+# Real holds last 3.1s or more, other still moments under 1s (11 real replays)
+KICKOFF_HOLD_MIN_SECONDS = 2.0
+KICKOFF_CAR_STILL_SPEED = 50.0
+BALL_REST_HEIGHT_TOLERANCE = 60.0
 
 
 def analyze_boost(
@@ -73,19 +86,65 @@ def analyze_boost(
     """
     boost_pickups = events.get("boost_pickups", [])
 
-    match_duration = frames[-1].timestamp - frames[0].timestamp if frames else 0.0
+    play_seconds = _active_play_seconds(frames)
     frame_timestamps = [frame.timestamp for frame in frames]
 
     if player_id:
         return _analyze_player_boost(
-            frames, frame_timestamps, boost_pickups, player_id, match_duration
+            frames, frame_timestamps, boost_pickups, player_id, play_seconds
         )
     elif team:
         return _analyze_team_boost(
-            frames, frame_timestamps, boost_pickups, team, match_duration
+            frames, frame_timestamps, boost_pickups, team, play_seconds
         )
     else:
         return _empty_boost()
+
+
+def _active_play_seconds(frames: list[Frame]) -> float:
+    """Return the seconds per-minute rates divide by, as ballchasing counts them.
+
+    Goal replays and kickoff countdowns come out of the recording, so rates compare
+    directly with ballchasing's published figures. Kickoffs are counted from frames
+    because detect_kickoffs reports several events per kickoff, and the clock
+    alignment can cut the kickoffs that follow late goals.
+    """
+    if not frames:
+        return 0.0
+
+    span = frames[-1].timestamp - frames[0].timestamp
+    gaps = (later.timestamp - earlier.timestamp for earlier, later in pairwise(frames))
+    pauses = sum(gap for gap in gaps if gap > PAUSE_GAP_SECONDS)
+
+    kickoffs = 0
+    for is_hold, stretch in groupby(frames, key=_is_kickoff_hold):
+        run = list(stretch)
+        if is_hold and run[-1].timestamp - run[0].timestamp >= KICKOFF_HOLD_MIN_SECONDS:
+            kickoffs += 1
+
+    active = span - pauses - kickoffs * KICKOFF_COUNTDOWN_SECONDS
+    return active if active > 0 else span
+
+
+def _is_kickoff_hold(frame: Frame) -> bool:
+    """Return True while the ball waits on the spot and every car is held still."""
+    ball = frame.ball
+    ball_is_set = (
+        abs(ball.position.x - KICKOFF_CENTER_POSITION.x) <= KICKOFF_POSITION_TOLERANCE
+        and abs(ball.position.y - KICKOFF_CENTER_POSITION.y)
+        <= KICKOFF_POSITION_TOLERANCE
+        and abs(ball.position.z - KICKOFF_CENTER_POSITION.z)
+        <= BALL_REST_HEIGHT_TOLERANCE
+        and vector_magnitude(ball.velocity) < BALL_STATIONARY_THRESHOLD
+    )
+    return (
+        ball_is_set
+        and bool(frame.players)
+        and all(
+            vector_magnitude(player.velocity) < KICKOFF_CAR_STILL_SPEED
+            for player in frame.players
+        )
+    )
 
 
 def _analyze_player_boost(
@@ -93,7 +152,7 @@ def _analyze_player_boost(
     frame_timestamps: Sequence[float],
     pickups: list[BoostPickupEvent],
     player_id: str,
-    match_duration: float,
+    play_seconds: float,
 ) -> dict[str, Any]:
     """Analyze boost metrics for a specific player."""
 
@@ -298,7 +357,7 @@ def _analyze_player_boost(
                 gain,
             )
 
-    minutes = max(match_duration / 60.0, 1.0)  # Avoid division by zero
+    minutes = max(play_seconds / 60.0, 1.0)  # Avoid division by zero
     bpm = amount_collected / minutes
     bcpm = (big_pads + small_pads) / minutes
 
@@ -495,7 +554,7 @@ def _analyze_team_boost(
     frame_timestamps: Sequence[float],
     pickups: list[BoostPickupEvent],
     team: str,
-    match_duration: float,
+    play_seconds: float,
 ) -> dict[str, Any]:
     """Analyze aggregated boost metrics for a team."""
 
@@ -514,7 +573,7 @@ def _analyze_team_boost(
 
     for player_id in team_players:
         player_metrics = _analyze_player_boost(
-            frames, frame_timestamps, pickups, player_id, match_duration
+            frames, frame_timestamps, pickups, player_id, play_seconds
         )
 
         # Sum most metrics
@@ -532,7 +591,7 @@ def _analyze_team_boost(
         # Average these metrics
         team_metrics["avg_boost"] += player_metrics["avg_boost"]
 
-    minutes = max(match_duration / 60.0, 1.0)
+    minutes = max(play_seconds / 60.0, 1.0)
     team_metrics["bpm"] = round(team_metrics["boost_collected"] / minutes, 2)
     team_metrics["bcpm"] = round(
         (team_metrics["big_pads"] + team_metrics["small_pads"]) / minutes, 2

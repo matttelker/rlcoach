@@ -380,6 +380,71 @@ class TestBoostAnalysis:
         assert result["bcpm"] == 1.5
         assert result["boost_collected"] == 212.0
 
+    def test_rates_use_active_play_time(self):
+        """Goal replays and kickoff countdowns should not dilute rates."""
+        held = create_test_player("player1", 0)
+        moving = create_test_player("player1", 0, velocity=Vec3(1000.0, 0.0, 0.0))
+
+        # Two kickoff holds around a 20s goal replay
+        frames = []
+        for start, end in ((0.0, 130.0), (150.0, 206.0)):
+            for step in range(int((end - start) * 2) + 1):
+                t = start + step * 0.5
+                player = held if t - start < 3.5 else moving
+                frames.append(create_test_frame(t, [player]))
+
+        pickups = [
+            BoostPickupEvent(
+                t=t,
+                player_id="player1",
+                pad_type="BIG",
+                stolen=False,
+                pad_id=0,
+                location=Vec3(3584, 0, 73),
+                frame=1,
+                boost_before=0.0,
+                boost_after=100.0,
+                boost_gain=100.0,
+            )
+            for t in (30.0, 60.0, 90.0)
+        ]
+        events = {"boost_pickups": pickups}
+
+        player = analyze_boost(frames, events, player_id="player1")
+        team = analyze_boost(frames, events, team="BLUE")
+
+        # 206s recorded - 20s replay - 6s for two kickoffs = 3 minutes of play
+        assert player["bpm"] == 100.0
+        assert player["bcpm"] == 1.0
+        assert team["bpm"] == 100.0
+
+    def test_short_still_moment_is_not_a_kickoff(self):
+        """A car and ball briefly at rest should not count as a countdown."""
+        held = create_test_player("player1", 0)
+        moving = create_test_player("player1", 0, velocity=Vec3(1000.0, 0.0, 0.0))
+
+        frames = [
+            create_test_frame(step * 0.5, [held if 100 <= step < 102 else moving])
+            for step in range(361)
+        ]
+        pickup = BoostPickupEvent(
+            t=30.0,
+            player_id="player1",
+            pad_type="BIG",
+            stolen=False,
+            pad_id=0,
+            location=Vec3(3584, 0, 73),
+            frame=1,
+            boost_before=0.0,
+            boost_after=100.0,
+            boost_gain=100.0,
+        )
+
+        result = analyze_boost(frames, {"boost_pickups": [pickup]}, player_id="player1")
+
+        # 180s of play with nothing removed = 3 minutes
+        assert result["bpm"] == 33.33
+
     def test_team_analysis_aggregation(self):
         """Test team-level boost analysis aggregation."""
         player1 = create_test_player("player1", 0, boost=50)  # Blue team

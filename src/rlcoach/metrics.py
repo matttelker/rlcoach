@@ -154,7 +154,7 @@ _register(
         unit="boost/min",
         direction=MetricDirection.HIGHER_BETTER,
         category="boost",
-        description="Boost collected per minute",
+        description="Boost collected per minute of active play",
     )
 )
 _register(
