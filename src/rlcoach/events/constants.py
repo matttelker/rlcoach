@@ -46,7 +46,9 @@ MIN_PAD_EVENT_COVERAGE = 0.5  # Share of boost-delta pickups pad events must mat
 
 # Pad neutral zone
 CENTERLINE_TOLERANCE = 1200.0  # Within this Y range is considered neutral half
-PAD_NEUTRAL_TOLERANCE = 1200.0
+PAD_NEUTRAL_TOLERANCE = 100.0  # Only halfway-line pads; the next row is 1000uu out
+
+PAUSE_GAP_SECONDS = 1.0  # A longer gap between frames is a goal replay
 
 BALL_STATIONARY_THRESHOLD = 50.0  # Ball speed for kickoff detection (units/s)
 KICKOFF_CENTER_POSITION = Vec3(0.0, 0.0, 93.15)

@@ -39,6 +39,7 @@ def create_test_player(
     is_supersonic: bool = False,
     is_on_ground: bool = True,
     is_demolished: bool = False,
+    handbrake: bool | None = None,
 ) -> PlayerFrame:
     """Helper to create test player frames."""
     if position is None:
@@ -58,6 +59,7 @@ def create_test_player(
         is_supersonic=is_supersonic,
         is_on_ground=is_on_ground,
         is_demolished=is_demolished,
+        handbrake=handbrake,
     )
 
 
@@ -269,7 +271,7 @@ class TestMovementAnalysis:
             ),
             # High air
             create_test_player(
-                "player1", 0, position=Vec3(0.0, 0.0, 600.0), is_on_ground=False
+                "player1", 0, position=Vec3(0.0, 0.0, 900.0), is_on_ground=False
             ),
         ]
 
@@ -285,42 +287,81 @@ class TestMovementAnalysis:
         assert result["time_low_air_s"] == 1.0
         assert result["time_high_air_s"] == 1.0
 
-    def test_powerslide_detection(self):
-        """Test powerslide detection based on angular velocity."""
-        players = [
-            # Starting position
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 0.0, 0.0), is_on_ground=True
-            ),
-            # High angular velocity (powersliding)
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 1.0, 0.0), is_on_ground=True
-            ),
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 2.0, 0.0), is_on_ground=True
-            ),
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 3.0, 0.0), is_on_ground=True
-            ),
-            # Back to normal
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 3.1, 0.0), is_on_ground=True
-            ),
-        ]
+    def test_high_air_starts_at_840_uu(self):
+        """Heights just under Ballchasing's line stay in low air."""
+        player = create_test_player(
+            "player1", 0, position=Vec3(0.0, 0.0, 830.0), is_on_ground=False
+        )
+        frames = [create_test_frame(float(t), [player]) for t in range(3)]
 
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["time_low_air_s"] == 3.0
+        assert result["time_high_air_s"] == 0.0
+
+    def test_goal_replay_pause_is_not_game_time(self):
+        """A gap in the frames adds one tick, not the length of the replay."""
+        player = create_test_player("player1", 0)
         frames = [
-            create_test_frame(0.0, [players[0]]),
-            create_test_frame(0.1, [players[1]]),  # High angular velocity starts
-            create_test_frame(0.2, [players[2]]),  # Continuing
-            create_test_frame(0.3, [players[3]]),  # Continuing
-            create_test_frame(0.4, [players[4]]),  # Back to normal
+            create_test_frame(0.0, [player]),
+            create_test_frame(1.0, [player]),
+            create_test_frame(11.0, [player]),
+            create_test_frame(12.0, [player]),
         ]
 
         result = analyze_movement(frames, {}, player_id="player1")
 
-        # Should detect at least one powerslide
-        assert result["powerslide_count"] >= 1
-        assert result["powerslide_duration_s"] > 0.0
+        assert result["time_ground_s"] == 4.0
+        assert result["time_slow_s"] == 4.0
+
+    def test_powerslide_detection(self):
+        """A powerslide is the handbrake held on the ground."""
+        held = [False, True, True, True, False]
+        frames = [
+            create_test_frame(
+                index * 0.1, [create_test_player("player1", 0, handbrake=h)]
+            )
+            for index, h in enumerate(held)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["powerslide_count"] == 1
+        assert result["powerslide_duration_s"] == pytest.approx(0.3)
+
+    def test_handbrake_in_the_air_is_not_a_powerslide(self):
+        frames = [
+            create_test_frame(
+                index * 0.1,
+                [
+                    create_test_player(
+                        "player1",
+                        0,
+                        position=Vec3(0.0, 0.0, 300.0),
+                        is_on_ground=False,
+                        handbrake=True,
+                    )
+                ],
+            )
+            for index in range(5)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["powerslide_count"] == 0
+
+    def test_turning_fast_without_handbrake_is_not_a_powerslide(self):
+        frames = [
+            create_test_frame(
+                index * 0.1,
+                [create_test_player("player1", 0, rotation=Vec3(0.0, index, 0.0))],
+            )
+            for index in range(5)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["powerslide_count"] == 0
 
     def test_aerial_detection(self):
         """Test aerial detection based on height and duration."""
@@ -587,7 +628,7 @@ class TestMovementAnalysis:
             create_test_player(
                 "player1",
                 0,
-                position=Vec3(0.0, 0.0, 600.0),
+                position=Vec3(0.0, 0.0, 900.0),
                 velocity=Vec3(800.0, 0.0, 0.0),
                 is_on_ground=False,
             ),

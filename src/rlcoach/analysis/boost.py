@@ -23,14 +23,15 @@ from ..events.constants import (
     BALL_STATIONARY_THRESHOLD,
     KICKOFF_CENTER_POSITION,
     KICKOFF_POSITION_TOLERANCE,
+    PAUSE_GAP_SECONDS,
 )
 from ..events.utils import vector_magnitude
 from ..field_constants import FIELD, Vec3
 from ..parser.types import Frame, Header
 
-# Boost analysis thresholds (aligned with internal metric conventions)
-ZERO_BOOST_THRESHOLD = 3.0  # Consider < 3 as "zero boost"
-FULL_BOOST_THRESHOLD = 99.0  # Consider >= 99 as "full boost"
+# Boost analysis thresholds (zero and full match Ballchasing's benchmarks)
+ZERO_BOOST_THRESHOLD = 0.0
+FULL_BOOST_THRESHOLD = 100.0
 OVERFILL_THRESHOLD = 80.0  # Overfill when collecting above this amount
 OVERFILL_BASELINE = 85.0  # Baseline boost level for wasted big-pad capacity
 SUPERSONIC_SPEED_THRESHOLD = 2300.0  # Speed at which boost provides minimal benefit
@@ -42,7 +43,6 @@ PAD_EVENT_MATCH_WINDOW = 1.1
 PAD_GAIN_MISMATCH_TOLERANCE = 24.0
 FALLBACK_BIG_GAIN_THRESHOLD = 45.0
 PAD_POSITION_TRUST_RADIUS_SQ = 600.0 * 600.0
-PAUSE_GAP_SECONDS = 1.0  # A longer gap between frames is a goal replay
 KICKOFF_COUNTDOWN_SECONDS = 3.0
 # Real holds last 3.1s or more, other still moments under 1s (11 real replays)
 KICKOFF_HOLD_MIN_SECONDS = 2.0
@@ -177,6 +177,8 @@ def _analyze_player_boost(
 
         if prev_timestamp is not None:
             time_delta = frame.timestamp - prev_timestamp
+            if time_delta > PAUSE_GAP_SECONDS:
+                time_delta = 0.0
 
             # Time at zero boost (use previous boost level)
             if prev_boost is not None and prev_boost <= ZERO_BOOST_THRESHOLD:

@@ -567,15 +567,15 @@ class TestPositioningAnalysis:
 
         frames = [
             create_test_frame(0.0, ball_positions[0], players[0]),
-            create_test_frame(2.0, ball_positions[1], players[1]),  # 2s duration
-            create_test_frame(3.0, ball_positions[2], players[2]),  # 1s duration
+            create_test_frame(0.5, ball_positions[1], players[1]),  # 0.5s duration
+            create_test_frame(1.5, ball_positions[2], players[2]),  # 1s duration
         ]
 
         result = analyze_positioning(frames, {}, player_id="player1")
 
         # Verify field third distribution
-        # Frame durations: 2s (defensive), 1s (neutral), 1s (offensive, estimated)
-        assert result["time_defensive_third_s"] == 2.0
+        # Frame durations: 0.5s (defensive), 1s (neutral), 1s (offensive, estimated)
+        assert result["time_defensive_third_s"] == 0.5
         assert result["time_middle_third_s"] == 1.0
         assert (
             result["time_offensive_third_s"] == 1.0
@@ -584,6 +584,25 @@ class TestPositioningAnalysis:
         # Verify distance calculations include all frames
         assert result["avg_distance_to_ball_m"] > 0.0
         assert result["avg_distance_to_teammate_m"] > 0.0
+
+    def test_goal_replay_pause_is_not_field_time(self):
+        """A gap in the frames must not credit its whole length to one third."""
+        ball = Vec3(0.0, 0.0, 93.15)
+        defending = [
+            create_test_player("player1", 0, position=Vec3(0.0, -3000.0, 17.0))
+        ]
+        attacking = [create_test_player("player1", 0, position=Vec3(0.0, 3000.0, 17.0))]
+        frames = [
+            create_test_frame(0.0, ball, defending),
+            create_test_frame(1.0, ball, defending),
+            create_test_frame(11.0, ball, attacking),
+            create_test_frame(12.0, ball, attacking),
+        ]
+
+        result = analyze_positioning(frames, {}, player_id="player1")
+
+        assert result["time_defensive_third_s"] == 2.0  # one tick stands in for the gap
+        assert result["time_offensive_third_s"] == 2.0
 
     def test_player_not_found_in_frames(self):
         """Test handling when requested player is not in frames."""

@@ -194,39 +194,54 @@ class TestBoostAnalysis:
 
     def test_time_at_zero_and_full_boost(self):
         """Test tracking time spent at 0 and 100 boost."""
+        boosts = [0, 0, 50, 100, 100, 100, 30]
         frames = [
             create_test_frame(
-                0.0, [create_test_player("player1", 0, boost=2)]
-            ),  # Zero boost
-            create_test_frame(
-                10.0, [create_test_player("player1", 0, boost=1)]
-            ),  # Still zero
-            create_test_frame(
-                20.0, [create_test_player("player1", 0, boost=50)]
-            ),  # Normal
-            create_test_frame(
-                30.0, [create_test_player("player1", 0, boost=99)]
-            ),  # Full
-            create_test_frame(
-                40.0, [create_test_player("player1", 0, boost=100)]
-            ),  # Still full
-            create_test_frame(
-                50.0, [create_test_player("player1", 0, boost=100)]
-            ),  # Max full
-            create_test_frame(
-                60.0, [create_test_player("player1", 0, boost=30)]
-            ),  # Normal
+                float(second), [create_test_player("player1", 0, boost=b)]
+            )
+            for second, b in enumerate(boosts)
         ]
 
         events = {}
 
         result = analyze_boost(frames, events, player_id="player1")
 
-        assert result["time_zero_boost_s"] == 20.0  # 0-20s at zero boost
-        assert result["time_full_boost_s"] == 30.0  # 30-60s at full boost
+        assert result["time_zero_boost_s"] == 2.0  # 0-2s at zero boost
+        assert result["time_full_boost_s"] == 3.0  # 3-6s at full boost
         assert (
-            abs(result["avg_boost"] - 54.57) < 0.1
+            abs(result["avg_boost"] - 54.29) < 0.1
         )  # Average of all boost amounts (allow small rounding)
+
+    def test_almost_empty_or_full_does_not_count(self):
+        """Zero and full mean exactly that, as Ballchasing counts them."""
+        boosts = [1, 2, 3, 99, 98, 50]
+        frames = [
+            create_test_frame(
+                float(second), [create_test_player("player1", 0, boost=b)]
+            )
+            for second, b in enumerate(boosts)
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["time_zero_boost_s"] == 0.0
+        assert result["time_full_boost_s"] == 0.0
+
+    def test_goal_replay_pause_is_not_time_at_zero_or_full(self):
+        empty = [create_test_player("player1", 0, boost=0)]
+        full = [create_test_player("player1", 0, boost=100)]
+        frames = [
+            create_test_frame(0.0, empty),
+            create_test_frame(1.0, empty),
+            create_test_frame(11.0, full),
+            create_test_frame(12.0, full),
+            create_test_frame(22.0, full),
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["time_zero_boost_s"] == 1.0
+        assert result["time_full_boost_s"] == 1.0
 
     def test_overfill_detection(self):
         """Test overfill calculation when collecting boost above threshold."""

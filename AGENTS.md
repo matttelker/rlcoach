@@ -51,6 +51,7 @@ Do not read all of `codex/` or all planning docs for a local bug fix.
 | Formatting/lint cleanup | `make fmt`, `make lint` | combine with relevant tests |
 | Rust bridge changes | relevant Rust/Python bridge checks | `make test` plus bridge-specific validation |
 | CLI/report behavior | targeted CLI invocation plus matching tests/goldens | `make test` |
+| Any stat in a report | `tests/analysis/test_ballchasing_parity.py`, which compares one real replay with Ballchasing's own CSV. Keep its bounds tight. | `make test` |
 
 ## Repo Rules
 
