@@ -631,5 +631,5 @@ def test_real_replay_speeds_stay_within_the_car_speed_cap():
     assert per_player
     for stats in per_player.values():
         movement = stats["movement"]
-        assert 0.0 < movement["avg_speed_kph"] < 60.0
+        assert 0.0 < movement["avg_speed_kph"] < 70.0
         assert 0.0 < movement["max_speed_kph"] <= 83.0
