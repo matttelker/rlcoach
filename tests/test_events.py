@@ -71,12 +71,19 @@ def create_test_player(
 FRAME_STEP = 1 / 30
 
 
-def countdown_frames(reset: float, phase: str = "INITIAL") -> list[Frame]:
+def countdown_frames(
+    reset: float,
+    phase: str = "INITIAL",
+    blue_drive: float = 920.0,
+    orange_drive: float = 800.0,
+    ball_exit: float = 1500.0,
+) -> list[Frame]:
     """One kickoff as real replays record it, from ball reset to contact.
 
     The ball drops onto the spot, which fires a second parser marker once it stops,
     and the cars settle before the countdown holds them still. They are released 4s
-    after the reset, and the blue car reaches the ball about 2.1s later.
+    after the reset, and the ball is played 2.1s later, leaving along +y at
+    ``ball_exit``. The drive speeds set how far each car is from it by then.
     """
     release = reset + 4.0
     contact = release + 2.1
@@ -87,29 +94,29 @@ def countdown_frames(reset: float, phase: str = "INITIAL") -> list[Frame]:
         t = reset + step * FRAME_STEP
         driving = max(0.0, t - release)
         held_speed = 120.0 if step <= 10 else 8.0
-        blue_speed = 920.0 if driving else held_speed
-        orange_speed = 800.0 if driving else held_speed
+        blue_speed = blue_drive if driving else held_speed
+        orange_speed = orange_drive if driving else held_speed
         players = [
             replace(
                 create_test_player(
                     "blue",
                     0,
-                    Vec3(0.0, -2048.0 + 920.0 * driving, 17.0),
+                    Vec3(0.0, -2048.0 + blue_drive * driving, 17.0),
                     boost=max(0, 33 - int(20.0 * driving)),
                 ),
                 velocity=Vec3(0.0, blue_speed, 0.0),
             ),
             replace(
                 create_test_player(
-                    "orange", 1, Vec3(0.0, 2048.0 - 800.0 * driving, 17.0)
+                    "orange", 1, Vec3(0.0, 2048.0 - orange_drive * driving, 17.0)
                 ),
                 velocity=Vec3(0.0, -orange_speed, 0.0),
             ),
         ]
 
         if t >= contact:
-            ball_pos = Vec3(0.0, 1500.0 * (t - contact), 92.8)
-            ball_vel = Vec3(0.0, 1500.0, 0.0)
+            ball_pos = Vec3(0.0, ball_exit * (t - contact), 92.8)
+            ball_vel = Vec3(0.0, ball_exit, 0.0)
         else:
             height, drop_speed = ball_drop.get(step, (92.8, 0.0))
             ball_pos = Vec3(0.0, 0.0, height)
@@ -657,6 +664,72 @@ class TestKickoffCountdown:
         assert len(kickoffs) == 1
         assert kickoffs[0].t_start == pytest.approx(14.0, abs=2 * FRAME_STEP)
 
+    def test_contact_is_found_with_the_car_still_out_of_touch_range(self):
+        """Positions refresh every few frames, so a car often reads 230uu out."""
+        kickoff = detect_kickoffs(countdown_frames(10.0, blue_drive=872.0))[0]
+
+        assert kickoff.first_touch_player == "blue"
+        assert kickoff.outcome == "FIRST_POSSESSION_BLUE"
+        assert kickoff.time_to_first_touch == pytest.approx(2.1, abs=2 * FRAME_STEP)
+
+    def test_ball_direction_decides_a_fifty_fifty(self):
+        """Both cars are level, and the ball leaves away from the one that won it."""
+        level = {"blue_drive": 900.0, "orange_drive": 900.0}
+
+        to_orange_side = countdown_frames(10.0, ball_exit=1500.0, **level)
+        to_blue_side = countdown_frames(10.0, ball_exit=-1500.0, **level)
+
+        assert detect_kickoffs(to_orange_side)[0].first_touch_player == "blue"
+        assert detect_kickoffs(to_blue_side)[0].first_touch_player == "orange"
+
+    def test_challenger_in_reach_is_not_a_fake(self):
+        """Losing the ball by a car length still counts as contesting it."""
+        frames = countdown_frames(10.0, orange_drive=830.0)
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        orange = next(p for p in kickoff.players if p["player_id"] == "orange")
+        assert kickoff.first_touch_player == "blue"
+        assert orange["time_to_first_touch"] == pytest.approx(2.1, abs=2 * FRAME_STEP)
+        assert not orange["approach_type"].startswith("FAKE")
+
+    def test_car_out_of_reach_is_not_contesting(self):
+        kickoff = detect_kickoffs(countdown_frames(10.0, orange_drive=500.0))[0]
+
+        orange = next(p for p in kickoff.players if p["player_id"] == "orange")
+        assert orange["time_to_first_touch"] is None
+
+    def test_hoops_launch_is_not_a_touch(self):
+        """Hoops throws the ball straight up at the release, with no car near it."""
+        frames = []
+        for frame in countdown_frames(10.0):
+            if 14.2 <= frame.timestamp < 16.1:
+                launched = replace(
+                    frame.ball,
+                    position=Vec3(0.0, 0.0, 300.0),
+                    velocity=Vec3(0.0, 0.0, 900.0),
+                )
+                frame = replace(frame, ball=launched)
+            frames.append(frame)
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff.first_touch_player == "blue"
+        assert kickoff.time_to_first_touch == pytest.approx(2.1, abs=2 * FRAME_STEP)
+
+    def test_kickoff_nobody_plays_stays_neutral(self):
+        """The cars stop short, so the ball never moves before the replay ends."""
+        frames = countdown_frames(
+            10.0, blue_drive=300.0, orange_drive=300.0, ball_exit=0.0
+        )
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].t_start == pytest.approx(14.0, abs=2 * FRAME_STEP)
+        assert kickoffs[0].outcome == "NEUTRAL"
+        assert kickoffs[0].first_touch_player is None
+
     def test_parser_phase_applies_to_the_kickoff(self):
         kickoffs = detect_kickoffs(countdown_frames(310.0, phase="OT"))
 
@@ -684,6 +757,11 @@ class TestKickoffCountdown:
         released += [398.72, 428.54]
         assert [kickoff.t_start for kickoff in kickoffs] == pytest.approx(
             released, abs=0.1
+        )
+        # The stream's bBallHasBeenHit, measured from each release.
+        played = [2.17, 1.9, 1.9, 1.93, 2.17, 2.2, 1.94, 1.91, 1.91, 2.21]
+        assert [kickoff.time_to_first_touch for kickoff in kickoffs] == pytest.approx(
+            played, abs=0.15
         )
 
 

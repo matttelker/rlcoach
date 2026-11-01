@@ -6,15 +6,17 @@ roles, approach types, and timing analysis.
 
 from __future__ import annotations
 
+import math
 from itertools import groupby
 from typing import Any
 
 from ..field_constants import Vec3
-from ..parser.types import BallFrame, Frame, Header
+from ..parser.types import BallFrame, Frame, Header, PlayerFrame
 from .constants import (
     BALL_STATIONARY_THRESHOLD,
     KICKOFF_CAR_STILL_SPEED,
     KICKOFF_CENTER_POSITION,
+    KICKOFF_CONTACT_REACH,
     KICKOFF_HOLD_MIN_S,
     KICKOFF_MAX_DURATION,
     KICKOFF_MIN_COOLDOWN,
@@ -31,11 +33,15 @@ def detect_kickoffs(
 ) -> list[KickoffEvent]:
     """Detect kickoff events with enriched per-player metrics.
 
-    The detector tracks the kickoff window (cars released -> ball leaves the spot),
+    The detector tracks the kickoff window (cars released -> ball first played),
     so ``t_start`` and every time in the event count from the release. It records:
     - Player roles (GO/CHEAT/WING/BACK) inferred from spawn positions
     - Boost consumption prior to the first meaningful action
     - Time-to-first-touch per player and overall first possession outcome
+
+    The contact time is exact to a frame. ``first_touch_player`` is the car the ball
+    leaves away from, so in a 50/50 it names who won the ball, which is what the
+    outcome means, and may not be who reached it first.
     """
     if not frames:
         return []
@@ -131,11 +137,22 @@ def _detect_heuristic_kickoffs(
 
         _update_kickoff_state(kickoff_state, frame)
 
+        # After a countdown only a car moves the ball sideways, while Hoops launches
+        # it straight up at the release. Other frames only show it leave the spot.
+        if releases:
+            ball_played = (
+                math.hypot(ball.velocity.x, ball.velocity.y)
+                > BALL_STATIONARY_THRESHOLD * 1.5
+            )
+            if ball_played:
+                _record_contact(kickoff_state, frame)
+        else:
+            ball_played = not at_center or ball_speed > BALL_STATIONARY_THRESHOLD * 1.5
+
         elapsed = frame.timestamp - kickoff_state["t_start"]
-        ball_left_center = not at_center or ball_speed > BALL_STATIONARY_THRESHOLD * 1.5
         duration_exceeded = elapsed >= KICKOFF_MAX_DURATION
 
-        if ball_left_center or duration_exceeded:
+        if ball_played or duration_exceeded:
             kickoff_event = _finalize_kickoff(kickoff_state, frame, header)
             if kickoff_event is not None:
                 kickoffs.append(kickoff_event)
@@ -291,6 +308,7 @@ def _start_kickoff(frame: Frame) -> dict[str, Any]:
             "movement_start_time": None,
             "max_distance": 0.0,
             "first_touch_time": None,
+            "contact_time": None,  # Set when in reach as the ball was played
             "role": "BACK",  # Placeholder until assigned from spawn ordering
             "velocities": [],  # List of (t, speed) tuples
             "max_speed": 0.0,
@@ -394,6 +412,52 @@ def _update_kickoff_state(state: dict[str, Any], frame: Frame) -> None:
                 }
 
 
+def _ball_departure_alignment(car: PlayerFrame, ball: BallFrame) -> float:
+    """How directly the ball is leaving away from a car, from 1.0 down to -1.0."""
+    offset_x = ball.position.x - car.position.x
+    offset_y = ball.position.y - car.position.y
+    offset_z = ball.position.z - car.position.z
+    scale = math.hypot(offset_x, offset_y, offset_z) * vector_magnitude(ball.velocity)
+    if scale == 0.0:
+        return 0.0
+    return (
+        offset_x * ball.velocity.x
+        + offset_y * ball.velocity.y
+        + offset_z * ball.velocity.z
+    ) / scale
+
+
+def _record_contact(state: dict[str, Any], frame: Frame) -> None:
+    """Credit the contact that moved the ball, on the frame it happened.
+
+    Car positions refresh every few frames, so at contact the two cars are seen
+    150-300uu out and distance can't separate them. The ball can: it leaves away
+    from whoever played it. A car in reach is contesting the ball even if it lost.
+    """
+    ball = frame.ball
+    cars = [player for player in frame.players if player.player_id in state["players"]]
+    if not cars:
+        return
+
+    def distance_to_ball(car: PlayerFrame) -> float:
+        return distance_3d(car.position, ball.position)
+
+    contesting = [
+        car for car in cars if distance_to_ball(car) <= KICKOFF_CONTACT_REACH
+    ] or [min(cars, key=distance_to_ball)]
+
+    rel_time = frame.timestamp - state["t_start"]
+    for car in contesting:
+        state["players"][car.player_id]["contact_time"] = rel_time
+
+    toucher = max(contesting, key=lambda car: _ball_departure_alignment(car, ball))
+    state["first_touch"] = {
+        "player_id": toucher.player_id,
+        "team": state["players"][toucher.player_id]["team"],
+        "time": rel_time,
+    }
+
+
 def _finalize_kickoff(
     state: dict[str, Any], frame: Frame, header: Header | None
 ) -> KickoffEvent | None:
@@ -414,7 +478,9 @@ def _finalize_kickoff(
             continue
 
         boost_used = max(0.0, pdata["start_boost"] - pdata["min_boost"])
-        time_to_contact = pdata["first_touch_time"]
+        time_to_contact = pdata["contact_time"]
+        if time_to_contact is None:
+            time_to_contact = pdata["first_touch_time"]
         approach_type = _classify_approach_type(pdata)
 
         players_payload.append(
@@ -555,8 +621,8 @@ def _is_fake_kickoff(pdata: dict[str, Any]) -> tuple[bool, str]:
     boost_used = max(0.0, pdata["start_boost"] - pdata["min_boost"])
     first_touch_time = pdata.get("first_touch_time")
 
-    # If player touched the ball, not a fake
-    if first_touch_time is not None:
+    # If player touched the ball or contested it, not a fake
+    if first_touch_time is not None or pdata.get("contact_time") is not None:
         return False, ""
 
     # Type 1: Stationary fake - barely moved

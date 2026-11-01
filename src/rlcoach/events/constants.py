@@ -55,6 +55,7 @@ KICKOFF_MIN_COOLDOWN = 5.0
 KICKOFF_HOLD_MIN_S = 2.0  # Ball and cars wait at least this long in a countdown
 KICKOFF_CAR_STILL_SPEED = 50.0  # Car speed while held for a countdown (units/s)
 KICKOFF_RESET_LEAD_S = 4.0  # Ball reset to cars released, as markers see it (s)
+KICKOFF_CONTACT_REACH = 400.0  # Car distance from the ball at contact (units)
 MIN_ORIENTATION_SAMPLES = 5
 
 # Kickoff approach type keys
