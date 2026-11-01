@@ -1,11 +1,21 @@
 """Tests for boost analysis."""
 
+from pathlib import Path
 from unittest.mock import Mock
 
-from rlcoach.analysis.boost import analyze_boost
+import pytest
+
+from rlcoach.analysis.boost import (
+    SPEED_CAP_WASTE_THRESHOLD,
+    _calculate_speed,
+    analyze_boost,
+)
 from rlcoach.events import BoostPickupEvent
 from rlcoach.field_constants import Vec3
+from rlcoach.normalize import build_timeline
+from rlcoach.parser import get_adapter
 from rlcoach.parser.types import BallFrame, Frame, PlayerFrame
+from rlcoach.physics_constants import CAR_MAX_SPEED_UU_S
 
 
 def create_test_frame(timestamp: float, players: list[PlayerFrame]) -> Frame:
@@ -323,6 +333,31 @@ class TestBoostAnalysis:
             result["waste"] > 0.0
         )  # Should detect some waste from supersonic boosting
 
+    @pytest.mark.parametrize(
+        ("speed", "expected_waste"),
+        [
+            (2300.0, 14.0),  # At the cap: 20 boost * 0.7
+            (2299.98, 14.0),  # What a capped car reads after replication
+            (2299.8, 6.0),  # Under the cap: partial 20 boost * 0.3
+            (2200.0, 6.0),  # Supersonic is not the cap
+        ],
+    )
+    def test_waste_counts_fully_only_at_the_speed_cap(self, speed, expected_waste):
+        """Boost spent at the cap adds no speed; below it some benefit remains."""
+        velocity = Vec3(speed, 0.0, 0.0)
+        frames = [
+            create_test_frame(
+                0.0, [create_test_player("player1", 0, boost=80, velocity=velocity)]
+            ),
+            create_test_frame(
+                1.0, [create_test_player("player1", 0, boost=60, velocity=velocity)]
+            ),
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == pytest.approx(expected_waste)
+
     def test_bpm_and_bcpm_calculation(self):
         """Test BPM and BCPM rate calculations."""
         player1 = create_test_player("player1", 0)
@@ -530,3 +565,26 @@ class TestBoostAnalysis:
         assert (
             result["bpm"] == 100.0
         )  # 100 boost collected in default 1 minute duration
+
+
+def test_real_replay_capped_cars_reach_the_waste_threshold():
+    """Capped cars read just under 2300 UU/s, so a check at 2300 would miss them."""
+    pytest.importorskip("rlreplay_rust")
+    replay = Path("testing_replay.replay")
+    if not replay.exists() or replay.stat().st_size < 1024:
+        pytest.skip("real testing_replay.replay not available")
+
+    adapter = get_adapter("rust")
+    frames = build_timeline(
+        adapter.parse_header(replay), adapter.parse_network(replay).frames
+    )
+    near_cap = [
+        speed
+        for frame in frames
+        for player in frame.players
+        if (speed := _calculate_speed(player.velocity)) >= CAR_MAX_SPEED_UU_S - 1.0
+    ]
+
+    assert near_cap
+    reached = sum(speed >= SPEED_CAP_WASTE_THRESHOLD for speed in near_cap)
+    assert reached / len(near_cap) > 0.5

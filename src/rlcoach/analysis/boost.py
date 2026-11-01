@@ -20,13 +20,14 @@ from typing import Any
 from ..events import PAD_NEUTRAL_TOLERANCE, BoostPickupEvent
 from ..field_constants import FIELD, Vec3
 from ..parser.types import Frame, Header
+from ..physics_constants import CAR_MAX_SPEED_UU_S
 
 # Boost analysis thresholds (aligned with internal metric conventions)
 ZERO_BOOST_THRESHOLD = 3.0  # Consider < 3 as "zero boost"
 FULL_BOOST_THRESHOLD = 99.0  # Consider >= 99 as "full boost"
 OVERFILL_THRESHOLD = 80.0  # Overfill when collecting above this amount
 OVERFILL_BASELINE = 85.0  # Baseline boost level for wasted big-pad capacity
-SUPERSONIC_SPEED_THRESHOLD = 2300.0  # Speed at which boost provides minimal benefit
+SPEED_CAP_WASTE_THRESHOLD = CAR_MAX_SPEED_UU_S - 0.1  # Capped cars read under 2300
 WASTE_DETECTION_MIN_BOOST = 10.0  # Minimum boost to consider for waste detection
 BIG_GAIN_THRESHOLD = 70.0
 SMALL_PAD_UNIT = 12.0
@@ -127,14 +128,14 @@ def _analyze_player_boost(
             if prev_boost is not None and prev_boost >= FULL_BOOST_THRESHOLD:
                 time_hundred_boost += time_delta
 
-            # Waste detection - boost spent at supersonic or with minimal benefit
+            # Waste detection - boost spent at the speed cap or with minimal benefit
             if prev_boost is not None and prev_boost > boost_amount:
                 boost_consumed = prev_boost - boost_amount
                 player_speed = _calculate_speed(player_frame.velocity)
 
-                # Waste if consuming boost while already supersonic
+                # Waste if consuming boost at the speed cap, where it adds nothing
                 if (
-                    player_speed > SUPERSONIC_SPEED_THRESHOLD
+                    player_speed >= SPEED_CAP_WASTE_THRESHOLD
                     and boost_consumed > WASTE_DETECTION_MIN_BOOST
                 ):
                     waste += boost_consumed * 0.7  # Heuristic factor
