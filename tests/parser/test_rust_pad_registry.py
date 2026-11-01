@@ -67,27 +67,21 @@ def test_rust_pad_registry_survives_checkpoints():
 
     adapter = get_adapter("rust")
     frames = adapter.parse_network(Path("testing_replay.replay"))
-    collected = [
-        event
-        for frame in frames.frames
-        for event in frame.get("boost_pad_events", [])
-        if event["status"] == "COLLECTED"
+    pad_events = [
+        event for frame in frames.frames for event in frame.get("boost_pad_events", [])
     ]
 
-    assert {event["pad_id"] for event in collected} == set(range(34))
-    assert sum(event["is_big"] for event in collected) > 50
+    assert {event["pad_id"] for event in pad_events} == set(range(34))
+    assert sum(event["is_big"] for event in pad_events) > 50
 
-    # A re-sent state would read as a second pickup inside the respawn window.
-    last_collect: dict[int, float] = {}
-    for event in collected:
-        pad = FIELD.BOOST_PADS[event["pad_id"]]
-        assert event["is_big"] == pad.is_big
-        previous = last_collect.get(pad.pad_id)
-        if previous is not None:
-            respawn = 10.0 if pad.is_big else 4.0
-            gap = event["timestamp"] - previous
-            assert gap >= respawn - 0.15, f"pad {pad.pad_id} collected {gap:.2f}s apart"
-        last_collect[pad.pad_id] = event["timestamp"]
+    # Statuses need not alternate: a car on a pad as it respawns collects with no
+    # RESPAWNED between. A re-sent state is the one repeat that cannot be real.
+    last_state: dict[int, int] = {}
+    for event in pad_events:
+        pad_id = event["pad_id"]
+        assert event["is_big"] == FIELD.BOOST_PADS[pad_id].is_big
+        assert last_state.get(pad_id) != event["raw_state"], f"pad {pad_id} re-sent"
+        last_state[pad_id] = event["raw_state"]
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")

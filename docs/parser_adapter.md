@@ -63,8 +63,9 @@ Player component-state flags are tri-state semantically:
 
 ## Boost Pad Events
 
-`boost_pad_events` carries one `COLLECTED` event per real pickup and one `RESPAWNED`
-event per return, read from the pads' replicated pickup state. Totals agree with the
+`boost_pad_events` carries one `COLLECTED` event per real pickup, read from the pads'
+replicated pickup state, and a `RESPAWNED` event when a pad returns unclaimed. A car
+on a pad as it respawns collects with no `RESPAWNED` between. Totals agree with the
 game's own `TAGame.PRI_TA:BoostPickups` counter to within one pickup per replay.
 
 - Pads are dormant until first collected, and a replay checkpoint re-spawns every pad
@@ -79,7 +80,7 @@ game's own `TAGame.PRI_TA:BoostPickups` counter to within one pickup per replay.
   pickup, using the tolerances in `schemas/boost_pad_tables.json`.
 - Hoops, Dropshot and Rumble have no verified pad table. Pickups there are replicated
   but emit no events, so boost detection uses boost deltas instead.
-- A collection whose car has no player binding yet (about 0.3%) is emitted without
+- A collection whose car has no player binding (about 0.3%) is emitted without
   `player_id` and is skipped by pickup detection.
 
 ## Parser Event Streams
