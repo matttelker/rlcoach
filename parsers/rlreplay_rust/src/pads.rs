@@ -1,5 +1,5 @@
 use crate::arena_tables::{
-    lookup_arena_slug, pad_table_for_slug, snap_to_pad, within_snap_tolerance, ArenaPadDef,
+    ArenaPadDef, lookup_arena_slug, pad_table_for_slug, snap_to_pad, within_snap_tolerance,
 };
 use std::collections::{HashMap, VecDeque};
 use std::env;
@@ -569,9 +569,11 @@ mod tests {
     fn reused_actor_id_no_longer_feeds_the_old_pad() {
         let mut registry = registry();
         registry.track_new_actor(80, "Archetypes.Car.Car_Default");
-        assert!(registry
-            .update_position(80, (150.0, -4200.0, 17.0))
-            .is_empty());
+        assert!(
+            registry
+                .update_position(80, (150.0, -4200.0, 17.0))
+                .is_empty()
+        );
         assert!(registry.instances[PAD_OBJECT].position.is_none());
     }
 

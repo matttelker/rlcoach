@@ -1,6 +1,7 @@
 mod arena_tables;
 mod pads;
 
+use pyo3::IntoPyObjectExt;
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -363,49 +364,49 @@ fn looks_like_replay_header(bytes: &[u8]) -> bool {
         .any(|n| head.windows(n.len()).any(|w| w == *n))
 }
 
-fn header_prop_to_py(py: Python<'_>, prop: &HeaderProp) -> PyResult<PyObject> {
+fn header_prop_to_py(py: Python<'_>, prop: &HeaderProp) -> PyResult<Py<PyAny>> {
     Ok(match prop {
         HeaderProp::Array(arr) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for inner in arr {
-                let dict = PyDict::new_bound(py);
+                let dict = PyDict::new(py);
                 for (k, v) in inner {
                     let value = header_prop_to_py(py, v)?;
                     dict.set_item(k.as_str(), value)?;
                 }
                 list.append(dict)?;
             }
-            list.to_object(py)
+            list.into_py_any(py)?
         }
-        HeaderProp::Bool(val) => val.into_py(py),
+        HeaderProp::Bool(val) => (*val).into_py_any(py)?,
         HeaderProp::Byte { kind, value } => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             dict.set_item("kind", kind.as_str())?;
             match value {
                 Some(v) => dict.set_item("value", v.as_str())?,
                 None => dict.set_item("value", py.None())?,
             }
-            dict.to_object(py)
+            dict.into_py_any(py)?
         }
-        HeaderProp::Float(val) => (*val as f64).into_py(py),
-        HeaderProp::Int(val) => (*val).into_py(py),
-        HeaderProp::Name(val) | HeaderProp::Str(val) => val.to_object(py),
-        HeaderProp::QWord(val) => (*val).into_py(py),
+        HeaderProp::Float(val) => (*val as f64).into_py_any(py)?,
+        HeaderProp::Int(val) => (*val).into_py_any(py)?,
+        HeaderProp::Name(val) | HeaderProp::Str(val) => val.into_py_any(py)?,
+        HeaderProp::QWord(val) => (*val).into_py_any(py)?,
         HeaderProp::Struct { name, fields } => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             dict.set_item("_struct", name.as_str())?;
             for (k, v) in fields {
                 let value = header_prop_to_py(py, v)?;
                 dict.set_item(k.as_str(), value)?;
             }
-            dict.to_object(py)
+            dict.into_py_any(py)?
         }
     })
 }
 
 #[pyfunction]
-fn parse_header(path: &str) -> PyResult<PyObject> {
-    Python::with_gil(|py| {
+fn parse_header(path: &str) -> PyResult<Py<PyAny>> {
+    Python::attach(|py| {
         let data = read_file_bytes(path)?;
         if data.len() < 100 {
             return Err(PyValueError::new_err("File too short to be a valid replay"));
@@ -420,17 +421,17 @@ fn parse_header(path: &str) -> PyResult<PyObject> {
         let mut team1_score: i64 = 0;
         let mut match_length: f64 = 0.0;
         let mut players_vec: Vec<(String, i64)> = Vec::new();
-        let mut players_meta: Vec<PyObject> = Vec::new();
-        let highlights_list = PyList::empty_bound(py);
+        let mut players_meta: Vec<Py<PyAny>> = Vec::new();
+        let highlights_list = PyList::empty(py);
         let mut team_size: i64 = 0;
         let mut warnings_vec: Vec<String> = Vec::new();
-        let mutators = PyDict::new_bound(py);
+        let mutators = PyDict::new(py);
 
         fn find_prop<'a>(props: &'a [(String, HeaderProp)], key: &str) -> Option<&'a HeaderProp> {
             props.iter().find(|(k, _)| k == key).map(|(_, v)| v)
         }
 
-        let goals_list = PyList::empty_bound(py);
+        let goals_list = PyList::empty(py);
 
         match ParserBuilder::new(&data).never_parse_network_data().parse() {
             Ok(Replay { properties, .. }) => {
@@ -547,7 +548,7 @@ fn parse_header(path: &str) -> PyResult<PyObject> {
                             // Each entry is Vec<(String, HeaderProp)>
                             let mut name: Option<String> = None;
                             let mut team: i64 = 0;
-                            let stats_dict = PyDict::new_bound(py);
+                            let stats_dict = PyDict::new(py);
                             for (k, v) in entry {
                                 match (k.as_str(), v) {
                                     ("Name", hp) | ("PlayerName", hp) => {
@@ -569,11 +570,11 @@ fn parse_header(path: &str) -> PyResult<PyObject> {
 
                             if let Some(n) = name.clone() {
                                 players_vec.push((n.clone(), team));
-                                let player_dict = PyDict::new_bound(py);
+                                let player_dict = PyDict::new(py);
                                 player_dict.set_item("name", n)?;
                                 player_dict.set_item("team", team)?;
                                 player_dict.set_item("stats", stats_dict)?;
-                                players_meta.push(player_dict.to_object(py));
+                                players_meta.push(player_dict.into_py_any(py)?);
                             }
                         }
                     }
@@ -606,7 +607,7 @@ fn parse_header(path: &str) -> PyResult<PyObject> {
                                     _ => {}
                                 }
                             }
-                            let g = PyDict::new_bound(py);
+                            let g = PyDict::new(py);
                             if let Some(fv) = g_frame {
                                 g.set_item("frame", fv)?;
                             }
@@ -647,7 +648,7 @@ fn parse_header(path: &str) -> PyResult<PyObject> {
                                     _ => {}
                                 }
                             }
-                            let h = PyDict::new_bound(py);
+                            let h = PyDict::new(py);
                             if let Some(fv) = h_frame {
                                 h.set_item("frame", fv)?;
                             }
@@ -684,7 +685,7 @@ fn parse_header(path: &str) -> PyResult<PyObject> {
             }
         }
 
-        let header = PyDict::new_bound(py);
+        let header = PyDict::new(py);
         header.set_item(
             "playlist_id",
             playlist_id.unwrap_or_else(|| "unknown".to_string()),
@@ -706,16 +707,16 @@ fn parse_header(path: &str) -> PyResult<PyObject> {
         header.set_item("mutators", mutators)?;
 
         if players_meta.is_empty() {
-            let players = PyList::empty_bound(py);
+            let players = PyList::empty(py);
             for (name, team) in &players_vec {
-                let p = PyDict::new_bound(py);
+                let p = PyDict::new(py);
                 p.set_item("name", name)?;
                 p.set_item("team", team)?;
                 players.append(p)?;
             }
             header.set_item("players", players)?;
         } else {
-            header.set_item("players", PyList::new_bound(py, players_meta))?;
+            header.set_item("players", PyList::new(py, players_meta)?)?;
         }
         if let Some(build) = warnings_vec
             .iter()
@@ -725,14 +726,14 @@ fn parse_header(path: &str) -> PyResult<PyObject> {
         }
         header.set_item("goals", goals_list)?;
         header.set_item("highlights", highlights_list)?;
-        let warnings = PyList::empty_bound(py);
+        let warnings = PyList::empty(py);
         warnings.append("parsed_with_rust_core")?;
         for w in warnings_vec {
             warnings.append(w)?;
         }
         header.set_item("quality_warnings", warnings)?;
 
-        Ok(header.to_object(py))
+        header.into_py_any(py)
     })
 }
 
@@ -747,8 +748,8 @@ fn header_property_keys(path: &str) -> PyResult<Vec<String>> {
 }
 
 #[pyfunction]
-fn header_property(path: &str, key: &str) -> PyResult<Option<PyObject>> {
-    Python::with_gil(|py| {
+fn header_property(path: &str, key: &str) -> PyResult<Option<Py<PyAny>>> {
+    Python::attach(|py| {
         let data = read_file_bytes(path)?;
         let replay = ParserBuilder::new(&data)
             .never_parse_network_data()
@@ -806,10 +807,10 @@ fn map_network_error_code(message: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        assign_player_index, bind_player_index, cam_settings_pairs, infer_kickoff_phase,
+        ActorKind, assign_player_index, bind_player_index, cam_settings_pairs, infer_kickoff_phase,
         is_car_state_actor, is_first_touch_rise, loadout_pairs, map_network_error_code,
         normalize_input_byte, pickup_bool_raw_state, player_index_for_car, resolve_component_owner,
-        team_loadout_for, unclaimed_header_rows, unlink_car, ActorKind,
+        team_loadout_for, unclaimed_header_rows, unlink_car,
     };
     use std::collections::{HashMap, HashSet};
 
@@ -1215,7 +1216,7 @@ mod tests {
 /// profile metadata (camera + loadout). Returns `(frames, player_metadata)` so
 /// callers can expose frames alone or the richer payload as needed.
 fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let data = read_file_bytes(path)?;
         let replay = ParserBuilder::new(&data)
             .must_parse_network_data()
@@ -1368,7 +1369,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 .push((tickmark.description.clone(), tickmark.frame as i64));
         }
 
-        let frames_out = PyList::empty_bound(py);
+        let frames_out = PyList::empty(py);
 
         fn classify_object_name_lower(lname: &str) -> ActorKind {
             let is_ball = lname.contains("ball_ta")
@@ -1982,22 +1983,22 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
 
                 frame_pad_events.extend(pad_registry.flush_ready_events());
 
-                let f = PyDict::new_bound(py);
+                let f = PyDict::new(py);
                 f.set_item("timestamp", nf.time as f64)?;
                 f.set_item("delta", nf.delta as f64)?;
-                let ball = PyDict::new_bound(py);
-                let bpos = PyDict::new_bound(py);
+                let ball = PyDict::new(py);
+                let bpos = PyDict::new(py);
                 bpos.set_item("x", ball_pos.0)?;
                 bpos.set_item("y", ball_pos.1)?;
                 bpos.set_item("z", ball_pos.2)?;
-                let bvel = PyDict::new_bound(py);
+                let bvel = PyDict::new(py);
                 bvel.set_item("x", ball_vel.0)?;
                 bvel.set_item("y", ball_vel.1)?;
                 bvel.set_item("z", ball_vel.2)?;
                 ball.set_item("position", bpos)?;
                 ball.set_item("velocity", bvel)?;
                 ball.set_item("sleeping", ball_sleeping)?;
-                let ang = PyDict::new_bound(py);
+                let ang = PyDict::new(py);
                 ang.set_item("x", ball_angvel.0)?;
                 ang.set_item("y", ball_angvel.1)?;
                 ang.set_item("z", ball_angvel.2)?;
@@ -2030,7 +2031,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                     )
                 });
 
-                let mut players_map: BTreeMap<usize, PyObject> = BTreeMap::new();
+                let mut players_map: BTreeMap<usize, Py<PyAny>> = BTreeMap::new();
                 let owned_actor_ids: HashSet<i32> = component_owner.values().copied().collect();
                 let mut owner_jump_state: HashMap<i32, bool> = HashMap::new();
                 let mut owner_dodge_state: HashMap<i32, bool> = HashMap::new();
@@ -2137,33 +2138,33 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                         }
                     }
                     if let Some(idx) = actor_to_player_index.get(&aid).cloned() {
-                        let p = PyDict::new_bound(py);
+                        let p = PyDict::new(py);
                         p.set_item("player_id", format!("player_{}", idx))?;
                         p.set_item("team", team)?;
-                        let ppos = PyDict::new_bound(py);
+                        let ppos = PyDict::new(py);
                         ppos.set_item("x", x)?;
                         ppos.set_item("y", y)?;
                         ppos.set_item("z", z)?;
                         let v = car_vel.get(&aid).cloned().unwrap_or((0.0, 0.0, 0.0));
-                        let pvel = PyDict::new_bound(py);
+                        let pvel = PyDict::new(py);
                         pvel.set_item("x", v.0)?;
                         pvel.set_item("y", v.1)?;
                         pvel.set_item("z", v.2)?;
                         let av = car_angvel.get(&aid).cloned().unwrap_or((0.0, 0.0, 0.0));
-                        let pang = PyDict::new_bound(py);
+                        let pang = PyDict::new(py);
                         pang.set_item("x", av.0)?;
                         pang.set_item("y", av.1)?;
                         pang.set_item("z", av.2)?;
 
                         // Use true quaternion rotation if available, else fallback to velocity approximation
-                        let prot = PyDict::new_bound(py);
+                        let prot = PyDict::new(py);
                         if let Some(q) = car_rot.get(&aid) {
                             let (roll, pitch, yaw) = quat_to_euler(*q);
                             prot.set_item("pitch", pitch)?;
                             prot.set_item("yaw", yaw)?;
                             prot.set_item("roll", roll)?;
                             // Also include raw quaternion for precision work
-                            let quat = PyDict::new_bound(py);
+                            let quat = PyDict::new(py);
                             quat.set_item("x", q.0 as f64)?;
                             quat.set_item("y", q.1 as f64)?;
                             quat.set_item("z", q.2 as f64)?;
@@ -2237,21 +2238,21 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                             p.set_item("boost_active_raw", *raw)?;
                         }
 
-                        players_map.insert(idx, p.into_py(py));
+                        players_map.insert(idx, p.into_py_any(py)?);
                     }
                 }
-                let players = PyList::empty_bound(py);
+                let players = PyList::empty(py);
                 for (_idx, pobj) in players_map.iter() {
                     players.append(pobj.bind(py))?;
                 }
                 f.set_item("players", players)?;
-                let parser_meta = PyDict::new_bound(py);
+                let parser_meta = PyDict::new(py);
                 parser_meta.set_item("classification_source", frame_classification_source)?;
                 f.set_item("_parser_meta", parser_meta)?;
 
-                let pad_list = PyList::empty_bound(py);
+                let pad_list = PyList::empty(py);
                 for event in frame_pad_events {
-                    let pad_dict = PyDict::new_bound(py);
+                    let pad_dict = PyDict::new(py);
                     pad_dict.set_item("pad_id", event.pad_id as i64)?;
                     pad_dict.set_item("is_big", event.is_big)?;
                     pad_dict.set_item("pad_side", event.pad_side)?;
@@ -2262,7 +2263,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                     pad_dict.set_item("raw_state", event.raw_state)?;
                     pad_dict.set_item("timestamp", event.timestamp as f64)?;
 
-                    let pos_dict = PyDict::new_bound(py);
+                    let pos_dict = PyDict::new(py);
                     pos_dict.set_item("x", event.position.0)?;
                     pos_dict.set_item("y", event.position.1)?;
                     pos_dict.set_item("z", event.position.2)?;
@@ -2297,13 +2298,13 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 }
                 f.set_item("boost_pad_events", pad_list)?;
 
-                let parser_demo_events = PyList::empty_bound(py);
+                let parser_demo_events = PyList::empty(py);
                 let mut emitted_demo_victims: HashSet<i32> = HashSet::new();
                 for (victim_actor_id, attacker_actor_id) in &frame_demo_records {
                     let Some(victim_index) = actor_to_player_index.get(victim_actor_id) else {
                         continue;
                     };
-                    let demo_dict = PyDict::new_bound(py);
+                    let demo_dict = PyDict::new(py);
                     demo_dict.set_item("timestamp", nf.time as f64)?;
                     demo_dict.set_item("victim_id", format!("player_{}", victim_index))?;
                     if let Some(team) = car_team.get(victim_actor_id) {
@@ -2330,7 +2331,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                             continue;
                         }
                         if let Some(idx) = actor_to_player_index.get(actor_id) {
-                            let demo_dict = PyDict::new_bound(py);
+                            let demo_dict = PyDict::new(py);
                             demo_dict.set_item("timestamp", nf.time as f64)?;
                             demo_dict.set_item("victim_id", format!("player_{}", idx))?;
                             if let Some(team) = car_team.get(actor_id) {
@@ -2344,9 +2345,9 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 }
                 prev_demo_state = car_demo.clone();
 
-                let component_events = PyList::empty_bound(py);
+                let component_events = PyList::empty(py);
                 for event in &frame_component_events {
-                    let event_dict = PyDict::new_bound(py);
+                    let event_dict = PyDict::new(py);
                     event_dict.set_item("timestamp", nf.time as f64)?;
                     event_dict.set_item("frame_index", frame_index)?;
                     event_dict.set_item("kind", event.kind)?;
@@ -2365,7 +2366,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                         event_dict.set_item("raw_value", raw_value)?;
                     }
                     if let Some((x, y, z)) = event.vector {
-                        let vector = PyDict::new_bound(py);
+                        let vector = PyDict::new(py);
                         vector.set_item("x", x)?;
                         vector.set_item("y", y)?;
                         vector.set_item("z", z)?;
@@ -2376,9 +2377,9 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 }
                 f.set_item("component_events", component_events)?;
 
-                let parser_stat_events = PyList::empty_bound(py);
+                let parser_stat_events = PyList::empty(py);
                 for event in &frame_stat_events {
-                    let event_dict = PyDict::new_bound(py);
+                    let event_dict = PyDict::new(py);
                     event_dict.set_item("timestamp", nf.time as f64)?;
                     event_dict.set_item("frame_index", frame_index)?;
                     event_dict.set_item("object_id", event.object_id)?;
@@ -2392,7 +2393,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 f.set_item("parser_stat_events", parser_stat_events)?;
 
                 // Detect touches: proximity-based ball-car contact detection
-                let parser_touch_events = PyList::empty_bound(py);
+                let parser_touch_events = PyList::empty(py);
                 for (actor_id, car_position) in &car_pos {
                     let dist = distance_3d(*car_position, ball_pos);
                     if dist >= TOUCH_PROXIMITY_THRESHOLD {
@@ -2424,7 +2425,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
 
                     if is_new_touch {
                         if let Some(idx) = actor_to_player_index.get(actor_id) {
-                            let touch_dict = PyDict::new_bound(py);
+                            let touch_dict = PyDict::new(py);
                             touch_dict.set_item("timestamp", timestamp)?;
                             touch_dict.set_item("player_id", format!("player_{}", idx))?;
                             if let Some(team) = car_team.get(actor_id) {
@@ -2445,7 +2446,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 f.set_item("parser_touch_events", parser_touch_events)?;
                 f.set_item("parser_demo_events", parser_demo_events)?;
 
-                let parser_first_touch_events = PyList::empty_bound(py);
+                let parser_first_touch_events = PyList::empty(py);
                 for pri in &frame_first_touch_pris {
                     let Some(idx) = owner_to_player_index.get(pri) else {
                         continue;
@@ -2453,7 +2454,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                     let Some((_, team)) = header_players.get(*idx) else {
                         continue;
                     };
-                    let event_dict = PyDict::new_bound(py);
+                    let event_dict = PyDict::new(py);
                     event_dict.set_item("timestamp", nf.time as f64)?;
                     event_dict.set_item("player_id", format!("player_{}", idx))?;
                     event_dict.set_item("team", *team)?;
@@ -2463,14 +2464,14 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 }
                 f.set_item("parser_first_touch_events", parser_first_touch_events)?;
 
-                let parser_tickmarks = PyList::empty_bound(py);
+                let parser_tickmarks = PyList::empty(py);
                 if let Some(tickmarks) = tickmarks_by_frame.get(&frame_index) {
                     for (description, tickmark_frame) in tickmarks {
-                        let tickmark_dict = PyDict::new_bound(py);
+                        let tickmark_dict = PyDict::new(py);
                         tickmark_dict.set_item("timestamp", nf.time as f64)?;
                         tickmark_dict.set_item("kind", description.clone())?;
                         tickmark_dict.set_item("frame_index", *tickmark_frame)?;
-                        let payload = PyDict::new_bound(py);
+                        let payload = PyDict::new(py);
                         payload.set_item("description", description.clone())?;
                         payload.set_item("frame", *tickmark_frame)?;
                         tickmark_dict.set_item("payload", payload)?;
@@ -2480,7 +2481,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 }
                 f.set_item("parser_tickmarks", parser_tickmarks)?;
 
-                let parser_kickoff_markers = PyList::empty_bound(py);
+                let parser_kickoff_markers = PyList::empty(py);
                 let at_center = ball_pos.0.abs() <= KICKOFF_POSITION_TOLERANCE as f32
                     && ball_pos.1.abs() <= KICKOFF_POSITION_TOLERANCE as f32
                     && (ball_pos.2 - BALL_REST_HEIGHT as f32).abs()
@@ -2491,7 +2492,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 let stationary = ball_speed <= BALL_STATIONARY_SPEED as f32;
                 if at_center && stationary && !kickoff_active {
                     kickoff_active = true;
-                    let marker = PyDict::new_bound(py);
+                    let marker = PyDict::new(py);
                     marker.set_item("timestamp", nf.time as f64)?;
                     marker.set_item(
                         "phase",
@@ -2550,20 +2551,20 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
             }
         }
 
-        let player_metadata = PyDict::new_bound(py);
+        let player_metadata = PyDict::new(py);
         let mut metadata_indices: BTreeSet<usize> = BTreeSet::new();
         metadata_indices.extend(camera_by_index.keys().copied());
         metadata_indices.extend(loadout_by_index.keys().copied());
         metadata_indices.retain(|idx| *idx < header_players.len());
         for idx in metadata_indices {
-            let entry = PyDict::new_bound(py);
+            let entry = PyDict::new(py);
             entry.set_item(
                 "name",
                 header_players.get(idx).map(|(name, _)| name.clone()),
             )?;
             match camera_by_index.get(&idx) {
                 Some(cam) => {
-                    let camera = PyDict::new_bound(py);
+                    let camera = PyDict::new(py);
                     for (key, value) in cam_settings_pairs(cam) {
                         camera.set_item(key, value)?;
                     }
@@ -2573,7 +2574,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
             }
             match loadout_by_index.get(&idx) {
                 Some(loadout) => {
-                    let loadout_dict = PyDict::new_bound(py);
+                    let loadout_dict = PyDict::new(py);
                     for (key, value) in loadout_pairs(loadout) {
                         loadout_dict.set_item(key, value)?;
                     }
@@ -2594,10 +2595,10 @@ fn iter_frames(path: &str) -> PyResult<Py<PyAny>> {
 }
 
 #[pyfunction]
-fn parse_network_with_diagnostics(path: &str) -> PyResult<PyObject> {
-    Python::with_gil(|py| {
-        let result = PyDict::new_bound(py);
-        let diagnostics = PyDict::new_bound(py);
+fn parse_network_with_diagnostics(path: &str) -> PyResult<Py<PyAny>> {
+    Python::attach(|py| {
+        let result = PyDict::new(py);
+        let diagnostics = PyDict::new(py);
         diagnostics.set_item("attempted_backends", vec!["boxcars"])?;
 
         match run_iter_frames(path) {
@@ -2610,13 +2611,13 @@ fn parse_network_with_diagnostics(path: &str) -> PyResult<PyObject> {
                 result.set_item("frames", frames_any)?;
                 result.set_item("player_metadata", player_metadata)?;
                 result.set_item("diagnostics", diagnostics)?;
-                Ok(result.to_object(py))
+                result.into_py_any(py)
             }
             Err(primary_err) => {
                 let primary_message = primary_err.to_string();
                 let error_code = map_network_error_code(&primary_message);
                 let mut detail = primary_message.clone();
-                let fallback_frames = PyList::empty_bound(py);
+                let fallback_frames = PyList::empty(py);
                 let mut fallback_frames_emitted: usize = 0;
 
                 match read_file_bytes(path) {
@@ -2627,20 +2628,20 @@ fn parse_network_with_diagnostics(path: &str) -> PyResult<PyObject> {
                         Ok(replay) => {
                             if let Some(net) = replay.network_frames {
                                 for nf in net.frames {
-                                    let f = PyDict::new_bound(py);
+                                    let f = PyDict::new(py);
                                     f.set_item("timestamp", nf.time as f64)?;
                                     f.set_item("delta", nf.delta as f64)?;
 
-                                    let ball = PyDict::new_bound(py);
-                                    let bpos = PyDict::new_bound(py);
+                                    let ball = PyDict::new(py);
+                                    let bpos = PyDict::new(py);
                                     bpos.set_item("x", 0.0f64)?;
                                     bpos.set_item("y", 0.0f64)?;
                                     bpos.set_item("z", 93.15f64)?;
-                                    let bvel = PyDict::new_bound(py);
+                                    let bvel = PyDict::new(py);
                                     bvel.set_item("x", 0.0f64)?;
                                     bvel.set_item("y", 0.0f64)?;
                                     bvel.set_item("z", 0.0f64)?;
-                                    let bang = PyDict::new_bound(py);
+                                    let bang = PyDict::new(py);
                                     bang.set_item("x", 0.0f64)?;
                                     bang.set_item("y", 0.0f64)?;
                                     bang.set_item("z", 0.0f64)?;
@@ -2649,20 +2650,17 @@ fn parse_network_with_diagnostics(path: &str) -> PyResult<PyObject> {
                                     ball.set_item("angular_velocity", bang)?;
                                     ball.set_item("sleeping", false)?;
                                     f.set_item("ball", ball)?;
-                                    f.set_item("players", PyList::empty_bound(py))?;
-                                    f.set_item("boost_pad_events", PyList::empty_bound(py))?;
-                                    f.set_item("component_events", PyList::empty_bound(py))?;
-                                    f.set_item("parser_touch_events", PyList::empty_bound(py))?;
-                                    f.set_item("parser_demo_events", PyList::empty_bound(py))?;
-                                    f.set_item(
-                                        "parser_first_touch_events",
-                                        PyList::empty_bound(py),
-                                    )?;
-                                    f.set_item("parser_stat_events", PyList::empty_bound(py))?;
-                                    f.set_item("parser_tickmarks", PyList::empty_bound(py))?;
-                                    f.set_item("parser_kickoff_markers", PyList::empty_bound(py))?;
+                                    f.set_item("players", PyList::empty(py))?;
+                                    f.set_item("boost_pad_events", PyList::empty(py))?;
+                                    f.set_item("component_events", PyList::empty(py))?;
+                                    f.set_item("parser_touch_events", PyList::empty(py))?;
+                                    f.set_item("parser_demo_events", PyList::empty(py))?;
+                                    f.set_item("parser_first_touch_events", PyList::empty(py))?;
+                                    f.set_item("parser_stat_events", PyList::empty(py))?;
+                                    f.set_item("parser_tickmarks", PyList::empty(py))?;
+                                    f.set_item("parser_kickoff_markers", PyList::empty(py))?;
 
-                                    let parser_meta = PyDict::new_bound(py);
+                                    let parser_meta = PyDict::new(py);
                                     parser_meta.set_item(
                                         "classification_source",
                                         "fallback_unclassified",
@@ -2690,9 +2688,9 @@ fn parse_network_with_diagnostics(path: &str) -> PyResult<PyObject> {
                 diagnostics.set_item("error_detail", detail)?;
                 diagnostics.set_item("frames_emitted", fallback_frames_emitted as i64)?;
                 result.set_item("frames", fallback_frames)?;
-                result.set_item("player_metadata", PyDict::new_bound(py))?;
+                result.set_item("player_metadata", PyDict::new(py))?;
                 result.set_item("diagnostics", diagnostics)?;
-                Ok(result.to_object(py))
+                result.into_py_any(py)
             }
         }
     })
@@ -2701,14 +2699,14 @@ fn parse_network_with_diagnostics(path: &str) -> PyResult<PyObject> {
 /// Debug harness: expose early-frame actor mappings and attribute kinds to Python.
 #[pyfunction]
 pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let data = read_file_bytes(path)?;
         let replay = ParserBuilder::new(&data)
             .must_parse_network_data()
             .parse()
             .map_err(|e| PyValueError::new_err(format!("Failed to parse network frames: {e}")))?;
 
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         let objects = &replay.objects;
 
         let mut actor_object_name: HashMap<i32, String> = HashMap::new();
@@ -2747,13 +2745,13 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                     break;
                 }
 
-                let frame_dict = PyDict::new_bound(py);
+                let frame_dict = PyDict::new(py);
                 frame_dict.set_item("frame_index", frame_idx as i64)?;
                 frame_dict.set_item("timestamp", nf.time as f64)?;
 
-                let new_actors_py = PyList::empty_bound(py);
-                let updated_py = PyList::empty_bound(py);
-                let boost_events_py = PyList::empty_bound(py);
+                let new_actors_py = PyList::empty(py);
+                let updated_py = PyList::empty(py);
+                let boost_events_py = PyList::empty(py);
 
                 for deleted in &nf.deleted_actors {
                     let aid: i32 = (*deleted).into();
@@ -2777,18 +2775,18 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                         boost_actor_ids.insert(actor_id);
                     }
 
-                    let actor_dict = PyDict::new_bound(py);
+                    let actor_dict = PyDict::new(py);
                     actor_dict.set_item("actor_id", actor_id as i64)?;
                     actor_dict.set_item("object_id", object_id as i64)?;
                     actor_dict.set_item("object_name", object_name.clone())?;
 
-                    let trajectory_dict = PyDict::new_bound(py);
+                    let trajectory_dict = PyDict::new(py);
                     if let Some(loc) = na.initial_trajectory.location {
-                        let loc_world = PyDict::new_bound(py);
+                        let loc_world = PyDict::new(py);
                         loc_world.set_item("x", (loc.x as f64) / 100.0)?;
                         loc_world.set_item("y", (loc.y as f64) / 100.0)?;
                         loc_world.set_item("z", (loc.z as f64) / 100.0)?;
-                        let loc_raw = PyDict::new_bound(py);
+                        let loc_raw = PyDict::new(py);
                         loc_raw.set_item("x", loc.x)?;
                         loc_raw.set_item("y", loc.y)?;
                         loc_raw.set_item("z", loc.z)?;
@@ -2796,7 +2794,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                         trajectory_dict.set_item("location_raw", loc_raw)?;
                     }
                     if let Some(rot) = na.initial_trajectory.rotation {
-                        let rot_dict = PyDict::new_bound(py);
+                        let rot_dict = PyDict::new(py);
                         if let Some(yaw) = rot.yaw {
                             rot_dict.set_item("yaw", yaw)?;
                         }
@@ -2817,13 +2815,13 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                     new_actors_py.append(actor_dict)?;
 
                     if is_boost_actor {
-                        let event = PyDict::new_bound(py);
+                        let event = PyDict::new(py);
                         event.set_item("event", "trajectory")?;
                         event.set_item("actor_id", actor_id as i64)?;
                         event.set_item("object_name", object_name)?;
                         event.set_item("timestamp", nf.time as f64)?;
                         if let Some(loc) = na.initial_trajectory.location {
-                            let loc_dict = PyDict::new_bound(py);
+                            let loc_dict = PyDict::new(py);
                             loc_dict.set_item("x", (loc.x as f64) / 100.0)?;
                             loc_dict.set_item("y", (loc.y as f64) / 100.0)?;
                             loc_dict.set_item("z", (loc.z as f64) / 100.0)?;
@@ -2836,7 +2834,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                 for ua in &nf.updated_actors {
                     let actor_id: i32 = ua.actor_id.into();
                     let attribute_repr = format!("{:?}", ua.attribute);
-                    let update_dict = PyDict::new_bound(py);
+                    let update_dict = PyDict::new(py);
                     update_dict.set_item("actor_id", actor_id as i64)?;
                     update_dict.set_item("attribute", attribute_repr)?;
                     if let Some(obj) = actor_object_name.get(&actor_id) {
@@ -2855,22 +2853,22 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                             }
                         }
                         Attribute::RigidBody(rb) => {
-                            let detail = PyDict::new_bound(py);
+                            let detail = PyDict::new(py);
                             detail.set_item("sleeping", rb.sleeping)?;
-                            let loc_dict = PyDict::new_bound(py);
+                            let loc_dict = PyDict::new(py);
                             loc_dict.set_item("x", rb.location.x)?;
                             loc_dict.set_item("y", rb.location.y)?;
                             loc_dict.set_item("z", rb.location.z)?;
                             detail.set_item("location", loc_dict)?;
                             if let Some(lv) = rb.linear_velocity {
-                                let vel_dict = PyDict::new_bound(py);
+                                let vel_dict = PyDict::new(py);
                                 vel_dict.set_item("x", lv.x)?;
                                 vel_dict.set_item("y", lv.y)?;
                                 vel_dict.set_item("z", lv.z)?;
                                 detail.set_item("linear_velocity", vel_dict)?;
                             }
                             if let Some(av) = rb.angular_velocity {
-                                let ang_dict = PyDict::new_bound(py);
+                                let ang_dict = PyDict::new(py);
                                 ang_dict.set_item("x", av.x)?;
                                 ang_dict.set_item("y", av.y)?;
                                 ang_dict.set_item("z", av.z)?;
@@ -2878,28 +2876,28 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                             }
                             update_dict.set_item("detail", detail)?;
                             if boost_actor_ids.contains(&actor_id) {
-                                let event = PyDict::new_bound(py);
+                                let event = PyDict::new(py);
                                 event.set_item("event", "rigid_body")?;
                                 event.set_item("actor_id", actor_id as i64)?;
                                 if let Some(obj) = actor_object_name.get(&actor_id) {
                                     event.set_item("object_name", obj)?;
                                 }
                                 event.set_item("timestamp", nf.time as f64)?;
-                                let loc_event = PyDict::new_bound(py);
+                                let loc_event = PyDict::new(py);
                                 loc_event.set_item("x", rb.location.x)?;
                                 loc_event.set_item("y", rb.location.y)?;
                                 loc_event.set_item("z", rb.location.z)?;
                                 event.set_item("location", loc_event)?;
                                 event.set_item("sleeping", rb.sleeping)?;
                                 if let Some(lv) = rb.linear_velocity {
-                                    let vel_dict = PyDict::new_bound(py);
+                                    let vel_dict = PyDict::new(py);
                                     vel_dict.set_item("x", lv.x)?;
                                     vel_dict.set_item("y", lv.y)?;
                                     vel_dict.set_item("z", lv.z)?;
                                     event.set_item("linear_velocity", vel_dict)?;
                                 }
                                 if let Some(av) = rb.angular_velocity {
-                                    let ang_dict = PyDict::new_bound(py);
+                                    let ang_dict = PyDict::new(py);
                                     ang_dict.set_item("x", av.x)?;
                                     ang_dict.set_item("y", av.y)?;
                                     ang_dict.set_item("z", av.z)?;
@@ -2909,7 +2907,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                             }
                         }
                         Attribute::Pickup(pickup) => {
-                            let detail = PyDict::new_bound(py);
+                            let detail = PyDict::new(py);
                             detail.set_item("picked_up", pickup.picked_up)?;
                             if let Some(instigator) = pickup.instigator {
                                 let raw_actor: i32 = instigator.into();
@@ -2919,7 +2917,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                                     detail.set_item("resolved_actor_id", resolved)?;
                                 }
                                 if !chain.is_empty() {
-                                    let chain_py = PyList::empty_bound(py);
+                                    let chain_py = PyList::empty(py);
                                     for item in chain {
                                         chain_py.append(item as i64)?;
                                     }
@@ -2928,7 +2926,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                             }
                             update_dict.set_item("detail", detail)?;
                             if boost_actor_ids.contains(&actor_id) {
-                                let event = PyDict::new_bound(py);
+                                let event = PyDict::new(py);
                                 event.set_item("event", "pickup_state")?;
                                 event.set_item("actor_id", actor_id as i64)?;
                                 if let Some(obj) = actor_object_name.get(&actor_id) {
@@ -2952,7 +2950,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                                         event.set_item("resolved_actor_id", resolved)?;
                                     }
                                     if !chain.is_empty() {
-                                        let chain_py = PyList::empty_bound(py);
+                                        let chain_py = PyList::empty(py);
                                         for item in chain {
                                             chain_py.append(item as i64)?;
                                         }
@@ -2963,7 +2961,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                             }
                         }
                         Attribute::PickupNew(pickup_new) => {
-                            let detail = PyDict::new_bound(py);
+                            let detail = PyDict::new(py);
                             detail.set_item("raw_state", pickup_new.picked_up)?;
                             detail.set_item("state", pickup_state_label(pickup_new.picked_up))?;
                             if let Some(instigator) = pickup_new.instigator {
@@ -2974,7 +2972,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                                     detail.set_item("resolved_actor_id", resolved)?;
                                 }
                                 if !chain.is_empty() {
-                                    let chain_py = PyList::empty_bound(py);
+                                    let chain_py = PyList::empty(py);
                                     for item in chain {
                                         chain_py.append(item as i64)?;
                                     }
@@ -2983,7 +2981,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                             }
                             update_dict.set_item("detail", detail)?;
                             if boost_actor_ids.contains(&actor_id) {
-                                let event = PyDict::new_bound(py);
+                                let event = PyDict::new(py);
                                 event.set_item("event", "pickup_new")?;
                                 event.set_item("actor_id", actor_id as i64)?;
                                 if let Some(obj) = actor_object_name.get(&actor_id) {
@@ -3002,7 +3000,7 @@ pub fn debug_first_frames(path: &str, max_frames: usize) -> PyResult<Py<PyAny>> 
                                         event.set_item("resolved_actor_id", resolved)?;
                                     }
                                     if !chain.is_empty() {
-                                        let chain_py = PyList::empty_bound(py);
+                                        let chain_py = PyList::empty(py);
                                         for item in chain {
                                             chain_py.append(item as i64)?;
                                         }
@@ -3055,6 +3053,5 @@ fn rlreplay_rust(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "Rust-backed RL replay parser (boxcars): header + network frames",
     )?;
 
-    pyo3::prepare_freethreaded_python();
     Ok(())
 }
