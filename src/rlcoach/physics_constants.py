@@ -36,7 +36,7 @@ BALL_MAX_SPEED_UU_S: float = 6000.0  # Maximum ball speed
 
 # Car dimensions (approximate for Octane)
 CAR_HEIGHT_UU: float = 17.0  # Height of car hitbox center when on ground
-CAR_MAX_SPEED_UU_S: float = 2300.0  # Max car speed without boost
+CAR_MAX_SPEED_UU_S: float = 2300.0  # Hard speed cap, boost included
 CAR_BOOST_ACCELERATION_UU_S2: float = 991.67  # Acceleration when boosting
 
 # Jump physics

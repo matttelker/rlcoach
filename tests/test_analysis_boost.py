@@ -1,12 +1,22 @@
 """Tests for boost analysis."""
 
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import Mock
 
-from rlcoach.analysis.boost import analyze_boost
+import pytest
+
+from rlcoach.analysis.boost import (
+    SPEED_CAP_WASTE_THRESHOLD,
+    _calculate_speed,
+    analyze_boost,
+)
 from rlcoach.events import BoostPickupEvent
 from rlcoach.field_constants import Vec3
+from rlcoach.normalize import build_timeline
+from rlcoach.parser import get_adapter
 from rlcoach.parser.types import BallFrame, Frame, PlayerFrame
+from rlcoach.physics_constants import CAR_MAX_SPEED_UU_S
 
 
 def create_test_frame(timestamp: float, players: list[PlayerFrame]) -> Frame:
@@ -52,6 +62,31 @@ def create_test_player(
         is_on_ground=True,
         is_demolished=False,
     )
+
+
+def create_burst_frames(
+    start_speed: float,
+    end_speed: float,
+    start_time: float = 0.0,
+    held_steps: int = 0,
+) -> list[Frame]:
+    """Build a 20-unit boost burst (0.6 s) whose drop replicates on its last frame.
+
+    Speed ramps to end_speed, then stays there for the last held_steps steps.
+    """
+    steps = 20
+    frames = []
+    for step in range(steps + 1):
+        progress = min(step / (steps - held_steps), 1.0)
+        speed = start_speed + (end_speed - start_speed) * progress
+        player = create_test_player(
+            "player1",
+            0,
+            boost=60 if step == steps else 80,
+            velocity=Vec3(speed, 0.0, 0.0),
+        )
+        frames.append(create_test_frame(start_time + step * 0.03, [player]))
+    return frames
 
 
 class TestBoostAnalysis:
@@ -395,6 +430,137 @@ class TestBoostAnalysis:
             result["waste"] > 0.0
         )  # Should detect some waste from supersonic boosting
 
+    @pytest.mark.parametrize(
+        ("speed", "expected_waste"),
+        [
+            (2300.0, 14.0),  # At the cap: 20 boost * 0.7
+            (2299.98, 14.0),  # What a capped car reads after replication
+            (2299.8, 6.0),  # Under the cap: partial 20 boost * 0.3
+            (2200.0, 6.0),  # Supersonic is not the cap
+        ],
+    )
+    def test_waste_counts_fully_only_at_the_speed_cap(self, speed, expected_waste):
+        """Boost spent at the cap adds no speed; below it some benefit remains."""
+        velocity = Vec3(speed, 0.0, 0.0)
+        frames = [
+            create_test_frame(
+                0.0, [create_test_player("player1", 0, boost=80, velocity=velocity)]
+            ),
+            create_test_frame(
+                1.0, [create_test_player("player1", 0, boost=60, velocity=velocity)]
+            ),
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == pytest.approx(expected_waste)
+
+    @pytest.mark.parametrize(
+        ("start_speed", "end_speed", "expected_waste"),
+        [
+            (1000.0, 1600.0, 0.0),  # Working boost, though each frame adds only 30
+            (1000.0, 1100.0, 0.0),  # Smallest gain that counts as useful
+            (1000.0, 1099.0, 6.0),  # Just under it: 20 boost * 0.3
+            (1500.0, 1200.0, 6.0),  # Lost speed while boosting
+        ],
+    )
+    def test_waste_compares_speed_across_the_whole_burst(
+        self, start_speed, end_speed, expected_waste
+    ):
+        """Boost adds little per frame, so only the whole burst shows its benefit."""
+        frames = create_burst_frames(start_speed, end_speed)
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == pytest.approx(expected_waste)
+
+    @pytest.mark.parametrize(
+        ("start_speed", "held_steps", "expected_waste"),
+        [
+            (1000.0, 0, 0.7),  # Reached the cap on the last sample: 1 of 20 * 0.7
+            (1000.0, 10, 7.7),  # 11 of 20 samples at the cap, the rest useful
+            (2250.0, 10, 10.4),  # Same share, but little gain: 7.7 + 9 boost * 0.3
+            (2300.0, 0, 14.0),  # Whole burst at the cap
+        ],
+    )
+    def test_waste_counts_only_the_boost_spent_at_the_cap(
+        self, start_speed, held_steps, expected_waste
+    ):
+        """A burst that climbed to the cap did useful work on the way there."""
+        frames = create_burst_frames(start_speed, 2300.0, held_steps=held_steps)
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == pytest.approx(expected_waste)
+
+    def test_waste_ignores_time_at_the_cap_before_the_burst(self):
+        """A burst that starts from the cap but falls away was never at it."""
+        frames = create_burst_frames(2300.0, 2000.0)
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == pytest.approx(6.0)  # Partial: 20 boost * 0.3
+
+    def test_waste_ignores_speed_from_before_the_burst(self):
+        """A car that slowed down first is judged only on what the burst added."""
+        slowing = [
+            create_test_frame(
+                0.0,
+                [
+                    create_test_player(
+                        "player1", 0, boost=80, velocity=Vec3(2300.0, 0.0, 0.0)
+                    )
+                ],
+            ),
+            create_test_frame(
+                1.9,
+                [
+                    create_test_player(
+                        "player1", 0, boost=80, velocity=Vec3(1000.0, 0.0, 0.0)
+                    )
+                ],
+            ),
+        ]
+        frames = slowing + create_burst_frames(1000.0, 1600.0, start_time=2.0)
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == 0.0
+
+    @pytest.mark.parametrize("speed_after", [0.0, 2300.0])  # Velocity can lag a reset
+    def test_reset_is_not_waste(self, speed_after):
+        """A kickoff or demo reset moves the car and takes boost without spending it."""
+        frames = [
+            create_test_frame(
+                0.0,
+                [
+                    create_test_player(
+                        "player1",
+                        0,
+                        boost=80,
+                        velocity=Vec3(1500.0, 0.0, 0.0),
+                        position=Vec3(3000.0, 3000.0, 17.0),
+                    )
+                ],
+            ),
+            create_test_frame(
+                0.03,
+                [
+                    create_test_player(
+                        "player1",
+                        0,
+                        boost=33,
+                        velocity=Vec3(speed_after, 0.0, 0.0),
+                        position=Vec3(0.0, -4608.0, 17.0),
+                    )
+                ],
+            ),
+        ]
+
+        result = analyze_boost(frames, {}, player_id="player1")
+
+        assert result["waste"] == 0.0
+
     def test_bpm_and_bcpm_calculation(self):
         """Test BPM and BCPM rate calculations."""
         player1 = create_test_player("player1", 0)
@@ -667,3 +833,26 @@ class TestBoostAnalysis:
         assert (
             result["bpm"] == 100.0
         )  # 100 boost collected in default 1 minute duration
+
+
+def test_real_replay_capped_cars_reach_the_waste_threshold():
+    """Capped cars read just under 2300 UU/s, so a check at 2300 would miss them."""
+    pytest.importorskip("rlreplay_rust")
+    replay = Path("testing_replay.replay")
+    if not replay.exists() or replay.stat().st_size < 1024:
+        pytest.skip("real testing_replay.replay not available")
+
+    adapter = get_adapter("rust")
+    frames = build_timeline(
+        adapter.parse_header(replay), adapter.parse_network(replay).frames
+    )
+    near_cap = [
+        speed
+        for frame in frames
+        for player in frame.players
+        if (speed := _calculate_speed(player.velocity)) >= CAR_MAX_SPEED_UU_S - 1.0
+    ]
+
+    assert near_cap
+    reached = sum(speed >= SPEED_CAP_WASTE_THRESHOLD for speed in near_cap)
+    assert reached / len(near_cap) > 0.5
