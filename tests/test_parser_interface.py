@@ -373,7 +373,7 @@ class TestIntegrationWithTestReplay:
 
     def test_parse_real_replay_file(self):
         """Test parsing the actual testing replay file if it exists."""
-        replay_path = Path("testing_replay.replay")
+        replay_path = Path("Replay_files/testing_replay.replay")
 
         if not replay_path.exists():
             pytest.skip("testing_replay.replay not found - skipping integration test")
@@ -391,7 +391,7 @@ class TestIntegrationWithTestReplay:
 
     def test_adapter_selection_with_real_file(self):
         """Test adapter selection system with real file."""
-        replay_path = Path("testing_replay.replay")
+        replay_path = Path("Replay_files/testing_replay.replay")
 
         if not replay_path.exists():
             pytest.skip("testing_replay.replay not found - skipping integration test")
@@ -442,11 +442,11 @@ def test_parse_network_returns_none_only_when_adapter_unavailable(monkeypatch):
     adapter = RustAdapter()
     monkeypatch.setattr("rlcoach.parser.rust_adapter._rust", FakeRust())
     monkeypatch.setattr("rlcoach.parser.rust_adapter._RUST_AVAILABLE", True)
-    assert adapter.parse_network(Path("testing_replay.replay")) is not None
+    assert adapter.parse_network(Path("Replay_files/testing_replay.replay")) is not None
 
     monkeypatch.setattr("rlcoach.parser.rust_adapter._rust", None)
     monkeypatch.setattr("rlcoach.parser.rust_adapter._RUST_AVAILABLE", False)
-    assert adapter.parse_network(Path("testing_replay.replay")) is None
+    assert adapter.parse_network(Path("Replay_files/testing_replay.replay")) is None
 
 
 def test_rust_adapter_can_report_attempted_backends_in_diagnostics():
@@ -454,7 +454,7 @@ def test_rust_adapter_can_report_attempted_backends_in_diagnostics():
     if not adapter.supports_network_parsing:
         pytest.skip("Rust adapter unavailable in this environment")
 
-    nf = adapter.parse_network(Path("testing_replay.replay"))
+    nf = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
     assert nf is not None
     assert hasattr(nf, "diagnostics")
     diagnostics = nf.diagnostics

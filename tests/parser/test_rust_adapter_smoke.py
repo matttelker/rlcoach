@@ -20,7 +20,7 @@ def _has_rust_core():
 def test_rust_header_and_frames_smoke():
     from rlcoach.parser import get_adapter
 
-    path = Path("testing_replay.replay")
+    path = Path("Replay_files/testing_replay.replay")
 
     adapter = get_adapter("rust")
     assert adapter.supports_network_parsing is True
@@ -49,7 +49,9 @@ def test_rust_header_and_frames_smoke():
 def test_rust_network_parse_returns_diagnostics_shape():
     import rlreplay_rust  # type: ignore
 
-    result = rlreplay_rust.parse_network_with_diagnostics("testing_replay.replay")
+    result = rlreplay_rust.parse_network_with_diagnostics(
+        "Replay_files/testing_replay.replay"
+    )
 
     assert isinstance(result, dict)
     assert "frames" in result

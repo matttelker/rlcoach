@@ -735,7 +735,7 @@ class TestMovementAnalysis:
 def test_real_replay_speeds_stay_within_the_car_speed_cap():
     """End to end, reported speeds must respect the 2300 UU/s (82.8 km/h) cap."""
     pytest.importorskip("rlreplay_rust")
-    replay = Path("testing_replay.replay")
+    replay = Path("Replay_files/testing_replay.replay")
     if not replay.exists() or replay.stat().st_size < 1024:
         pytest.skip("real testing_replay.replay not available")
 

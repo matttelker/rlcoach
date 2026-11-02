@@ -241,11 +241,11 @@ class TestFileSHA256:
             tmp.flush()
 
             tmp_path = Path(tmp.name)
-            try:
-                result = file_sha256(tmp_path)
-                assert result == expected_hash
-            finally:
-                tmp_path.unlink()
+        try:
+            result = file_sha256(tmp_path)
+            assert result == expected_hash
+        finally:
+            tmp_path.unlink()
 
     def test_file_sha256_nonexistent_file(self):
         """Test SHA256 calculation for nonexistent file."""
@@ -270,11 +270,11 @@ class TestReadReplayBytes:
             tmp.flush()
 
             tmp_path = Path(tmp.name)
-            try:
-                result = read_replay_bytes(tmp_path)
-                assert result == content
-            finally:
-                tmp_path.unlink()
+        try:
+            result = read_replay_bytes(tmp_path)
+            assert result == content
+        finally:
+            tmp_path.unlink()
 
     def test_read_replay_bytes_nonexistent(self):
         """Test reading nonexistent file."""
@@ -294,14 +294,14 @@ class TestReadReplayBytes:
             tmp.flush()
 
             tmp_path = Path(tmp.name)
-            try:
-                with pytest.raises(FileTooSmallError) as exc_info:
-                    read_replay_bytes(tmp_path)
+        try:
+            with pytest.raises(FileTooSmallError) as exc_info:
+                read_replay_bytes(tmp_path)
 
-                assert exc_info.value.details["size_bytes"] == len(content)
-                assert exc_info.value.details["min_size_bytes"] == MIN_REPLAY_SIZE
-            finally:
-                tmp_path.unlink()
+            assert exc_info.value.details["size_bytes"] == len(content)
+            assert exc_info.value.details["min_size_bytes"] == MIN_REPLAY_SIZE
+        finally:
+            tmp_path.unlink()
 
     def test_read_replay_bytes_too_large(self):
         """Test reading file that's too large."""
@@ -318,14 +318,14 @@ class TestReadReplayBytes:
             tmp.flush()
 
             tmp_path = Path(tmp.name)
-            try:
-                with pytest.raises(FileTooLargeError) as exc_info:
-                    read_replay_bytes(tmp_path)
+        try:
+            with pytest.raises(FileTooLargeError) as exc_info:
+                read_replay_bytes(tmp_path)
 
-                assert exc_info.value.details["size_bytes"] == large_size
-                assert exc_info.value.details["max_size_bytes"] == MAX_REPLAY_SIZE
-            finally:
-                tmp_path.unlink()
+            assert exc_info.value.details["size_bytes"] == large_size
+            assert exc_info.value.details["max_size_bytes"] == MAX_REPLAY_SIZE
+        finally:
+            tmp_path.unlink()
 
     def test_read_replay_bytes_directory(self):
         """Test reading a directory instead of file."""
@@ -366,30 +366,30 @@ class TestIngestReplay:
             tmp.flush()
 
             tmp_path = Path(tmp.name)
-            try:
-                result = ingest_replay(tmp_path)
+        try:
+            result = ingest_replay(tmp_path)
 
-                assert result["file_path"] == str(tmp_path)
-                assert result["sha256"] == expected_hash
-                assert result["size_bytes"] == len(content)
-                assert result["size_human"] is not None
-                assert result["status"] == "success"
+            assert result["file_path"] == str(tmp_path)
+            assert result["sha256"] == expected_hash
+            assert result["size_bytes"] == len(content)
+            assert result["size_human"] is not None
+            assert result["status"] == "success"
 
-                assert result["bounds_check"]["passed"] is True
+            assert result["bounds_check"]["passed"] is True
 
-                assert result["format_check"]["passed"] is True
+            assert result["format_check"]["passed"] is True
 
-                assert result["crc_check"]["passed"] is True
-                assert result["crc_check"]["details"]["header"]["passed"] is True
-                assert result["crc_check"]["details"]["content"]["passed"] is True
-                assert result["header_versions"]["major"] == 868
-                assert result["header_versions"]["minor"] == 23
+            assert result["crc_check"]["passed"] is True
+            assert result["crc_check"]["details"]["header"]["passed"] is True
+            assert result["crc_check"]["details"]["content"]["passed"] is True
+            assert result["header_versions"]["major"] == 868
+            assert result["header_versions"]["minor"] == 23
 
-                # Should have no warnings for valid file
-                assert result["warnings"] == []
+            # Should have no warnings for valid file
+            assert result["warnings"] == []
 
-            finally:
-                tmp_path.unlink()
+        finally:
+            tmp_path.unlink()
 
     def test_ingest_replay_crc_failure(self):
         """Replay ingestion should raise when CRC validation fails."""
@@ -402,13 +402,13 @@ class TestIngestReplay:
             tmp.flush()
 
             tmp_path = Path(tmp.name)
-            try:
-                with pytest.raises(CRCValidationError) as exc_info:
-                    ingest_replay(tmp_path)
+        try:
+            with pytest.raises(CRCValidationError) as exc_info:
+                ingest_replay(tmp_path)
 
-                assert exc_info.value.details["section"] == "header"
-            finally:
-                tmp_path.unlink()
+            assert exc_info.value.details["section"] == "header"
+        finally:
+            tmp_path.unlink()
 
     def test_ingest_replay_file_not_found(self):
         """Test ingesting nonexistent file."""
@@ -426,11 +426,11 @@ class TestIngestReplay:
             tmp.flush()
 
             tmp_path = Path(tmp.name)
-            try:
-                with pytest.raises(InvalidReplayFormatError):
-                    ingest_replay(tmp_path)
-            finally:
-                tmp_path.unlink()
+        try:
+            with pytest.raises(InvalidReplayFormatError):
+                ingest_replay(tmp_path)
+        finally:
+            tmp_path.unlink()
 
     def test_ingest_replay_too_small(self):
         """Test ingesting file that's too small."""
@@ -441,11 +441,11 @@ class TestIngestReplay:
             tmp.flush()
 
             tmp_path = Path(tmp.name)
-            try:
-                with pytest.raises(FileTooSmallError):
-                    ingest_replay(tmp_path)
-            finally:
-                tmp_path.unlink()
+        try:
+            with pytest.raises(FileTooSmallError):
+                ingest_replay(tmp_path)
+        finally:
+            tmp_path.unlink()
 
 
 class TestConstants:

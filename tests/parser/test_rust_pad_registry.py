@@ -17,7 +17,7 @@ def test_rust_pad_registry_event_completeness():
     from rlcoach.parser import get_adapter
 
     adapter = get_adapter("rust")
-    frames = adapter.parse_network(Path("testing_replay.replay"))
+    frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
 
     pad_events = []
     for frame in frames.frames:
@@ -66,7 +66,7 @@ def test_rust_pad_registry_survives_checkpoints():
     from rlcoach.parser import get_adapter
 
     adapter = get_adapter("rust")
-    frames = adapter.parse_network(Path("testing_replay.replay"))
+    frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
     pad_events = [
         event for frame in frames.frames for event in frame.get("boost_pad_events", [])
     ]
@@ -89,7 +89,7 @@ def test_location_component_events_do_not_break_pad_registry():
     from rlcoach.parser import get_adapter
 
     adapter = get_adapter("rust")
-    frames = adapter.parse_network(Path("testing_replay.replay"))
+    frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
 
     pad_events = []
     component_events = []

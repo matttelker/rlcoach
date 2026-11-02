@@ -838,7 +838,7 @@ class TestBoostAnalysis:
 def test_real_replay_capped_cars_reach_the_waste_threshold():
     """Capped cars read just under 2300 UU/s, so a check at 2300 would miss them."""
     pytest.importorskip("rlreplay_rust")
-    replay = Path("testing_replay.replay")
+    replay = Path("Replay_files/testing_replay.replay")
     if not replay.exists() or replay.stat().st_size < 1024:
         pytest.skip("real testing_replay.replay not available")
 

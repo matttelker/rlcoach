@@ -15,15 +15,17 @@ def reset_db():
 
 def test_benchmarks_import_success(tmp_path, capsys):
     config_path = tmp_path / "config.toml"
-    config_path.write_text(f"""
+    config_path.write_text(
+        f"""
 [identity]
 platform_ids = ["steam:123"]
 
 [paths]
 watch_folder = "~/Replays"
-data_dir = "{tmp_path / "data"}"
-reports_dir = "{tmp_path / "reports"}"
-""")
+data_dir = "{(tmp_path / "data").as_posix()}"
+reports_dir = "{(tmp_path / "reports").as_posix()}"
+"""
+    )
 
     benchmark_file = tmp_path / "benchmarks.json"
     benchmark_file.write_text(
@@ -52,15 +54,17 @@ reports_dir = "{tmp_path / "reports"}"
 
 def test_benchmarks_list_shows_data(tmp_path, capsys):
     config_path = tmp_path / "config.toml"
-    config_path.write_text(f"""
+    config_path.write_text(
+        f"""
 [identity]
 platform_ids = ["steam:123"]
 
 [paths]
 watch_folder = "~/Replays"
-data_dir = "{tmp_path / "data"}"
-reports_dir = "{tmp_path / "reports"}"
-""")
+data_dir = "{(tmp_path / "data").as_posix()}"
+reports_dir = "{(tmp_path / "reports").as_posix()}"
+"""
+    )
 
     benchmark_file = tmp_path / "benchmarks.json"
     benchmark_file.write_text(

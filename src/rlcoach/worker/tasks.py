@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-import resource
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +11,11 @@ from pathlib import Path
 from celery.exceptions import SoftTimeLimitExceeded
 
 from rlcoach.worker.celery_app import celery_app
+
+try:
+    import resource
+except ImportError:  # Unix only
+    resource = None
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,8 @@ def _is_path_within_directory(file_path: Path, directory: Path) -> bool:
 
 def set_memory_limit():
     """Set memory limit for subprocess."""
+    if resource is None:
+        return
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
 
 

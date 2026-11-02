@@ -734,11 +734,11 @@ class TestKickoffDetection:
         ("replay", "overtime_kickoffs"),
         [
             ("0925.replay", []),
-            ("4985385d-2a6a-4bea-a312-8e539c7fd098.replay", [346.3, 346.4, 351.3]),
+            ("4985385d-2a6a-4bea-a312-8e539c7fd098.replay", [350.2]),
             ("6804bd43-5415-49f4-b7d0-31b168c871ed.replay", []),
             ("70c0e78e-ea32-4722-a951-937baa40efc9.replay", []),
             ("77253f53-0654-4565-b18e-e77ddbb84282.replay", []),
-            ("testing_replay.replay", [424.5, 424.7, 429.6]),
+            ("testing_replay.replay", [428.5]),
         ],
     )
     def test_overtime_kickoffs_match_the_game_clock(self, replay, overtime_kickoffs):

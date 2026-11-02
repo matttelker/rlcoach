@@ -808,8 +808,8 @@ mod tests {
     use super::{
         assign_player_index, bind_player_index, cam_settings_pairs, infer_kickoff_phase,
         is_car_state_actor, is_first_touch_rise, loadout_pairs, map_network_error_code,
-        normalize_input_byte, pickup_bool_raw_state, player_index_for_car,
-        resolve_component_owner, team_loadout_for, unclaimed_header_rows, unlink_car, ActorKind,
+        normalize_input_byte, pickup_bool_raw_state, player_index_for_car, resolve_component_owner,
+        team_loadout_for, unclaimed_header_rows, unlink_car, ActorKind,
     };
     use std::collections::{HashMap, HashSet};
 
