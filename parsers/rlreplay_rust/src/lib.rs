@@ -81,6 +81,97 @@ fn unique_header_index_by_name(
     matches.next().is_none().then_some(first)
 }
 
+/// Header rows a car can be given by team alone, because no PRI in the stream carries
+/// their name (a player renamed mid-match). Every other row waits for its PRI, however
+/// late that PRI joins, so a stranger's car can't borrow it in the meantime.
+fn unclaimed_header_rows(
+    header_players: &[(String, i64)],
+    stream_names: &HashSet<String>,
+) -> HashMap<i64, Vec<usize>> {
+    let mut rows: HashMap<i64, Vec<usize>> = HashMap::from([(0, Vec::new()), (1, Vec::new())]);
+    for (idx, (name, team)) in header_players.iter().enumerate() {
+        if stream_names.contains(name)
+            && unique_header_index_by_name(header_players, name) == Some(idx)
+        {
+            continue;
+        }
+        rows.entry(if *team == 0 { 0 } else { 1 })
+            .or_default()
+            .push(idx);
+    }
+    rows
+}
+
+/// Give an unbound car a player index, or `None` when it should stay unbound.
+///
+/// A car takes its PRI's index. A PRI without one takes an unclaimed header row, or
+/// failing that a new index past the header rows: `PlayerStats` lists only who finished
+/// the match, so leavers and the bots that replaced them have no row. Either way the
+/// PRI keeps that index, so its later cars need no second look.
+#[allow(clippy::too_many_arguments)]
+fn assign_player_index(
+    actor_to_player_index: &mut HashMap<i32, usize>,
+    owner_to_player_index: &mut HashMap<i32, usize>,
+    next_by_team: &mut HashMap<i64, Vec<usize>>,
+    car_owner: &HashMap<i32, i32>,
+    unlinked_cars: &HashSet<i32>,
+    next_extra_index: &mut usize,
+    car: i32,
+    team: i64,
+) -> Option<usize> {
+    if unlinked_cars.contains(&car) {
+        return None;
+    }
+    let owner = car_owner.get(&car).copied();
+    let owner_index = owner.and_then(|owner| owner_to_player_index.get(&owner).copied());
+    let idx = match owner_index {
+        Some(idx) => idx,
+        None => {
+            let spare = pop_available_player_index(actor_to_player_index, next_by_team, team);
+            let idx = match (spare, owner) {
+                (Some(idx), _) => idx,
+                (None, Some(_)) => {
+                    let idx = *next_extra_index;
+                    *next_extra_index += 1;
+                    idx
+                }
+                (None, None) => return None,
+            };
+            if let Some(owner) = owner {
+                owner_to_player_index.insert(owner, idx);
+            }
+            idx
+        }
+    };
+    bind_player_index(actor_to_player_index, next_by_team, car, idx);
+    Some(idx)
+}
+
+/// Mark a car whose PRI link the game cleared. A demolished car stays in the stream
+/// about 5s and its replacement arrives after 3s, so for 2s a player has two cars.
+/// Dropping the link leaves the wreck reporting until then, but it can no longer take
+/// the player back from the new car or claim a free row.
+fn unlink_car(car_owner: &mut HashMap<i32, i32>, unlinked_cars: &mut HashSet<i32>, car: i32) {
+    car_owner.remove(&car);
+    unlinked_cars.insert(car);
+}
+
+/// The player a car collects for: the one it reports as, else its PRI's. Two PRIs can
+/// share an index (bots reuse names), and only one of their cars can report at a time.
+fn player_index_for_car(
+    actor_to_player_index: &HashMap<i32, usize>,
+    car_owner: &HashMap<i32, i32>,
+    owner_to_player_index: &HashMap<i32, usize>,
+    car: i32,
+) -> Option<usize> {
+    actor_to_player_index.get(&car).copied().or_else(|| {
+        car_owner
+            .get(&car)
+            .and_then(|owner| owner_to_player_index.get(owner))
+            .copied()
+    })
+}
+
 /// Flatten a boxcars `CamSettings` into ordered (key, value) pairs for emission.
 ///
 /// The `swivel`/`transition` fields are surfaced under the more descriptive
@@ -708,11 +799,12 @@ fn map_network_error_code(message: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        cam_settings_pairs, infer_kickoff_phase, is_car_state_actor, loadout_pairs,
-        map_network_error_code, normalize_input_byte, pickup_bool_raw_state,
-        resolve_component_owner, team_loadout_for, ActorKind,
+        assign_player_index, bind_player_index, cam_settings_pairs, infer_kickoff_phase,
+        is_car_state_actor, loadout_pairs, map_network_error_code, normalize_input_byte,
+        pickup_bool_raw_state, player_index_for_car, resolve_component_owner, team_loadout_for,
+        unclaimed_header_rows, unlink_car, ActorKind,
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn kickoff_phase_stays_initial_before_overtime() {
@@ -827,6 +919,183 @@ mod tests {
             &component_owner,
             &actor_to_player_index,
         ));
+    }
+
+    /// What the end of each frame does: unbound cars claim an index in actor id order.
+    #[derive(Default)]
+    struct Bindings {
+        actor_to_player_index: HashMap<i32, usize>,
+        owner_to_player_index: HashMap<i32, usize>,
+        next_by_team: HashMap<i64, Vec<usize>>,
+        car_owner: HashMap<i32, i32>,
+        unlinked_cars: HashSet<i32>,
+        next_extra_index: usize,
+    }
+
+    impl Bindings {
+        fn link(&mut self, car: i32, owner: i32) {
+            self.car_owner.insert(car, owner);
+            if let Some(idx) = self.owner_to_player_index.get(&owner).copied() {
+                bind_player_index(
+                    &mut self.actor_to_player_index,
+                    &mut self.next_by_team,
+                    car,
+                    idx,
+                );
+            }
+        }
+
+        fn end_frame(&mut self, cars: &[i32], team: i64) {
+            let mut sorted = cars.to_vec();
+            sorted.sort_unstable();
+            for car in sorted {
+                if !self.actor_to_player_index.contains_key(&car) {
+                    assign_player_index(
+                        &mut self.actor_to_player_index,
+                        &mut self.owner_to_player_index,
+                        &mut self.next_by_team,
+                        &self.car_owner,
+                        &self.unlinked_cars,
+                        &mut self.next_extra_index,
+                        car,
+                        team,
+                    );
+                }
+            }
+        }
+
+        fn index_of(&self, car: i32) -> Option<usize> {
+            self.actor_to_player_index.get(&car).copied()
+        }
+
+        fn collector(&self, car: i32) -> Option<usize> {
+            player_index_for_car(
+                &self.actor_to_player_index,
+                &self.car_owner,
+                &self.owner_to_player_index,
+                car,
+            )
+        }
+    }
+
+    #[test]
+    fn respawned_car_keeps_player_while_higher_id_wreck_lingers() {
+        // E8D9: car 149 demolished, car 141 spawns 3s later, 149 deleted 2s after that.
+        // BTreeSet order runs the wreck last, so it used to win every frame.
+        let mut bindings = Bindings::default();
+        bindings.owner_to_player_index.insert(47, 3);
+        bindings.link(149, 47);
+        bindings.end_frame(&[149], 1);
+        assert_eq!(bindings.index_of(149), Some(3));
+
+        unlink_car(&mut bindings.car_owner, &mut bindings.unlinked_cars, 149);
+        bindings.end_frame(&[149], 1);
+        // The wreck reports until its replacement arrives.
+        assert_eq!(bindings.index_of(149), Some(3));
+
+        bindings.link(141, 47);
+        for _ in 0..3 {
+            bindings.end_frame(&[141, 149], 1);
+            assert_eq!(bindings.index_of(141), Some(3));
+            assert_eq!(bindings.index_of(149), None);
+        }
+        assert_eq!(bindings.collector(141), Some(3));
+    }
+
+    #[test]
+    fn unlinked_wreck_does_not_claim_a_free_row() {
+        let mut bindings = Bindings::default();
+        bindings.next_by_team.insert(0, vec![4]);
+        bindings.unlinked_cars.insert(149);
+        bindings.end_frame(&[149], 0);
+        assert_eq!(bindings.index_of(149), None);
+        assert_eq!(bindings.next_by_team[&0], vec![4]);
+    }
+
+    #[test]
+    fn player_missing_from_header_gets_one_index_past_the_rows() {
+        // D5B7: PRI 80 left before the end, so PlayerStats has no row for it. Car 176
+        // collected three times and stayed unbound for all of them.
+        let mut bindings = Bindings {
+            next_extra_index: 6,
+            ..Bindings::default()
+        };
+        bindings.link(85, 80);
+        bindings.end_frame(&[85], 0);
+        assert_eq!(bindings.index_of(85), Some(6));
+
+        // A later car of the same PRI is the same player, and a second leaver is not.
+        bindings.link(176, 80);
+        bindings.link(19, 43);
+        bindings.end_frame(&[19, 176], 0);
+        assert_eq!(bindings.index_of(176), Some(6));
+        assert_eq!(bindings.index_of(19), Some(7));
+        assert_eq!(bindings.collector(176), Some(6));
+    }
+
+    #[test]
+    fn named_header_row_waits_for_its_pri() {
+        // D5B7: Alan zitro's PRI joins at 56s. A leaver's car on the same team used to
+        // take the free row at the start and collect under Alan's name.
+        let header = vec![("Alan zitro".to_string(), 1)];
+        let names = HashSet::from(["Alan zitro".to_string(), "YoZae--".to_string()]);
+        let mut bindings = Bindings {
+            next_by_team: unclaimed_header_rows(&header, &names),
+            next_extra_index: 1,
+            ..Bindings::default()
+        };
+        bindings.link(19, 43);
+        bindings.end_frame(&[19], 1);
+        assert_eq!(bindings.index_of(19), Some(1));
+
+        bindings.owner_to_player_index.insert(128, 0);
+        bindings.link(137, 128);
+        bindings.end_frame(&[19, 137], 1);
+        assert_eq!(bindings.index_of(137), Some(0));
+        assert_eq!(bindings.index_of(19), Some(1));
+    }
+
+    #[test]
+    fn renamed_player_takes_the_row_no_pri_names_and_keeps_it() {
+        // FBBB: the header says Poncho, the stream says fanta_666_due.
+        let header = vec![("Stayed".to_string(), 1), ("Poncho".to_string(), 1)];
+        let names = HashSet::from(["Stayed".to_string(), "fanta_666_due".to_string()]);
+        let mut bindings = Bindings {
+            next_by_team: unclaimed_header_rows(&header, &names),
+            next_extra_index: 2,
+            ..Bindings::default()
+        };
+        assert_eq!(bindings.next_by_team[&1], vec![1]);
+        bindings.link(50, 43);
+        bindings.end_frame(&[50], 1);
+        assert_eq!(bindings.index_of(50), Some(1));
+
+        // Demolished: the row is held by the wreck, yet the new car gets it from the PRI.
+        unlink_car(&mut bindings.car_owner, &mut bindings.unlinked_cars, 50);
+        bindings.link(60, 43);
+        bindings.end_frame(&[50, 60], 1);
+        assert_eq!(bindings.index_of(60), Some(1));
+        assert_eq!(bindings.index_of(50), None);
+    }
+
+    #[test]
+    fn duplicate_header_names_stay_free_for_team_binding() {
+        let header = vec![("Twin".to_string(), 0), ("Twin".to_string(), 0)];
+        let names = HashSet::from(["Twin".to_string()]);
+        assert_eq!(unclaimed_header_rows(&header, &names)[&0], vec![0, 1]);
+    }
+
+    #[test]
+    fn linked_car_collects_for_its_pri_when_another_car_reports_as_that_player() {
+        // Two bots named Rex share a header row and only one can hold it.
+        let mut bindings = Bindings::default();
+        bindings.owner_to_player_index.insert(66, 5);
+        bindings.owner_to_player_index.insert(95, 5);
+        bindings.link(60, 66);
+        bindings.link(39, 95);
+        assert_eq!(bindings.index_of(60), None);
+        assert_eq!(bindings.collector(60), Some(5));
+        assert_eq!(bindings.collector(39), Some(5));
     }
 
     #[test]
@@ -1010,6 +1279,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
         let mut car_rot: HashMap<i32, (f32, f32, f32, f32)> = HashMap::new(); // quaternion (x,y,z,w)
         let mut car_demo: HashMap<i32, bool> = HashMap::new();
         let mut car_owner: HashMap<i32, i32> = HashMap::new();
+        let mut unlinked_cars: HashSet<i32> = HashSet::new();
         let mut component_owner: HashMap<i32, i32> = HashMap::new();
         let mut component_active_state: HashMap<i32, bool> = HashMap::new();
         let mut component_active_raw: HashMap<i32, u8> = HashMap::new();
@@ -1021,7 +1291,6 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
         let mut ball_sleeping = false;
         let mut actor_to_player_index: HashMap<i32, usize> = HashMap::new();
         let mut owner_to_player_index: HashMap<i32, usize> = HashMap::new();
-        let mut next_by_team: HashMap<i64, Vec<usize>> = HashMap::new();
         // Per-player profile metadata (camera + loadout), captured from the network
         // stream and keyed by PRI actor id. These persist for the whole replay even
         // across actor deletion/respawn, then resolve to header indices at the end.
@@ -1035,7 +1304,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
         // yet when ClientLoadouts is first replicated).
         let mut team_loadout_by_pri: HashMap<i32, boxcars::TeamLoadout> = HashMap::new();
         let mut fallback_actor_index: HashMap<i32, usize> = HashMap::new();
-        let mut next_fallback_index: usize = 0;
+        let mut next_fallback_index: usize = header_players.len();
         let mut prev_demo_state: HashMap<i32, bool> = HashMap::new();
         let mut frame_index: i64 = 0;
         let mut kickoff_active = false;
@@ -1044,17 +1313,23 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
         let mut last_touch_pos: HashMap<i32, (f32, f32, f32)> = HashMap::new();
         let mut tickmarks_by_frame: HashMap<i64, Vec<(String, i64)>> = HashMap::new();
 
-        let mut team_zero: Vec<usize> = Vec::new();
-        let mut team_one: Vec<usize> = Vec::new();
-        for (idx, (_, team)) in header_players.iter().enumerate() {
-            if *team == 0 {
-                team_zero.push(idx);
-            } else {
-                team_one.push(idx);
-            }
-        }
-        next_by_team.insert(0, team_zero);
-        next_by_team.insert(1, team_one);
+        let stream_names: HashSet<String> = replay
+            .network_frames
+            .iter()
+            .flat_map(|net| &net.frames)
+            .flat_map(|nf| &nf.updated_actors)
+            .filter_map(|upd| match &upd.attribute {
+                Attribute::String(name)
+                    if objects
+                        .get(usize::from(upd.object_id))
+                        .is_some_and(|attr| attr == "Engine.PlayerReplicationInfo:PlayerName") =>
+                {
+                    Some(name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let mut next_by_team = unclaimed_header_rows(&header_players, &stream_names);
 
         for tickmark in &replay.tick_marks {
             tickmarks_by_frame
@@ -1133,7 +1408,9 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                         ball_sleeping = false;
                     }
                     if let Some(idx) = actor_to_player_index.remove(&aid) {
-                        if let Some(team) = team_for_return {
+                        // A PRI keeps its index across respawns.
+                        let owned = owner_to_player_index.values().any(|owned| *owned == idx);
+                        if let (false, Some(team)) = (owned, team_for_return) {
                             if let Some(queue) = next_by_team.get_mut(&team) {
                                 queue.push(idx);
                             }
@@ -1158,6 +1435,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                     car_rot.remove(&aid);
                     car_demo.remove(&aid);
                     car_owner.remove(&aid);
+                    unlinked_cars.remove(&aid);
                     prev_demo_state.remove(&aid);
                     last_touch_time.remove(&aid);
                     last_touch_pos.remove(&aid);
@@ -1228,6 +1506,14 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                                 let owner_id: i32 = active.actor.into();
                                 component_owner.insert(aid, owner_id);
                             }
+                            if !active.active
+                                && objects
+                                    .get(upd_object_id)
+                                    .map(|name| name == "Engine.Pawn:PlayerReplicationInfo")
+                                    .unwrap_or(false)
+                            {
+                                unlink_car(&mut car_owner, &mut unlinked_cars, aid);
+                            }
                             if active.active
                                 && actor_kind
                                     .get(&aid)
@@ -1244,6 +1530,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                                     continue;
                                 }
                                 car_owner.insert(aid, owner_id);
+                                unlinked_cars.remove(&aid);
                                 if let Some(idx) = owner_to_player_index.get(&owner_id).copied() {
                                     bind_player_index(
                                         &mut actor_to_player_index,
@@ -1551,21 +1838,8 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                                     );
                                 }
                             }
-                            if assigned_idx.is_none() {
-                                assigned_idx = pop_available_player_index(
-                                    &actor_to_player_index,
-                                    &mut next_by_team,
-                                    t,
-                                );
-                                if let Some(idx) = assigned_idx {
-                                    bind_player_index(
-                                        &mut actor_to_player_index,
-                                        &mut next_by_team,
-                                        target,
-                                        idx,
-                                    );
-                                }
-                            }
+                            // Anything else waits for the end of the frame, when this
+                            // car's PRI link has been read too.
                             if let Some(idx) = assigned_idx {
                                 if car_owner.contains_key(&target) {
                                     if let Some((_, team)) = header_players.get(idx) {
@@ -1798,30 +2072,20 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                     }
                     // Assign player index if not assigned and team known
                     if !actor_to_player_index.contains_key(&aid) && team >= 0 {
-                        let mut assigned_idx = car_owner
-                            .get(&aid)
-                            .and_then(|owner| owner_to_player_index.get(owner))
-                            .copied();
-                        if let Some(idx) = assigned_idx {
-                            bind_player_index(
-                                &mut actor_to_player_index,
-                                &mut next_by_team,
-                                aid,
-                                idx,
-                            );
-                        } else if let Some(idx) = pop_available_player_index(
-                            &actor_to_player_index,
+                        let mut assigned_idx = assign_player_index(
+                            &mut actor_to_player_index,
+                            &mut owner_to_player_index,
                             &mut next_by_team,
+                            &car_owner,
+                            &unlinked_cars,
+                            &mut next_fallback_index,
+                            aid,
                             team,
-                        ) {
-                            bind_player_index(
-                                &mut actor_to_player_index,
-                                &mut next_by_team,
-                                aid,
-                                idx,
-                            );
-                            assigned_idx = Some(idx);
-                        } else if header_players.is_empty() {
+                        );
+                        if assigned_idx.is_none()
+                            && header_players.is_empty()
+                            && !unlinked_cars.contains(&aid)
+                        {
                             let fallback = *fallback_actor_index.entry(aid).or_insert_with(|| {
                                 let idx = next_fallback_index;
                                 next_fallback_index += 1;
@@ -1975,8 +2239,13 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                     }
                     if let Some(resolved) = event.resolved_actor_id {
                         pad_dict.set_item("actor_id", resolved)?;
-                        if let Some(idx) = actor_to_player_index.get(&resolved) {
-                            pad_dict.set_item("player_index", *idx as i64)?;
+                        if let Some(idx) = player_index_for_car(
+                            &actor_to_player_index,
+                            &car_owner,
+                            &owner_to_player_index,
+                            resolved,
+                        ) {
+                            pad_dict.set_item("player_index", idx as i64)?;
                             pad_dict.set_item("player_id", format!("player_{}", idx))?;
                         }
                         if let Some(team) = car_team.get(&resolved) {
@@ -2232,6 +2501,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
         let mut metadata_indices: BTreeSet<usize> = BTreeSet::new();
         metadata_indices.extend(camera_by_index.keys().copied());
         metadata_indices.extend(loadout_by_index.keys().copied());
+        metadata_indices.retain(|idx| *idx < header_players.len());
         for idx in metadata_indices {
             let entry = PyDict::new_bound(py);
             entry.set_item(

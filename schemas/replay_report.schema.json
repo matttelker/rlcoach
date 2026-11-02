@@ -434,16 +434,16 @@
           "type": "number",
           "description": "Boost pads collected per minute of play, on the same time basis as bpm. Not the same measure as ballchasing's bcpm."
         },
-        "avg_boost": { "type": "number" },
-        "time_zero_boost_s": { "type": "number" },
-        "time_full_boost_s": { "type": "number" },
+        "avg_boost": { "type": "number", "description": "Mean of the boost level updates, not weighted by time, matching ballchasing." },
+        "time_zero_boost_s": { "type": "number", "description": "Seconds at empty, counting only stretches the next boost update closed. One cut short by a goal, a kickoff, a demo or the end of the game counts for nothing, matching ballchasing." },
+        "time_full_boost_s": { "type": "number", "description": "Seconds at 100 boost, counted the same way as time_zero_boost_s." },
         "boost_collected": { "type": "number" },
         "boost_stolen": { "type": "number" },
         "big_pads": { "type": "integer" },
         "small_pads": { "type": "integer" },
         "stolen_big_pads": { "type": "integer" },
         "stolen_small_pads": { "type": "integer" },
-        "overfill": { "type": "number", "description": "Sum of (100 - boost_before) for pickups that exceed 100" },
+        "overfill": { "type": "number", "description": "Boost already in the tank at each big pad pickup, which is what the pad had no room for. Small pads are left out." },
         "waste": { "type": "number", "description": "Boost spent with negligible speed benefit (heuristic)" }
       }
     },

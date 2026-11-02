@@ -39,6 +39,7 @@ def create_test_player(
     is_supersonic: bool = False,
     is_on_ground: bool = True,
     is_demolished: bool = False,
+    handbrake: bool | None = None,
 ) -> PlayerFrame:
     """Helper to create test player frames."""
     if position is None:
@@ -58,6 +59,7 @@ def create_test_player(
         is_supersonic=is_supersonic,
         is_on_ground=is_on_ground,
         is_demolished=is_demolished,
+        handbrake=handbrake,
     )
 
 
@@ -141,24 +143,47 @@ class TestMovementAnalysis:
         expected_avg_kph = _uu_s_to_kph(avg_speed_uu_s)
         assert abs(result["avg_speed_kph"] - expected_avg_kph) < 0.01
 
-    def test_distance_accumulation(self):
-        """Distance should accumulate from frame-to-frame position deltas."""
-        players = [
-            create_test_player("player1", 0, position=Vec3(0.0, 0.0, 0.0)),
-            create_test_player("player1", 0, position=Vec3(1000.0, 0.0, 0.0)),
-            create_test_player("player1", 0, position=Vec3(2000.0, 0.0, 0.0)),
-        ]
-
+    def test_distance_is_speed_over_time(self):
+        """A respawn's position jump is not distance driven."""
+        velocity = Vec3(1000.0, 0.0, 0.0)
         frames = [
-            create_test_frame(0.0, [players[0]]),
-            create_test_frame(1.0, [players[1]]),
-            create_test_frame(2.0, [players[2]]),
+            create_test_frame(
+                0.0,
+                [create_test_player("player1", 0, Vec3(0.0, 0.0, 17.0), velocity)],
+            ),
+            create_test_frame(
+                1.0,
+                [create_test_player("player1", 0, Vec3(1000.0, 0.0, 17.0), velocity)],
+            ),
+            create_test_frame(
+                2.0,
+                [
+                    create_test_player(
+                        "player1", 0, Vec3(-2304.0, -4608.0, 17.0), velocity
+                    )
+                ],
+            ),
         ]
 
         result = analyze_movement(frames, {}, player_id="player1")
 
-        expected_distance_km = round(_uu_to_km(2000.0), 2)
-        assert result["distance_km"] == pytest.approx(expected_distance_km, rel=1e-3)
+        assert result["distance_km"] == pytest.approx(_uu_to_km(3000.0), rel=1e-3)
+
+    def test_avg_speed_leaves_out_a_parked_car(self):
+        speeds = [0.0, 5.0, 1000.0, 1000.0]
+        frames = [
+            create_test_frame(
+                float(second),
+                [create_test_player("player1", 0, velocity=Vec3(speed, 0.0, 0.0))],
+            )
+            for second, speed in enumerate(speeds)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["avg_speed_kph"] == pytest.approx(
+            _uu_s_to_kph(2005.0 / 2.0), abs=0.01
+        )
 
     def test_speed_uses_velocity_when_positions_refresh_every_third_frame(self):
         """Real replays repeat positions between updates; speed must not spike."""
@@ -212,8 +237,8 @@ class TestMovementAnalysis:
 
         assert result["max_speed_kph"] == pytest.approx(36.0, abs=0.01)
 
-    def test_supersonic_flag_counts_alongside_speed_hysteresis(self):
-        """A single parser flag must not switch off speed-based detection."""
+    def test_supersonic_is_speed_alone(self):
+        """Ballchasing goes by speed, so a parser flag on its own changes nothing."""
         frames = [
             create_test_frame(
                 0.0,
@@ -234,8 +259,37 @@ class TestMovementAnalysis:
 
         result = analyze_movement(frames, {}, player_id="player1")
 
+        assert result["time_supersonic_s"] == pytest.approx(1.0, rel=1e-3)
+        assert result["time_boost_speed_s"] == pytest.approx(1.0, rel=1e-3)
+
+    def test_supersonic_counts_vertical_speed(self):
+        frames = [
+            create_test_frame(
+                float(second),
+                [create_test_player("player1", 0, velocity=Vec3(1500.0, 0.0, 1700.0))],
+            )
+            for second in range(2)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
         assert result["time_supersonic_s"] == pytest.approx(2.0, rel=1e-3)
-        assert result["time_slow_s"] == 0.0
+
+    def test_top_speed_without_boost_is_slow(self):
+        """Full throttle tops out at 1410 uu/s, on the slow side of the line."""
+        speeds = [1405.0, 1415.0]
+        frames = [
+            create_test_frame(
+                float(second),
+                [create_test_player("player1", 0, velocity=Vec3(speed, 0.0, 0.0))],
+            )
+            for second, speed in enumerate(speeds)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["time_slow_s"] == pytest.approx(1.0, rel=1e-3)
+        assert result["time_boost_speed_s"] == pytest.approx(1.0, rel=1e-3)
 
     def test_max_speed_tracking(self):
         """Max speed should reflect the highest observed speed."""
@@ -269,7 +323,7 @@ class TestMovementAnalysis:
             ),
             # High air
             create_test_player(
-                "player1", 0, position=Vec3(0.0, 0.0, 600.0), is_on_ground=False
+                "player1", 0, position=Vec3(0.0, 0.0, 900.0), is_on_ground=False
             ),
         ]
 
@@ -285,42 +339,121 @@ class TestMovementAnalysis:
         assert result["time_low_air_s"] == 1.0
         assert result["time_high_air_s"] == 1.0
 
-    def test_powerslide_detection(self):
-        """Test powerslide detection based on angular velocity."""
-        players = [
-            # Starting position
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 0.0, 0.0), is_on_ground=True
-            ),
-            # High angular velocity (powersliding)
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 1.0, 0.0), is_on_ground=True
-            ),
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 2.0, 0.0), is_on_ground=True
-            ),
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 3.0, 0.0), is_on_ground=True
-            ),
-            # Back to normal
-            create_test_player(
-                "player1", 0, rotation=Vec3(0.0, 3.1, 0.0), is_on_ground=True
-            ),
-        ]
+    def test_high_air_starts_at_840_uu(self):
+        """Heights just under Ballchasing's line stay in low air."""
+        player = create_test_player(
+            "player1", 0, position=Vec3(0.0, 0.0, 830.0), is_on_ground=False
+        )
+        frames = [create_test_frame(float(t), [player]) for t in range(3)]
 
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["time_low_air_s"] == 3.0
+        assert result["time_high_air_s"] == 0.0
+
+    def test_goal_replay_pause_is_not_game_time(self):
+        """A gap in the frames adds one tick, not the length of the replay."""
+        player = create_test_player("player1", 0)
         frames = [
-            create_test_frame(0.0, [players[0]]),
-            create_test_frame(0.1, [players[1]]),  # High angular velocity starts
-            create_test_frame(0.2, [players[2]]),  # Continuing
-            create_test_frame(0.3, [players[3]]),  # Continuing
-            create_test_frame(0.4, [players[4]]),  # Back to normal
+            create_test_frame(0.0, [player]),
+            create_test_frame(1.0, [player]),
+            create_test_frame(11.0, [player]),
+            create_test_frame(12.0, [player]),
         ]
 
         result = analyze_movement(frames, {}, player_id="player1")
 
-        # Should detect at least one powerslide
-        assert result["powerslide_count"] >= 1
-        assert result["powerslide_duration_s"] > 0.0
+        assert result["time_ground_s"] == 4.0
+        assert result["time_slow_s"] == 4.0
+
+    def test_powerslide_detection(self):
+        """A powerslide is the handbrake held on the ground."""
+        held = [False, True, True, True, False]
+        frames = [
+            create_test_frame(
+                index * 0.1, [create_test_player("player1", 0, handbrake=h)]
+            )
+            for index, h in enumerate(held)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["powerslide_count"] == 1
+        assert result["powerslide_duration_s"] == pytest.approx(0.3)
+
+    def test_handbrake_in_the_air_is_not_a_powerslide(self):
+        frames = [
+            create_test_frame(
+                index * 0.1,
+                [
+                    create_test_player(
+                        "player1",
+                        0,
+                        position=Vec3(0.0, 0.0, 300.0),
+                        is_on_ground=False,
+                        handbrake=True,
+                    )
+                ],
+            )
+            for index in range(5)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["powerslide_count"] == 0
+
+    def test_powerslide_on_a_car_resting_above_the_parser_ground_flag(self):
+        """Some car bodies rest at 18.3uu, and the parser's flag stops at 18."""
+        frames = [
+            create_test_frame(
+                second / 30.0,
+                [
+                    create_test_player(
+                        "player1",
+                        0,
+                        position=Vec3(0.0, 0.0, 18.3),
+                        velocity=Vec3(1000.0, 0.0, 0.0),
+                        is_on_ground=False,
+                        handbrake=second < 5,
+                    )
+                ],
+            )
+            for second in range(10)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["powerslide_count"] == 1
+        assert result["powerslide_duration_s"] == pytest.approx(5 / 30.0, abs=0.01)
+        assert result["time_ground_s"] == pytest.approx(10 / 30.0, abs=0.01)
+
+    def test_goal_replay_pause_does_not_lengthen_a_powerslide(self):
+        times_and_handbrake = [(0.0, True), (0.1, True), (10.1, True), (10.2, False)]
+        frames = [
+            create_test_frame(
+                timestamp,
+                [create_test_player("player1", 0, handbrake=handbrake)],
+            )
+            for timestamp, handbrake in times_and_handbrake
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["powerslide_count"] == 1
+        assert result["powerslide_duration_s"] == pytest.approx(0.3, abs=0.01)
+
+    def test_turning_fast_without_handbrake_is_not_a_powerslide(self):
+        frames = [
+            create_test_frame(
+                index * 0.1,
+                [create_test_player("player1", 0, rotation=Vec3(0.0, index, 0.0))],
+            )
+            for index in range(5)
+        ]
+
+        result = analyze_movement(frames, {}, player_id="player1")
+
+        assert result["powerslide_count"] == 0
 
     def test_aerial_detection(self):
         """Test aerial detection based on height and duration."""
@@ -478,28 +611,8 @@ class TestMovementAnalysis:
         # All frames have boost speed velocity
         assert abs(result["time_boost_speed_s"] - 2.5) < 0.1
 
-    def test_supersonic_flag_override(self):
-        """Test that is_supersonic flag overrides speed calculation."""
-        # Velocity below supersonic threshold but flag set
-        players = [
-            create_test_player(
-                "player1", 0, velocity=Vec3(1500.0, 0.0, 0.0), is_supersonic=True
-            ),
-        ]
-
-        frames = [
-            create_test_frame(0.0, [players[0]]),
-            create_test_frame(1.0, [players[0]]),
-        ]
-
-        result = analyze_movement(frames, {}, player_id="player1")
-
-        # Should classify as supersonic due to flag, not velocity
-        assert result["time_supersonic_s"] == 2.0  # Both frames get 1s each
-        assert result["time_boost_speed_s"] == 0.0
-
-    def test_supersonic_hysteresis_handles_minor_dips(self):
-        """Supersonic state should persist through small horizontal speed drops."""
+    def test_supersonic_ends_below_2200(self):
+        """Ballchasing has no grace band, unlike the game's own state."""
         frames = [
             create_test_frame(
                 0.0, [create_test_player("player1", 0, velocity=Vec3(2300.0, 0.0, 0.0))]
@@ -514,8 +627,8 @@ class TestMovementAnalysis:
 
         result = analyze_movement(frames, {}, player_id="player1")
 
-        assert result["time_supersonic_s"] == pytest.approx(2.0, rel=1e-3)
-        assert result["time_boost_speed_s"] == pytest.approx(1.0, rel=1e-3)
+        assert result["time_supersonic_s"] == pytest.approx(1.0, rel=1e-3)
+        assert result["time_boost_speed_s"] == pytest.approx(2.0, rel=1e-3)
 
     def test_demolished_player_handling(self):
         """Test handling of demolished players in frames."""
@@ -535,9 +648,10 @@ class TestMovementAnalysis:
 
         result = analyze_movement(frames, {}, player_id="player1")
 
-        # Should still process demolished player frames
+        # A demolished car is off the field, so it goes in no time bucket
         assert result["time_boost_speed_s"] == 1.0  # First frame
-        assert result["time_slow_s"] == 1.0  # Second frame (0 velocity)
+        assert result["time_slow_s"] == 0.0
+        assert result["time_ground_s"] == 1.0
 
     def test_single_frame_analysis(self):
         """Test analysis with only one frame."""
@@ -587,7 +701,7 @@ class TestMovementAnalysis:
             create_test_player(
                 "player1",
                 0,
-                position=Vec3(0.0, 0.0, 600.0),
+                position=Vec3(0.0, 0.0, 900.0),
                 velocity=Vec3(800.0, 0.0, 0.0),
                 is_on_ground=False,
             ),

@@ -268,6 +268,24 @@ class TestPlayerNormalization:
         assert aliases["frame_player_1"] == "slug:player2"
         assert aliases["player_1"] == "slug:player2"
 
+    def test_parser_id_past_header_is_not_matched_by_position(self):
+        """A player who left has a parser id past the header rows, and stays apart."""
+        header = Header(
+            players=[
+                PlayerInfo(name="Stayed1", team=0),
+                PlayerInfo(name="Stayed2", team=1),
+            ]
+        )
+
+        # The leaver's car is sampled second, where position would say Stayed2.
+        frame = Mock()
+        frame.players = [Mock(player_id="player_0"), Mock(player_id="player_2")]
+
+        _, aliases = normalize_players(header, [frame])
+
+        assert aliases["player_0"] == "slug:stayed1"
+        assert "player_2" not in aliases
+
 
 class TestTimelineBuilding:
     """Test normalized timeline construction."""

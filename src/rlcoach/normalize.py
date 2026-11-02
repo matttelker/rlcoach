@@ -9,6 +9,7 @@ This module transforms raw parser data into normalized structures with:
 
 from __future__ import annotations
 
+import re
 import statistics
 from dataclasses import replace
 from typing import Any
@@ -37,6 +38,10 @@ from .utils.identity import (
 
 # Default frame rate when unable to measure from replay data
 DEFAULT_FRAME_RATE = 30.0
+
+# The parser's own player ids. One past the header rows is a player who left before
+# the end, so it must not be matched to a header player by position.
+PARSER_PLAYER_ID = re.compile(r"player_\d+")
 
 
 def measure_frame_rate(frames: list[Any]) -> float:
@@ -581,7 +586,7 @@ def normalize_players(
                 continue
 
         for idx, raw_id in enumerate(sampled_ids):
-            if raw_id in alias_lookup:
+            if raw_id in alias_lookup or PARSER_PLAYER_ID.fullmatch(raw_id):
                 continue
             if idx < len(header_ids):
                 alias_lookup[raw_id] = header_ids[idx]

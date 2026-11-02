@@ -16,6 +16,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ..events.constants import PAUSE_GAP_SECONDS
 from ..field_constants import FieldConstants, Vec3
 from ..parser.types import Frame, Header
 
@@ -481,12 +482,12 @@ def _frame_duration(
 
     if index < len(frames) - 1:
         next_dt = frames[index + 1].timestamp - frames[index].timestamp
-        if next_dt > 0:
+        if 0 < next_dt <= PAUSE_GAP_SECONDS:
             return next_dt
 
     if prev_timestamp is not None:
         prev_dt = frames[index].timestamp - prev_timestamp
-        if prev_dt > 0:
+        if 0 < prev_dt <= PAUSE_GAP_SECONDS:
             return prev_dt
 
     return 0.033

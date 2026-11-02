@@ -10,7 +10,7 @@ from .constants import DEMO_POSITION_TOLERANCE
 from .types import DemoEvent
 from .utils import distance_3d
 
-PARSER_DEMO_ECHO_WINDOW_S = 2.5
+PARSER_DEMO_ECHO_WINDOW_S = 5.0
 PARSER_DEMO_ECHO_LOCATION_TOLERANCE_UU = 200.0
 
 

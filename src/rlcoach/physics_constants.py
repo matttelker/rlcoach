@@ -18,7 +18,7 @@ UU_S_TO_KPH: float = UU_TO_METERS * 3.6  # = 0.036, so 2300 UU/s = 82.8 km/h
 
 
 # Speed categories aligned with community standards
-SLOW_SPEED_MAX_UU_S: float = 1400.0  # Below this is "slow"
+SLOW_SPEED_MAX_UU_S: float = 1410.0  # Below this is "slow"
 BOOST_SPEED_MAX_UU_S: float = 2200.0  # Below this is "boost speed"
 SUPERSONIC_SPEED_UU_S: float = 2200.0  # At or above this is "supersonic"
 
