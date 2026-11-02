@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..config import IdentityConfig, RLCoachConfig, compute_play_date
@@ -27,7 +27,7 @@ class PlayerNotFoundError(Exception):
 def _as_utc(value: datetime | None) -> datetime | None:
     """Attach UTC to the offset-less datetimes SQLite returns."""
     if value is not None and value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
+        return value.replace(tzinfo=UTC)
     return value
 
 
@@ -36,7 +36,7 @@ def _played_at_utc(metadata: dict[str, Any]) -> datetime:
     played_at_str = metadata.get("started_at_utc", "")
     if played_at_str:
         return datetime.fromisoformat(played_at_str.replace("Z", "+00:00"))
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _record_sighting(player: Player, seen_at: datetime) -> None:
@@ -63,7 +63,7 @@ def upsert_players(
         seen_at: When the game was played (default: now)
     """
     resolver = PlayerIdentityResolver(identity_config)
-    seen_at = seen_at or datetime.now(timezone.utc)
+    seen_at = seen_at or datetime.now(UTC)
 
     session = create_session()
     try:
@@ -171,7 +171,7 @@ def insert_replay(
             played_at_str = played_at_str.replace("Z", "+00:00")
             played_at_utc = datetime.fromisoformat(played_at_str)
         else:
-            played_at_utc = datetime.now(timezone.utc)
+            played_at_utc = datetime.now(UTC)
 
         play_date = compute_play_date(played_at_utc, config.preferences.timezone)
 
@@ -376,7 +376,7 @@ def write_report(
         played_at_str = played_at_str.replace("Z", "+00:00")
         played_at_utc = datetime.fromisoformat(played_at_str)
     else:
-        played_at_utc = datetime.now(timezone.utc)
+        played_at_utc = datetime.now(UTC)
     play_date = compute_play_date(played_at_utc, config.preferences.timezone)
 
     # Only aggregate for recognized playlists

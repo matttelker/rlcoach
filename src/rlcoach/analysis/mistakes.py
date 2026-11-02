@@ -436,7 +436,7 @@ def game_clock(frames: Sequence[Frame], live: Sequence[bool]) -> list[float]:
     elapsed = 0.0
     clock: list[float] = []
     previous: float | None = None
-    for frame, is_live in zip(frames, live):
+    for frame, is_live in zip(frames, live, strict=False):
         if is_live and previous is not None:
             dt = frame.timestamp - previous
             if 0 < dt <= MAX_FRAME_GAP_S:
@@ -474,7 +474,7 @@ def _kickoff_starts(live: Sequence[bool], frames: Sequence[Frame]) -> list[float
     starts: list[float] = []
     current = 0.0
     previous = False
-    for frame, is_live in zip(frames, live):
+    for frame, is_live in zip(frames, live, strict=False):
         if is_live and not previous:
             current = frame.timestamp
         starts.append(current)

@@ -54,7 +54,7 @@ def reset_engine() -> None:
     _SessionFactory = None
 
 
-def get_session() -> Generator[Session, None, None]:
+def get_session() -> Generator[Session]:
     """Get a database session (for use with FastAPI Depends)."""
     if _SessionFactory is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")

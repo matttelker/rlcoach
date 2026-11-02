@@ -82,7 +82,7 @@ _MIN_PLAYER_IDENTITY_COVERAGE = 0.5
 
 def _utc_now_iso() -> str:
     return (
-        _dt.datetime.now(_dt.timezone.utc)
+        _dt.datetime.now(_dt.UTC)
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z")

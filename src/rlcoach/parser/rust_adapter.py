@@ -52,8 +52,8 @@ def parse_replay_date(raw: Any, tz: _dt.tzinfo | None = None) -> str | None:
             recorded = _dt.datetime.strptime(raw.strip(), fmt)
             if tz is not None:
                 recorded = recorded.replace(tzinfo=tz)
-            started = recorded.astimezone(_dt.timezone.utc)
-        except (ValueError, OSError, OverflowError):
+            started = recorded.astimezone(_dt.UTC)
+        except ValueError, OSError, OverflowError:
             continue
         return started.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return None
@@ -544,7 +544,7 @@ class RustAdapter(ParserAdapter):
         for key, value in raw.items():
             try:
                 idx = int(key)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if isinstance(value, dict):
                 out[idx] = value

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -80,7 +80,7 @@ def test_insert_player_stats_creates_records(tmp_path, sample_report, config):
             replay_id="abc123hash",
             source_file="/path/to/file.replay",
             file_hash="hash123",
-            played_at_utc=datetime.now(timezone.utc),
+            played_at_utc=datetime.now(UTC),
             play_date=date.today(),
             map="DFH Stadium",
             playlist="DOUBLES",
@@ -127,7 +127,7 @@ def test_insert_player_stats_handles_missing_metrics(tmp_path, config):
             replay_id="abc123hash",
             source_file="/path/to/file.replay",
             file_hash="hash123",
-            played_at_utc=datetime.now(timezone.utc),
+            played_at_utc=datetime.now(UTC),
             play_date=date.today(),
             map="DFH Stadium",
             playlist="DOUBLES",

@@ -299,7 +299,7 @@ def _analyze_player_boost(
                     pad_idx = int(getattr(pickup_match, "pad_id", -1))
                     if 0 <= pad_idx < len(FIELD.BOOST_PADS):
                         pad_meta = FIELD.BOOST_PADS[pad_idx]
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     pad_meta = None
                 if pad_meta is not None:
                     if pos_y is None:
@@ -521,7 +521,7 @@ def _to_float(value: Any) -> float | None:
         return None
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

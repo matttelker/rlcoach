@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
@@ -43,7 +43,7 @@ def test_insert_replay_with_utc_datetime(tmp_path):
             replay_id="abc123",
             source_file="/path/to/replay.replay",
             file_hash="sha256hash",
-            played_at_utc=datetime.now(timezone.utc),  # Must be UTC aware
+            played_at_utc=datetime.now(UTC),  # Must be UTC aware
             play_date=date(2024, 12, 23),
             map="DFH Stadium",
             playlist="DOUBLES",

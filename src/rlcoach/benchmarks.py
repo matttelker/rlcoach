@@ -6,7 +6,7 @@ Uses the metric catalog as single source of truth for valid metrics.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -118,7 +118,7 @@ def import_benchmarks(file_path: Path, replace: bool = False) -> int:
                 existing.source = source
                 existing.source_date = source_date
                 existing.notes = b.get("notes") or notes
-                existing.imported_at = datetime.now(timezone.utc)
+                existing.imported_at = datetime.now(UTC)
             else:
                 benchmark = Benchmark(
                     metric=b["metric"],

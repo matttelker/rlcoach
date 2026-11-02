@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
@@ -127,7 +127,7 @@ def process_replay_file(
             played_at_str = played_at_str.replace("Z", "+00:00")
             played_at_utc = datetime.fromisoformat(played_at_str)
         else:
-            played_at_utc = datetime.now(timezone.utc)
+            played_at_utc = datetime.now(UTC)
         play_date = compute_play_date(played_at_utc, config.preferences.timezone)
 
         replay_id = report.get("replay_id", file_hash[:16])

@@ -1,6 +1,6 @@
 """Tests for players API endpoints."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest.mock import patch
 
 import pytest
@@ -86,7 +86,7 @@ def db_with_players(mock_config):
                 replay_id=f"replay_{i}",
                 source_file=f"/path/replay_{i}.replay",
                 file_hash=f"hash_{i}",
-                played_at_utc=datetime(2024, 12, 23, 10 + i, 0, 0, tzinfo=timezone.utc),
+                played_at_utc=datetime(2024, 12, 23, 10 + i, 0, 0, tzinfo=UTC),
                 play_date=date(2024, 12, 23),
                 map="DFH Stadium",
                 playlist="DOUBLES",

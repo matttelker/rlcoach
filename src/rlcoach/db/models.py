@@ -6,7 +6,7 @@ The play_date field is computed from played_at_utc + configured timezone.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -26,7 +26,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 
 def _utc_now() -> datetime:
     """Get current UTC time (timezone-aware)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):

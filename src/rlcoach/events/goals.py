@@ -131,7 +131,7 @@ def _detect_goals_from_header(frames: list[Frame], header: Header) -> list[GoalE
                 break
             try:
                 target_frame = int(target_frame_val)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 break
 
             if i < target_frame:
@@ -203,7 +203,7 @@ def _detect_goals_from_header(frames: list[Frame], header: Header) -> list[GoalE
         gh = header_goals[goal_index]
         try:
             frame_idx = int(getattr(gh, "frame", len(frames) - 1))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             frame_idx = len(frames) - 1
 
         frame_ref_idx = min(max(frame_idx, 0), len(frames) - 1) if frames else 0

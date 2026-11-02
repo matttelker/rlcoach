@@ -24,7 +24,7 @@ def check_exclusion(report: dict) -> str | None:
     try:
         config = load_config(config_path)
         config.validate()
-    except (ConfigError, FileNotFoundError):
+    except ConfigError, FileNotFoundError:
         # No config = no exclusion rules
         return None
 
@@ -51,7 +51,7 @@ def _load_identity_config() -> IdentityConfig | None:
     try:
         config = load_config(config_path)
         config.validate()
-    except (ConfigError, FileNotFoundError):
+    except ConfigError, FileNotFoundError:
         return None
     return config.identity
 

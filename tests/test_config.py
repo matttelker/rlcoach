@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -16,8 +16,7 @@ from rlcoach.config import (
 
 def test_load_config_from_valid_toml(tmp_path):
     config_file = tmp_path / "config.toml"
-    config_file.write_text(
-        """
+    config_file.write_text("""
 [identity]
 platform_ids = ["steam:76561198012345678"]
 display_names = ["TestPlayer"]
@@ -31,8 +30,7 @@ reports_dir = "~/.rlcoach/reports"
 primary_playlist = "DOUBLES"
 target_rank = "GC1"
 timezone = "America/Los_Angeles"
-"""
-    )
+""")
 
     config = load_config(config_file)
 
@@ -43,7 +41,7 @@ timezone = "America/Los_Angeles"
 def test_compute_play_date_with_timezone():
     """play_date should be computed from UTC time + configured timezone."""
     # 2024-12-24 02:00 UTC = 2024-12-23 18:00 PST (still Dec 23 in LA)
-    utc_time = datetime(2024, 12, 24, 2, 0, 0, tzinfo=timezone.utc)
+    utc_time = datetime(2024, 12, 24, 2, 0, 0, tzinfo=UTC)
 
     play_date = compute_play_date(utc_time, "America/Los_Angeles")
 
@@ -52,7 +50,7 @@ def test_compute_play_date_with_timezone():
 
 def test_compute_play_date_with_system_timezone():
     """Should use system timezone when not configured."""
-    utc_time = datetime(2024, 12, 24, 12, 0, 0, tzinfo=timezone.utc)
+    utc_time = datetime(2024, 12, 24, 12, 0, 0, tzinfo=UTC)
 
     # None means use system timezone
     play_date = compute_play_date(utc_time, None)
@@ -137,8 +135,7 @@ def test_validate_excluded_names_no_overlap():
 def test_load_config_with_excluded_names(tmp_path):
     """Should load excluded_names from TOML config."""
     config_file = tmp_path / "config.toml"
-    config_file.write_text(
-        """
+    config_file.write_text("""
 [identity]
 platform_ids = ["steam:123"]
 display_names = ["MainAccount"]
@@ -152,8 +149,7 @@ reports_dir = "~/.rlcoach/reports"
 [preferences]
 primary_playlist = "DOUBLES"
 target_rank = "GC1"
-"""
-    )
+""")
 
     config = load_config(config_file)
 
@@ -163,8 +159,7 @@ target_rank = "GC1"
 def test_load_config_excluded_names_defaults_empty(tmp_path):
     """excluded_names should default to empty list if not specified."""
     config_file = tmp_path / "config.toml"
-    config_file.write_text(
-        """
+    config_file.write_text("""
 [identity]
 display_names = ["MainAccount"]
 
@@ -176,8 +171,7 @@ reports_dir = "~/.rlcoach/reports"
 [preferences]
 primary_playlist = "DOUBLES"
 target_rank = "GC1"
-"""
-    )
+""")
 
     config = load_config(config_file)
 

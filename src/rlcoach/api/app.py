@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +32,7 @@ def get_config() -> RLCoachConfig:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Load the config and open the database for the life of the app."""
     global _config
 
@@ -93,7 +93,7 @@ def create_app() -> FastAPI:
             "status": "healthy" if db_status == "connected" else "degraded",
             "service": "rlcoach-backend",
             "version": __version__,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "checks": {"database": db_status},
         }
 

@@ -210,7 +210,7 @@ def test_nested_vec3_missing_component_reports_required():
 
 
 def test_network_diagnostics_rejects_additional_properties():
-    examples_dir = Path(__file__).parent.parent / "examples"
+    examples_dir = Path(__file__).parent / "fixtures"
     with open(examples_dir / "replay_report.success.json", encoding="utf-8") as f:
         report = json.load(f)
 

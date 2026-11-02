@@ -1,6 +1,6 @@
 """Tests for daily stats aggregation."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -30,7 +30,7 @@ def _create_test_data(session, play_date: date, games: list[dict]):
                 replay_id=replay_id,
                 source_file=f"/path/{replay_id}.replay",
                 file_hash=f"hash_{replay_id}",
-                played_at_utc=datetime.now(timezone.utc),
+                played_at_utc=datetime.now(UTC),
                 play_date=play_date,
                 map="DFH Stadium",
                 playlist=game["playlist"],

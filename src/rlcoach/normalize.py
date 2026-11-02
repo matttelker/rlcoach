@@ -67,7 +67,7 @@ def measure_frame_rate(frames: list[Any]) -> float:
                 timestamps.append(float(frame["timestamp"]))
             elif isinstance(frame, dict) and "time" in frame:
                 timestamps.append(float(frame["time"]))
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             continue  # Skip frames with invalid timestamps
 
     if len(timestamps) < 2:
@@ -124,7 +124,7 @@ def to_field_coords(vec: Any) -> Vec3:
         z_norm = max(-100.0, min(FIELD.CEILING_Z * 2.0, z_norm))
 
         return Vec3(x_norm, y_norm, z_norm)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return Vec3(0.0, 0.0, 0.0)
 
 
@@ -145,7 +145,7 @@ def to_vec3(vec: Any) -> Vec3:
 
     try:
         return Vec3(float(x), float(y), float(z))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return Vec3(0.0, 0.0, 0.0)
 
 
@@ -213,7 +213,7 @@ def _parse_rotation(rot_data: Any) -> Rotation | Vec3:
                 and isinstance(z_val, (int, float))
             ):
                 return Vec3(x=float(x_val), y=float(y_val), z=float(z_val))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
 
     pitch_val = getattr(rot_data, "pitch", None)
@@ -297,7 +297,7 @@ def _extract_optional_float(source: Any, field: str) -> float | None:
         return None
     try:
         return float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -309,7 +309,7 @@ def _extract_optional_int(source: Any, field: str) -> int | None:
         return None
     try:
         return int(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -497,7 +497,7 @@ def _parse_events(
                 event = converter(item)
             if event is not None:
                 result.append(event)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
     return result
 
@@ -511,7 +511,7 @@ def _shift_event_timestamps(events: list, start_time: float) -> list:
             continue
         try:
             new_time = float(event_time) - start_time
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if abs(new_time) < 1e-6:
             new_time = 0.0
@@ -582,7 +582,7 @@ def normalize_players(
                     raw_id_str = str(raw_id)
                     if raw_id_str and raw_id_str not in sampled_ids:
                         sampled_ids.append(raw_id_str)
-            except (AttributeError, TypeError):
+            except AttributeError, TypeError:
                 continue
 
         for idx, raw_id in enumerate(sampled_ids):
@@ -860,7 +860,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                     player_prev_position[canonical_id] = position
                     player_prev_timestamp[canonical_id] = timestamp
 
-                except (ValueError, TypeError, AttributeError):
+                except ValueError, TypeError, AttributeError:
                     # Skip malformed player data
                     continue
 
@@ -887,7 +887,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                     continue
                 try:
                     pad_id = int(pad_id_raw)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
 
                 status = str(raw_event.get("status", "UNKNOWN")).upper()
@@ -906,7 +906,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                 elif player_index_value is not None:
                     try:
                         idx_value = int(player_index_value)
-                    except (TypeError, ValueError):
+                    except TypeError, ValueError:
                         idx_value = None
                     if idx_value is not None:
                         candidate = f"player_{idx_value}"
@@ -919,7 +919,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                         if player_team_value is not None
                         else None
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     player_team = None
 
                 actor_id_value = raw_event.get("actor_id")
@@ -927,7 +927,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                     actor_id = (
                         int(actor_id_value) if actor_id_value is not None else None
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     actor_id = None
 
                 instigator_value = raw_event.get("instigator_actor_id")
@@ -935,7 +935,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                     instigator_actor_id = (
                         int(instigator_value) if instigator_value is not None else None
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     instigator_actor_id = None
 
                 raw_state_value = raw_event.get("raw_state")
@@ -943,7 +943,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                     raw_state = (
                         int(raw_state_value) if raw_state_value is not None else None
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     raw_state = None
 
                 position_value = raw_event.get("position")
@@ -954,7 +954,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                     event_time = (
                         float(event_timestamp) if event_timestamp is not None else None
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     event_time = None
 
                 object_name = raw_event.get("object_name")
@@ -1030,7 +1030,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
 
             normalized_frames.append(normalized_frame)
 
-        except (ValueError, TypeError, AttributeError):
+        except ValueError, TypeError, AttributeError:
             # Skip malformed frames
             continue
 
@@ -1095,7 +1095,7 @@ def _align_match_clock(frames: list[Frame]) -> list[Frame]:
             else:
                 try:
                     new_time = float(event_time) - start_time
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     new_time = None
             if new_time is not None and abs(new_time) < 1e-6:
                 new_time = 0.0

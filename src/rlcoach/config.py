@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-import tomllib
 
 from .metrics import VALID_PLAYLISTS, VALID_RANKS
 

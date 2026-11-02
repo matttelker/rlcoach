@@ -609,7 +609,10 @@ class _MarkdownComposer:
             table_rows.append([self._stringify_cell(cell) for cell in row])
         if not table_rows:
             return "*No data*"
-        widths = [max(len(cell) for cell in column) for column in zip(*table_rows)]
+        widths = [
+            max(len(cell) for cell in column)
+            for column in zip(*table_rows, strict=False)
+        ]
         lines = []
         for idx, row in enumerate(table_rows):
             padded = [cell.ljust(widths[col]) for col, cell in enumerate(row)]
@@ -636,7 +639,7 @@ class _MarkdownComposer:
     def _fmt_num(self, value: Any, digits: int = 2) -> str:
         try:
             number = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return "-"
         if abs(number - round(number)) < _NUMBER_EPSILON:
             return str(int(round(number)))
@@ -645,7 +648,7 @@ class _MarkdownComposer:
     def _safe_float(self, value: Any) -> float:
         try:
             return float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0.0
 
     def _rate_per_minute_value(self, value: Any) -> float:
@@ -766,12 +769,12 @@ class _MarkdownComposer:
         if mtype == "percentage":
             try:
                 delta = float(blue_value or 0.0) - float(orange_value or 0.0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 delta = 0.0
             return self._fmt_num(delta) + "%"
         try:
             delta = float(blue_value or 0.0) - float(orange_value or 0.0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             delta = 0.0
         return self._fmt_num(delta)
 
@@ -810,7 +813,7 @@ class _MarkdownComposer:
             value = float(subset or 0.0)
             denom = max(float(total or 0.0), 1.0)
             return f"{(value / denom) * 100:.1f}%"
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return "-"
 
     def _ordered_player_ids(self) -> list[str]:
@@ -880,7 +883,7 @@ class _MarkdownComposer:
             return "-"
         try:
             base = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return "-"
         per_minute = base / self.match_minutes if self.match_minutes > 0 else 0.0
         return self._fmt_num(per_minute)
