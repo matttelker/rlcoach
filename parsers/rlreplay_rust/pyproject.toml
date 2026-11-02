@@ -1,0 +1,8 @@
+[build-system]
+requires = ["maturin>=1.16"]
+build-backend = "maturin"
+
+[project]
+name = "rlreplay_rust"
+requires-python = ">=3.14"
+dynamic = ["version"]
