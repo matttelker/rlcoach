@@ -339,6 +339,8 @@ class Frame:
     parser_stat_events: list[ParserStatEvent] = field(default_factory=list)
     parser_tickmarks: list[ParserTickmarkEvent] = field(default_factory=list)
     parser_kickoff_markers: list[ParserKickoffMarker] = field(default_factory=list)
+    # When the game's first-touch counter rose, up to a second after the touch itself.
+    parser_first_touch_events: list[ParserTouchEvent] = field(default_factory=list)
     delta: float | None = None  # Seconds since the previous network frame
 
     def get_player_by_id(self, player_id: str) -> PlayerFrame | None:

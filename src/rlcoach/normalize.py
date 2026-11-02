@@ -620,6 +620,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                 parser_stat_events=[],
                 parser_tickmarks=[],
                 parser_kickoff_markers=[],
+                parser_first_touch_events=[],
             )
         ]
 
@@ -1000,6 +1001,12 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
             parser_kickoff_markers = _parse_events(
                 frame_data, "parser_kickoff_markers", _convert_kickoff_marker
             )
+            parser_first_touch_events = _parse_events(
+                frame_data,
+                "parser_first_touch_events",
+                _convert_touch_event,
+                alias_lookup,
+            )
 
             normalized_frame = Frame(
                 timestamp=timestamp,
@@ -1012,6 +1019,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                 parser_stat_events=parser_stat_events,
                 parser_tickmarks=parser_tickmarks,
                 parser_kickoff_markers=parser_kickoff_markers,
+                parser_first_touch_events=parser_first_touch_events,
                 delta=delta,
             )
 
@@ -1045,6 +1053,7 @@ def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
                 parser_stat_events=[],
                 parser_tickmarks=[],
                 parser_kickoff_markers=[],
+                parser_first_touch_events=[],
             )
         ]
     )
@@ -1136,6 +1145,9 @@ def _align_match_clock(frames: list[Frame], header: Header | None) -> list[Frame
                 ),
                 parser_kickoff_markers=_shift_event_timestamps(
                     frame.parser_kickoff_markers, start_time
+                ),
+                parser_first_touch_events=_shift_event_timestamps(
+                    frame.parser_first_touch_events, start_time
                 ),
             )
         )

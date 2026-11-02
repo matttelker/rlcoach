@@ -223,6 +223,7 @@ def with_flip_at(
         parser_stat_events=frame.parser_stat_events,
         parser_tickmarks=frame.parser_tickmarks,
         parser_kickoff_markers=frame.parser_kickoff_markers,
+        parser_first_touch_events=frame.parser_first_touch_events,
     )
     return updated
 

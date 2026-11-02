@@ -50,6 +50,7 @@ Each frame should carry:
 - `parser_demo_events`
 - `parser_tickmarks`
 - `parser_kickoff_markers`
+- `parser_first_touch_events`
 
 Positions are normalized through field-coordinate bounds. Velocity and angular-velocity
 vectors are not position-clamped; downstream mechanics depend on preserving magnitude,
@@ -69,6 +70,7 @@ The parser-facing event carriers on each frame are:
 - `parser_demo_events`
 - `parser_tickmarks`
 - `parser_kickoff_markers`
+- `parser_first_touch_events`
 
 Event detectors consume parser events first when present, then use existing inference fallbacks when absent.
 Touch and demo streams are event-type authoritative: once parser-authored touch/demo
@@ -79,6 +81,14 @@ Contact-sensitive mechanics use the same parser-first posture. If a replay has a
 parser-authored touch stream, mechanics treat no-touch frames as authoritative no-contact
 frames instead of falling back to player-ball proximity. Proximity remains a fallback only
 for replay parses that do not expose parser touch authority.
+
+`parser_first_touch_events` is the game's own record of who took each kickoff's first touch,
+one event each time a player's `TAGame.PRI_TA:MatchFirstTouches` counter rises. The event's
+timestamp is when the rise replicated, up to about a second after the touch, so it does not
+give the contact time. The game keeps resending the total, so the parser compares values and
+emits only a step of one. The counter exists from net version 12 on, so older replays emit
+none, and `detect_kickoffs` then estimates `first_touch_player` from frames. A rise is dropped
+if its player's name has no unique header row.
 
 Corpus-health tracks parser event/provenance coverage across these carriers:
 

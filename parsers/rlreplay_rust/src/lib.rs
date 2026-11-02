@@ -81,6 +81,13 @@ fn unique_header_index_by_name(
     matches.next().is_none().then_some(first)
 }
 
+/// True when a `MatchFirstTouches` update records a new first touch. The game keeps
+/// resending a player's total, so only a step up from the last value counts. A
+/// player's first update is the 1 from their first touch, so an unseen total is 0.
+fn is_first_touch_rise(seen: Option<i32>, value: i32) -> bool {
+    value == seen.unwrap_or(0) + 1
+}
+
 /// Flatten a boxcars `CamSettings` into ordered (key, value) pairs for emission.
 ///
 /// The `swivel`/`transition` fields are surfaced under the more descriptive
@@ -708,8 +715,8 @@ fn map_network_error_code(message: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        cam_settings_pairs, infer_kickoff_phase, is_car_state_actor, loadout_pairs,
-        map_network_error_code, normalize_input_byte, pickup_bool_raw_state,
+        cam_settings_pairs, infer_kickoff_phase, is_car_state_actor, is_first_touch_rise,
+        loadout_pairs, map_network_error_code, normalize_input_byte, pickup_bool_raw_state,
         resolve_component_owner, team_loadout_for, ActorKind,
     };
     use std::collections::HashMap;
@@ -850,6 +857,28 @@ mod tests {
         assert_eq!(normalize_input_byte(128), 0.0);
         assert_eq!(normalize_input_byte(255), 1.0);
         assert_eq!(normalize_input_byte(0), -1.0);
+    }
+
+    #[test]
+    fn first_touch_rise_counts_each_step_once() {
+        let mut seen = None;
+        let rises: Vec<i32> = [1, 1, 1, 2, 2, 3, 3]
+            .into_iter()
+            .filter(|&value| {
+                let rise = is_first_touch_rise(seen, value);
+                seen = Some(value);
+                rise
+            })
+            .collect();
+        assert_eq!(rises, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn first_touch_rise_ignores_a_total_that_is_not_one_step_up() {
+        assert!(!is_first_touch_rise(None, 0));
+        assert!(!is_first_touch_rise(None, 3));
+        assert!(!is_first_touch_rise(Some(1), 3));
+        assert!(!is_first_touch_rise(Some(2), 1));
     }
 
     #[test]
@@ -1042,6 +1071,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
 
         let mut last_touch_time: HashMap<i32, f64> = HashMap::new();
         let mut last_touch_pos: HashMap<i32, (f32, f32, f32)> = HashMap::new();
+        let mut first_touch_count: HashMap<i32, i32> = HashMap::new();
         let mut tickmarks_by_frame: HashMap<i64, Vec<(String, i64)>> = HashMap::new();
 
         let mut team_zero: Vec<usize> = Vec::new();
@@ -1108,6 +1138,7 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                 let mut frame_demo_records: Vec<(i32, Option<i32>)> = Vec::new();
                 let mut frame_component_events: Vec<ComponentEvent> = Vec::new();
                 let mut frame_stat_events: Vec<ParserStatEvent> = Vec::new();
+                let mut frame_first_touch_pris: Vec<i32> = Vec::new();
                 // Prune actors that were deleted before processing updates to avoid stale telemetry
                 for deleted in nf.deleted_actors {
                     let aid: i32 = deleted.into();
@@ -1456,22 +1487,25 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
                             }
                         }
                         Attribute::Int(value) => {
-                            if objects
-                                .get(upd_object_id)
-                                .map(|name| {
-                                    name == "TAGame.CarComponent_AirActivate_TA:AirActivateCount"
-                                })
-                                .unwrap_or(false)
-                            {
-                                let target = resolve_component_owner(&component_owner, aid);
-                                frame_component_events.push(ComponentEvent {
-                                    owner_actor_id: target,
-                                    kind: "air_activate_count",
-                                    component: "air_activate",
-                                    vector: None,
-                                    raw_value: Some(value as i64),
-                                    active: None,
-                                });
+                            match objects.get(upd_object_id).map(String::as_str) {
+                                Some("TAGame.CarComponent_AirActivate_TA:AirActivateCount") => {
+                                    let target = resolve_component_owner(&component_owner, aid);
+                                    frame_component_events.push(ComponentEvent {
+                                        owner_actor_id: target,
+                                        kind: "air_activate_count",
+                                        component: "air_activate",
+                                        vector: None,
+                                        raw_value: Some(value as i64),
+                                        active: None,
+                                    });
+                                }
+                                Some("TAGame.PRI_TA:MatchFirstTouches") => {
+                                    let seen = first_touch_count.insert(aid, value);
+                                    if is_first_touch_rise(seen, value) {
+                                        frame_first_touch_pris.push(aid);
+                                    }
+                                }
+                                _ => {}
                             }
                         }
 
@@ -2141,6 +2175,25 @@ fn run_iter_frames(path: &str) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
 
                 f.set_item("parser_touch_events", parser_touch_events)?;
                 f.set_item("parser_demo_events", parser_demo_events)?;
+
+                let parser_first_touch_events = PyList::empty_bound(py);
+                for pri in &frame_first_touch_pris {
+                    let Some(idx) = owner_to_player_index.get(pri) else {
+                        continue;
+                    };
+                    let Some((_, team)) = header_players.get(*idx) else {
+                        continue;
+                    };
+                    let event_dict = PyDict::new_bound(py);
+                    event_dict.set_item("timestamp", nf.time as f64)?;
+                    event_dict.set_item("player_id", format!("player_{}", idx))?;
+                    event_dict.set_item("team", *team)?;
+                    event_dict.set_item("frame_index", frame_index)?;
+                    event_dict.set_item("source", "parser")?;
+                    parser_first_touch_events.append(event_dict)?;
+                }
+                f.set_item("parser_first_touch_events", parser_first_touch_events)?;
+
                 let parser_tickmarks = PyList::empty_bound(py);
                 if let Some(tickmarks) = tickmarks_by_frame.get(&frame_index) {
                     for (description, tickmark_frame) in tickmarks {
@@ -2331,6 +2384,10 @@ fn parse_network_with_diagnostics(path: &str) -> PyResult<PyObject> {
                                     f.set_item("component_events", PyList::empty_bound(py))?;
                                     f.set_item("parser_touch_events", PyList::empty_bound(py))?;
                                     f.set_item("parser_demo_events", PyList::empty_bound(py))?;
+                                    f.set_item(
+                                        "parser_first_touch_events",
+                                        PyList::empty_bound(py),
+                                    )?;
                                     f.set_item("parser_stat_events", PyList::empty_bound(py))?;
                                     f.set_item("parser_tickmarks", PyList::empty_bound(py))?;
                                     f.set_item("parser_kickoff_markers", PyList::empty_bound(py))?;
