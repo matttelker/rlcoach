@@ -180,6 +180,8 @@
 | STANDARD_DIAGONAL  | 0          | 0.0%   | 0            | 0.0%     |
 | STANDARD_FRONTFLIP | 0          | 0.0%   | 0            | 0.0%     |
 | STANDARD_WAVEDASH  | 0          | 0.0%   | 0            | 0.0%     |
+| SUPPORT_CHEAT      | 0          | 0.0%   | 0            | 0.0%     |
+| SUPPORT_HOLD       | 0          | 0.0%   | 0            | 0.0%     |
 | UNKNOWN            | 0          | 0.0%   | 0            | 0.0%     |
 
 
@@ -543,6 +545,8 @@
             "STANDARD_DIAGONAL": 0,
             "STANDARD_FRONTFLIP": 0,
             "STANDARD_WAVEDASH": 0,
+            "SUPPORT_CHEAT": 0,
+            "SUPPORT_HOLD": 0,
             "UNKNOWN": 0
           },
           "avg_time_to_first_touch_s": 0.0,
@@ -821,6 +825,8 @@
             "STANDARD_DIAGONAL": 0,
             "STANDARD_FRONTFLIP": 0,
             "STANDARD_WAVEDASH": 0,
+            "SUPPORT_CHEAT": 0,
+            "SUPPORT_HOLD": 0,
             "UNKNOWN": 0
           },
           "avg_time_to_first_touch_s": 0.0,
@@ -973,6 +979,8 @@
             "STANDARD_DIAGONAL": 0,
             "STANDARD_FRONTFLIP": 0,
             "STANDARD_WAVEDASH": 0,
+            "SUPPORT_CHEAT": 0,
+            "SUPPORT_HOLD": 0,
             "UNKNOWN": 0
           },
           "avg_time_to_first_touch_s": 0.0,
@@ -1102,6 +1110,8 @@
             "STANDARD_DIAGONAL": 0,
             "STANDARD_FRONTFLIP": 0,
             "STANDARD_WAVEDASH": 0,
+            "SUPPORT_CHEAT": 0,
+            "SUPPORT_HOLD": 0,
             "UNKNOWN": 0
           },
           "avg_time_to_first_touch_s": 0.0,

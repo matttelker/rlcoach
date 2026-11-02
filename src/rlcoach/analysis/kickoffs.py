@@ -17,12 +17,14 @@ APPROACH_KEYS = [
     "SPEEDFLIP",
     "STANDARD_FRONTFLIP",
     "STANDARD_DIAGONAL",
-    "STANDARD_WAVEDASH",
+    "STANDARD_WAVEDASH",  # Reserved, never reported: see _classify_standard_kickoff
     "STANDARD_BOOST",
-    "DELAY",
+    "DELAY",  # Reserved, never reported: see _classify_approach_type
     "FAKE_STATIONARY",
     "FAKE_HALFFLIP",
     "FAKE_AGGRESSIVE",
+    "SUPPORT_CHEAT",
+    "SUPPORT_HOLD",
     "STANDARD",  # Generic fallback for backwards compatibility
     "UNKNOWN",
 ]

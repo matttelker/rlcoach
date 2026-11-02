@@ -61,22 +61,15 @@ KICKOFF_RESET_LEAD_S = 4.0  # Ball reset to cars released, as markers see it (s)
 KICKOFF_CONTACT_REACH = 400.0  # Car distance from the ball at contact (units)
 KICKOFF_FIRST_TOUCH_LAG_S = 1.5  # Allowed for the game's counter to replicate (s)
 KICKOFF_RESET_WINDOW = 6.0  # Kickoff events this close are one ball reset (s)
+KICKOFF_ARRIVAL_MAX_S = 1.0  # A GO car this far out at contact is still racing (s)
+KICKOFF_ROLE_TIE_TOLERANCE = 100.0  # Spawns this close to level are equal (units)
+KICKOFF_CHEAT_MIN_ADVANCE = 750.0  # Move toward centre that is cheating up (units)
+KICKOFF_FRONTFLIP_MAX_ANGLE = 15.0  # Dodge this far off straight ahead (degrees)
+DODGE_SPIN_RATE = 5.5  # Car spin about the dodge torque in a flip (rad/s)
+DODGE_MIN_PITCH_TORQUE = 0.4  # Weaker pitch torque can't show a cancel
+SPEEDFLIP_SPIN_WINDOW_S = (0.08, 0.5)  # Spin sampled this long after a dodge (s)
+SPEEDFLIP_MAX_PITCH_SHARE = 0.5  # Share of a flip's pitch rate left after a cancel
 MIN_ORIENTATION_SAMPLES = 5
-
-# Kickoff approach type keys
-APPROACH_TYPE_KEYS = [
-    "SPEEDFLIP",
-    "STANDARD_FRONTFLIP",
-    "STANDARD_DIAGONAL",
-    "STANDARD_WAVEDASH",
-    "STANDARD_BOOST",
-    "DELAY",
-    "FAKE_STATIONARY",
-    "FAKE_HALFFLIP",
-    "FAKE_AGGRESSIVE",
-    "STANDARD",  # Generic fallback
-    "UNKNOWN",
-]
 
 CHALLENGE_WINDOW_S = 1.2
 CHALLENGE_RADIUS_UU = 1000.0

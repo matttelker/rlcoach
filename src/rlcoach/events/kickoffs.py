@@ -7,6 +7,7 @@ roles, approach types, and timing analysis.
 from __future__ import annotations
 
 import math
+import statistics
 from dataclasses import replace
 from itertools import groupby
 from typing import Any
@@ -15,16 +16,24 @@ from ..field_constants import Vec3
 from ..parser.types import BallFrame, Frame, Header, ParserTouchEvent, PlayerFrame
 from .constants import (
     BALL_STATIONARY_THRESHOLD,
+    DODGE_MIN_PITCH_TORQUE,
+    DODGE_SPIN_RATE,
+    KICKOFF_ARRIVAL_MAX_S,
     KICKOFF_CAR_STILL_SPEED,
     KICKOFF_CENTER_POSITION,
+    KICKOFF_CHEAT_MIN_ADVANCE,
     KICKOFF_CONTACT_REACH,
     KICKOFF_FIRST_TOUCH_LAG_S,
+    KICKOFF_FRONTFLIP_MAX_ANGLE,
     KICKOFF_HOLD_MIN_S,
     KICKOFF_MAX_DURATION,
     KICKOFF_MIN_COOLDOWN,
     KICKOFF_POSITION_TOLERANCE,
     KICKOFF_RESET_LEAD_S,
     KICKOFF_RESET_WINDOW,
+    KICKOFF_ROLE_TIE_TOLERANCE,
+    SPEEDFLIP_MAX_PITCH_SHARE,
+    SPEEDFLIP_SPIN_WINDOW_S,
     TOUCH_PROXIMITY_THRESHOLD,
 )
 from .types import KickoffEvent
@@ -38,8 +47,10 @@ def detect_kickoffs(
 
     The detector tracks the kickoff window (cars released -> ball first played),
     so ``t_start`` and every time in the event count from the release. It records:
-    - Player roles (GO/CHEAT/WING/BACK) inferred from spawn positions
+    - Player roles (GO/CHEAT/WING/BACK) inferred from spawn positions, with GO
+      going to whichever car took the kickoff when spawns are level
     - Boost consumption prior to the first meaningful action
+    - How each car played the kickoff, read from its own dodges and movement
     - Time-to-first-touch per player and overall first possession outcome
 
     The contact time is exact to a frame. ``first_touch_player`` is the game's own
@@ -362,16 +373,13 @@ def _start_kickoff(frame: Frame) -> dict[str, Any]:
             "max_distance": 0.0,
             "first_touch_time": None,
             "contact_time": None,  # Set when in reach as the ball was played
+            "arrival_eta": float("inf"),  # Seconds out as the ball was played
             "role": "BACK",  # Placeholder until assigned from spawn ordering
-            "velocities": [],  # List of (t, speed) tuples
-            "max_speed": 0.0,
             "speed_at_contact": 0.0,
             "positions": [],  # List of (t, Vec3) for path analysis
             "distance_to_ball_min": float("inf"),
-            "reached_ball": False,
-            "moved_toward_ball": False,
-            "moved_away_from_ball": False,
-            "jumped": False,
+            "dodges": [],  # List of (t, torque_x, torque_y), in the car's own frame
+            "flip_motion": [],  # List of (t, pitch_rate, roof_height)
         }
 
     _assign_kickoff_roles(player_states)
@@ -394,15 +402,37 @@ def _assign_kickoff_roles(player_states: dict[str, dict[str, Any]]) -> None:
         if not entries:
             continue
         # Sort by distance to centre spot (closer players are the goers)
-        entries.sort(
-            key=lambda item: distance_3d(
-                item[1]["start_pos"], Vec3(0.0, 0.0, item[1]["start_pos"].z)
-            )
-        )
+        entries.sort(key=lambda item: _spawn_distance(item[1]))
 
         for index, (_pid, state) in enumerate(entries):
             role = _classify_kickoff_role(state["start_pos"], team, index)
             state["role"] = role
+
+
+def _spawn_distance(state: dict[str, Any]) -> float:
+    """Distance from a car's spawn to the centre spot."""
+    start_pos = state["start_pos"]
+    return distance_3d(start_pos, Vec3(0.0, 0.0, start_pos.z))
+
+
+def _settle_level_spawns(player_states: dict[str, dict[str, Any]]) -> None:
+    """Give GO to the car that took the kickoff when spawns can't separate them.
+
+    A team's cars often start level on mirrored spawns and agree between them who
+    goes, so spawn order alone can name the wrong car.
+    """
+    states = list(player_states.values())
+    for go in [state for state in states if state["role"] == "GO"]:
+        level = [
+            state
+            for state in states
+            if state["team"] == go["team"]
+            and abs(_spawn_distance(state) - _spawn_distance(go))
+            <= KICKOFF_ROLE_TIE_TOLERANCE
+        ]
+        taker = min(level, key=lambda state: state["distance_to_ball_min"])
+        if taker["distance_to_ball_min"] < go["distance_to_ball_min"]:
+            go["role"], taker["role"] = taker["role"], go["role"]
 
 
 def _update_kickoff_state(state: dict[str, Any], frame: Frame) -> None:
@@ -428,27 +458,15 @@ def _update_kickoff_state(state: dict[str, Any], frame: Frame) -> None:
             pdata["movement_start_time"] = t
 
         speed = vector_magnitude(player.velocity)
-        pdata["velocities"].append((rel_time, speed))
-        pdata["max_speed"] = max(pdata["max_speed"], speed)
 
         pdata["positions"].append((rel_time, player.position))
 
+        flip_motion = _flip_motion(player)
+        if flip_motion is not None:
+            pdata["flip_motion"].append((rel_time, *flip_motion))
+
         separation = distance_3d(player.position, ball.position)
         pdata["distance_to_ball_min"] = min(pdata["distance_to_ball_min"], separation)
-
-        if separation < TOUCH_PROXIMITY_THRESHOLD * 1.2:
-            pdata["reached_ball"] = True
-
-        ball_center = KICKOFF_CENTER_POSITION
-        start_dist_to_ball = distance_3d(pdata["start_pos"], ball_center)
-        current_dist_to_ball = distance_3d(player.position, ball_center)
-        if current_dist_to_ball < start_dist_to_ball - 100.0:
-            pdata["moved_toward_ball"] = True
-        if current_dist_to_ball > start_dist_to_ball + 100.0:
-            pdata["moved_away_from_ball"] = True
-
-        if not player.is_on_ground and player.position.z > 30.0:
-            pdata["jumped"] = True
 
         # Detect per-player first touch during kickoff window
         if separation < TOUCH_PROXIMITY_THRESHOLD * 0.9:
@@ -464,6 +482,29 @@ def _update_kickoff_state(state: dict[str, Any], frame: Frame) -> None:
                     "time": rel_time,
                 }
 
+    for event in frame.component_events:
+        if event.kind != "dodge_torque" or event.vector is None:
+            continue
+        if event.player_id in state["players"]:
+            state["players"][event.player_id]["dodges"].append(
+                (rel_time, event.vector.x, event.vector.y)
+            )
+
+
+def _flip_motion(player: PlayerFrame) -> tuple[float, float] | None:
+    """Pitch rate in the car's own frame, and how far its roof points up."""
+    quaternion = getattr(player.rotation, "quaternion", None)
+    spin = player.angular_velocity
+    if quaternion is None or spin is None:
+        return None
+    x, y, z, w = quaternion
+    pitch_rate = (
+        spin.x * 2.0 * (x * y - z * w)
+        + spin.y * (1.0 - 2.0 * (x * x + z * z))
+        + spin.z * 2.0 * (y * z + x * w)
+    )
+    return pitch_rate, 1.0 - 2.0 * (x * x + y * y)
+
 
 def _ball_departure_alignment(car: PlayerFrame, ball: BallFrame) -> float:
     """How directly the ball is leaving away from a car, from 1.0 down to -1.0."""
@@ -478,6 +519,22 @@ def _ball_departure_alignment(car: PlayerFrame, ball: BallFrame) -> float:
         + offset_y * ball.velocity.y
         + offset_z * ball.velocity.z
     ) / scale
+
+
+def _arrival_eta(car: PlayerFrame, ball: BallFrame) -> float:
+    """Seconds until a car reaches the ball at its current closing speed."""
+    offset_x = ball.position.x - car.position.x
+    offset_y = ball.position.y - car.position.y
+    offset_z = ball.position.z - car.position.z
+    distance = math.hypot(offset_x, offset_y, offset_z)
+    if distance == 0.0:
+        return 0.0
+    closing_speed = (
+        offset_x * car.velocity.x
+        + offset_y * car.velocity.y
+        + offset_z * car.velocity.z
+    ) / distance
+    return distance / closing_speed if closing_speed > 0.0 else float("inf")
 
 
 def _record_contact(state: dict[str, Any], frame: Frame) -> None:
@@ -502,6 +559,8 @@ def _record_contact(state: dict[str, Any], frame: Frame) -> None:
     rel_time = frame.timestamp - state["t_start"]
     for car in contesting:
         state["players"][car.player_id]["contact_time"] = rel_time
+    for car in cars:
+        state["players"][car.player_id]["arrival_eta"] = _arrival_eta(car, ball)
 
     toucher = max(contesting, key=lambda car: _ball_departure_alignment(car, ball))
     state["first_touch"] = {
@@ -548,6 +607,8 @@ def _finalize_kickoff(state: dict[str, Any], frame: Frame) -> KickoffEvent | Non
     first_touch = state.get("first_touch")
     first_touch_player = first_touch.get("player_id") if first_touch else None
     time_to_first_touch = first_touch.get("time") if first_touch else None
+
+    _settle_level_spawns(state["players"])
 
     players_payload = []
     for pid in state["player_order"]:
@@ -606,183 +667,137 @@ def _classify_kickoff_role(position: Vec3, team: int, ordinal: int) -> str:
     return "BACK"
 
 
+def _is_cancelled_dodge(
+    pdata: dict[str, Any], dodge: tuple[float, float, float]
+) -> bool:
+    """True when a forward dodge's pitch stopped while the car rolled through.
+
+    A flip spins about its dodge torque at a fixed rate, so the torque says what
+    pitch rate to expect. A cancel takes that pitch out and leaves the roll, so the
+    nose stays level as the roof comes round. A dodge that lands first keeps its
+    roof up and is a wavedash. Spin is judged by its median because some cars'
+    rotation replicates up to 0.2s behind the dodge.
+    """
+    dodge_time, torque_x, torque_y = dodge
+    if torque_y < DODGE_MIN_PITCH_TORQUE:
+        return False
+
+    motion = pdata["flip_motion"]
+    window_start = dodge_time + SPEEDFLIP_SPIN_WINDOW_S[0]
+    window_end = dodge_time + SPEEDFLIP_SPIN_WINDOW_S[1]
+    window = [sample for sample in motion if window_start <= sample[0] <= window_end]
+    # A dodge this close to contact is the flip into the ball, not an approach.
+    if not window or motion[-1][0] < window_end:
+        return False
+
+    expected_pitch = DODGE_SPIN_RATE * torque_y / math.hypot(torque_x, torque_y)
+    pitch_share = statistics.median(rate for _, rate, _ in window) / expected_pitch
+    rolled_over = min(roof for _, _, roof in window) < 0.0
+    return pitch_share < SPEEDFLIP_MAX_PITCH_SHARE and rolled_over
+
+
 def _is_speedflip_kickoff(pdata: dict[str, Any]) -> bool:
-    """Detect speedflip from fast time to ball + high speed profile.
+    """Detect a speedflip from the car's own flip.
 
-    Speedflip is characterized by:
-    - Fast first touch time from diagonal spawn (~2.4-2.6s)
-    - High boost usage during kickoff
-    - High max speed achieved
-    - Player jumped (flip required)
-
-    Without mechanics data, we use timing and speed heuristics.
+    Cars that cancel a forward dodge reach 1000uu from the centre spot about 0.2s
+    ahead of cars from the same spawn that don't, measured apart from this rule.
     """
-    first_touch_time = pdata.get("first_touch_time")
-    max_speed = pdata.get("max_speed", 0.0)
-    boost_used = max(0.0, pdata["start_boost"] - pdata["min_boost"])
-    jumped = pdata.get("jumped", False)
+    return any(_is_cancelled_dodge(pdata, dodge) for dodge in pdata["dodges"])
 
-    # Speedflip requires a flip
-    if not jumped:
-        return False
 
-    # Must have used significant boost
-    if boost_used < 20.0:
-        return False
+def _is_contesting(pdata: dict[str, Any]) -> bool:
+    """True if a car went for the ball.
 
-    # High max speed is indicative (speedflip maintains supersonic)
-    # Supersonic threshold is ~2200 uu/s
-    if max_speed < 2000.0:
-        return False
-
-    # Fast time to first touch is the key indicator
-    # Pro speedflips from diagonal: ~2.4-2.6s
-    # Non-speedflip from diagonal: ~2.8-3.2s
-    if first_touch_time is not None and first_touch_time <= 2.7:
+    A car in reach as the ball is played is contesting it. So is a GO car still
+    closing on it, which lost the race instead of declining it. Other roles get no
+    such credit, because their cars pass through at every range on the way upfield.
+    """
+    if pdata["contact_time"] is not None or pdata["first_touch_time"] is not None:
         return True
-
-    return False
-
-
-def _is_delay_kickoff(pdata: dict[str, Any]) -> bool:
-    """Detect delay kickoff from deceleration near contact.
-
-    Delay kickoff = normal approach but brake right before 50/50.
-    Key signature: high speed followed by sudden drop near contact.
-    """
-    velocities = pdata.get("velocities", [])
-    contact_time = pdata.get("first_touch_time")
-    max_speed = pdata.get("max_speed", 0.0)
-
-    if not velocities or contact_time is None:
-        return False
-
-    # Must have approached at high speed (was going fast)
-    if max_speed < 1800.0:
-        return False
-
-    pre_contact_velocities = [
-        (t, v) for t, v in velocities if contact_time - 0.5 < t < contact_time
-    ]
-
-    if len(pre_contact_velocities) < 3:
-        return False
-
-    # Look for deceleration spike
-    local_max_speed = max(v for _, v in pre_contact_velocities)
-    final_speed = pre_contact_velocities[-1][1]
-
-    # Significant deceleration (>30% speed drop) near contact
-    if local_max_speed > 0:
-        speed_drop = (local_max_speed - final_speed) / local_max_speed
-        return speed_drop > 0.30 and local_max_speed > 1500.0
-
-    return False
+    return pdata["role"] == "GO" and pdata["arrival_eta"] <= KICKOFF_ARRIVAL_MAX_S
 
 
-def _is_fake_kickoff(pdata: dict[str, Any]) -> tuple[bool, str]:
-    """Detect fake kickoff and classify subtype.
+def _classify_fake_kickoff(pdata: dict[str, Any]) -> str:
+    """Name what a GO car did instead of contesting the ball.
 
     Fake types:
-    1. FAKE_STATIONARY: Didn't move at all
-    2. FAKE_HALFFLIP: Moved backward (half-flip to grab corner boost)
-    3. FAKE_AGGRESSIVE: Moved but didn't contest ball
-
-    Returns:
-        Tuple of (is_fake, fake_type or "")
+    1. FAKE_HALFFLIP: Flipped backward, usually to grab corner boost
+    2. FAKE_STATIONARY: Barely moved
+    3. FAKE_AGGRESSIVE: Moved, but somewhere other than the ball
     """
-    reached_ball = pdata.get("reached_ball", False)
-    max_distance = pdata.get("max_distance", 0.0)
-    moved_away = pdata.get("moved_away_from_ball", False)
-    moved_toward = pdata.get("moved_toward_ball", False)
+    if any(torque_y <= -DODGE_MIN_PITCH_TORQUE for _, _, torque_y in pdata["dodges"]):
+        return "FAKE_HALFFLIP"
+
     boost_used = max(0.0, pdata["start_boost"] - pdata["min_boost"])
-    first_touch_time = pdata.get("first_touch_time")
+    if pdata["max_distance"] < 300.0 and boost_used < 5.0:
+        return "FAKE_STATIONARY"
 
-    # If player touched the ball or contested it, not a fake
-    if first_touch_time is not None or pdata.get("contact_time") is not None:
-        return False, ""
+    return "FAKE_AGGRESSIVE"
 
-    # Type 1: Stationary fake - barely moved
-    if max_distance < 100.0 and boost_used < 5.0:
-        return True, "FAKE_STATIONARY"
 
-    # Type 2: Half-flip backward (common on diagonal)
-    # Moved significant distance but AWAY from ball
-    if moved_away and not moved_toward and max_distance > 300.0:
-        return True, "FAKE_HALFFLIP"
+def _classify_support_kickoff(pdata: dict[str, Any]) -> str:
+    """Name the job of a car that left the ball to its teammate.
 
-    # Type 3: Aggressive fake - moved toward but didn't reach ball
-    # This happens when they go to intercept where opponent hits ball
-    if not reached_ball and moved_toward and max_distance > 500.0:
-        return True, "FAKE_AGGRESSIVE"
-
-    # Type 3b: Just didn't contest despite moving
-    if not reached_ball and max_distance > 300.0:
-        return True, "FAKE_AGGRESSIVE"
-
-    return False, ""
+    - SUPPORT_CHEAT: Moved up toward the play
+    - SUPPORT_HOLD: Stayed back, or went for boost
+    """
+    center = KICKOFF_CENTER_POSITION
+    advance = distance_3d(pdata["start_pos"], center) - distance_3d(
+        pdata["last_pos"], center
+    )
+    if advance >= KICKOFF_CHEAT_MIN_ADVANCE:
+        return "SUPPORT_CHEAT"
+    return "SUPPORT_HOLD"
 
 
 def _classify_standard_kickoff(pdata: dict[str, Any]) -> str:
-    """Classify standard kickoff subtype based on movement pattern.
+    """Classify a contested kickoff with no speedflip by the car's first dodge.
 
     Subtypes:
-    - STANDARD_FRONTFLIP: Jumped, moved toward ball
-    - STANDARD_DIAGONAL: High speed diagonal approach
-    - STANDARD_WAVEDASH: Would need mechanics data
-    - STANDARD_BOOST: No jump, just boost to ball
+    - STANDARD_FRONTFLIP: Dodged straight ahead
+    - STANDARD_DIAGONAL: Dodged at an angle, side flips included
+    - STANDARD_BOOST: Reached contact without dodging, on boost
+    - STANDARD: Reached contact without dodging or boost
+
+    STANDARD_WAVEDASH is reserved: no contesting car has shown one to calibrate on.
     """
-    jumped = pdata.get("jumped", False)
-    boost_used = max(0.0, pdata["start_boost"] - pdata["min_boost"])
-    max_speed = pdata.get("max_speed", 0.0)
-
-    # Without detailed flip direction data, we use simpler heuristics
-    if not jumped:
-        # No flip = boost-only kickoff
-        if boost_used > 10.0:
-            return "STANDARD_BOOST"
-        return "STANDARD"
-
-    # High speed suggests diagonal flip or speedflip attempt
-    if max_speed > 2100.0:
+    if pdata["dodges"]:
+        _, torque_x, torque_y = pdata["dodges"][0]
+        angle = math.degrees(math.atan2(abs(torque_x), torque_y))
+        if angle <= KICKOFF_FRONTFLIP_MAX_ANGLE:
+            return "STANDARD_FRONTFLIP"
         return "STANDARD_DIAGONAL"
 
-    # Default to frontflip if they jumped
-    return "STANDARD_FRONTFLIP"
+    boost_used = max(0.0, pdata["start_boost"] - pdata["min_boost"])
+    if boost_used > 10.0:
+        return "STANDARD_BOOST"
+    return "STANDARD"
 
 
 def _classify_approach_type(pdata: dict[str, Any]) -> str:
-    """Classify kickoff approach type from movement, velocity, and timing data.
+    """Classify how a car played the kickoff.
 
-    Classification priority:
-    1. Fake - didn't contest the ball
-    2. Delay - contested but braked before contact
-    3. Speedflip - fast time with flip characteristics
-    4. Standard subtypes - based on flip/boost pattern
+    A car that left the ball alone reports its job: only a GO car was meant to go,
+    so only a GO car can fake. A car that went for the ball reports how it got there.
+
+    DELAY is reserved: no car has been seen braking before contact, so nothing
+    calibrates a rule for it.
     """
-    boost_used = max(0.0, pdata["start_boost"] - pdata["min_boost"])
-    max_distance = pdata.get("max_distance", 0.0)
+    if not _is_contesting(pdata):
+        if pdata["role"] == "GO":
+            return _classify_fake_kickoff(pdata)
+        return _classify_support_kickoff(pdata)
 
-    # 1. Check for fake first (didn't contest)
-    is_fake, fake_type = _is_fake_kickoff(pdata)
-    if is_fake:
-        return fake_type
-
-    # 2. Check for delay (contested but braked)
-    if _is_delay_kickoff(pdata):
-        return "DELAY"
-
-    # 3. Check for speedflip
     if _is_speedflip_kickoff(pdata):
         return "SPEEDFLIP"
 
-    # 4. Classify standard subtypes
     standard_type = _classify_standard_kickoff(pdata)
     if standard_type != "STANDARD":
         return standard_type
 
     # Fallback
-    if boost_used > 0.0 or max_distance > 150.0:
+    boost_used = max(0.0, pdata["start_boost"] - pdata["min_boost"])
+    if boost_used > 0.0 or pdata["max_distance"] > 150.0:
         return "STANDARD"
 
     return "UNKNOWN"

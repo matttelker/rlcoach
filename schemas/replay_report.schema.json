@@ -280,9 +280,9 @@
             "required": ["player_id","role","boost_used","approach_type","time_to_first_touch"],
             "properties": {
               "player_id": { "type": "string" },
-              "role": { "type": "string", "enum":["GO","CHEAT","WING","BACK"] },
+              "role": { "type": "string", "enum":["GO","CHEAT","WING","BACK"], "description": "From spawn position. When a team's cars start level, GO is the one that took the kickoff" },
               "boost_used": { "type": "number" },
-              "approach_type": { "type": "string", "enum":["SPEEDFLIP","STANDARD_FRONTFLIP","STANDARD_DIAGONAL","STANDARD_WAVEDASH","STANDARD_BOOST","DELAY","FAKE_STATIONARY","FAKE_HALFFLIP","FAKE_AGGRESSIVE","STANDARD","UNKNOWN"] },
+              "approach_type": { "type": "string", "enum":["SPEEDFLIP","STANDARD_FRONTFLIP","STANDARD_DIAGONAL","STANDARD_WAVEDASH","STANDARD_BOOST","DELAY","FAKE_STATIONARY","FAKE_HALFFLIP","FAKE_AGGRESSIVE","SUPPORT_CHEAT","SUPPORT_HOLD","STANDARD","UNKNOWN"], "description": "How the car played the kickoff. FAKE_* is only a GO car that left the ball alone; other roles report SUPPORT_CHEAT (moved up) or SUPPORT_HOLD (stayed back or went for boost). SPEEDFLIP is a forward dodge with its pitch cancelled. STANDARD_DIAGONAL includes side flips. DELAY and STANDARD_WAVEDASH are reserved and never reported" },
               "time_to_first_touch": { "type": ["number","null"] }
             }
           }
@@ -536,6 +536,8 @@
             "FAKE_STATIONARY": { "type": "integer" },
             "FAKE_HALFFLIP": { "type": "integer" },
             "FAKE_AGGRESSIVE": { "type": "integer" },
+            "SUPPORT_CHEAT": { "type": "integer" },
+            "SUPPORT_HOLD": { "type": "integer" },
             "STANDARD": { "type": "integer" },
             "UNKNOWN": { "type": "integer" }
           }

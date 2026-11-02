@@ -1,5 +1,6 @@
 """Tests for event detection and timeline aggregation."""
 
+import math
 from dataclasses import replace
 from pathlib import Path
 
@@ -28,10 +29,13 @@ from rlcoach.parser.types import (
     Frame,
     GoalHeader,
     Header,
+    ParserComponentEvent,
     ParserDemoEvent,
     ParserKickoffMarker,
     ParserTouchEvent,
     PlayerFrame,
+    Quaternion,
+    Rotation,
 )
 
 REPLAY_DIR = Path(__file__).resolve().parents[1] / "Replay_files"
@@ -158,6 +162,99 @@ def countdown_frames(
             frame = replace(frame, parser_kickoff_markers=[marker])
         frames.append(frame)
     return frames
+
+
+def with_flip(
+    frames: list[Frame],
+    player_id: str,
+    at: float,
+    torque: tuple[float, float],
+    pitch_share: float = 1.0,
+    rolls: bool = True,
+) -> list[Frame]:
+    """Give a car a dodge, then the spin real replays record after one.
+
+    The car spins about ``torque`` at the flip rate. ``pitch_share`` is how much of
+    the pitch survives, so a cancel is near 0. ``rolls=False`` is a dodge that lands
+    before the car comes round, which keeps its roof up.
+    """
+    length = math.hypot(*torque)
+    pitch_rate = pitch_share * 5.5 * torque[1] / length
+    roll_rate = 5.5 * torque[0] / length if rolls else 0.0
+
+    updated = []
+    dodged = False
+    for frame in frames:
+        if frame.timestamp < at:
+            updated.append(frame)
+            continue
+        angle = roll_rate * (frame.timestamp - at)
+        spinning = replace(
+            frame.get_player_by_id(player_id),
+            rotation=Rotation(
+                0.0,
+                0.0,
+                0.0,
+                Quaternion(math.sin(angle / 2), 0.0, 0.0, math.cos(angle / 2)),
+            ),
+            angular_velocity=Vec3(
+                roll_rate, pitch_rate * math.cos(angle), pitch_rate * math.sin(angle)
+            ),
+        )
+        players = [
+            spinning if car.player_id == player_id else car for car in frame.players
+        ]
+        events = frame.component_events
+        if not dodged:
+            dodged = True
+            events = [
+                ParserComponentEvent(
+                    timestamp=frame.timestamp,
+                    kind="dodge_torque",
+                    component="dodge",
+                    player_id=player_id,
+                    vector=Vec3(torque[0], torque[1], 0.0),
+                )
+            ]
+        updated.append(replace(frame, players=players, component_events=events))
+    return updated
+
+
+def with_teammate(
+    frames: list[Frame],
+    player_id: str,
+    team: int,
+    spawn: Vec3,
+    drive: float = 0.0,
+    release: float = 14.0,
+) -> list[Frame]:
+    """Add a car that holds its spawn for the countdown, then drives at the spot."""
+    length = math.hypot(spawn.x, spawn.y)
+    heading_x, heading_y = -spawn.x / length, -spawn.y / length
+
+    updated = []
+    for frame in frames:
+        driving = max(0.0, frame.timestamp - release)
+        speed = drive if driving else 0.0
+        car = replace(
+            create_test_player(
+                player_id,
+                team,
+                Vec3(
+                    spawn.x + heading_x * drive * driving,
+                    spawn.y + heading_y * drive * driving,
+                    spawn.z,
+                ),
+            ),
+            velocity=Vec3(heading_x * speed, heading_y * speed, 0.0),
+        )
+        updated.append(replace(frame, players=[*frame.players, car]))
+    return updated
+
+
+def kickoff_row(kickoff: KickoffEvent, player_id: str) -> dict:
+    """One car's row on a kickoff event."""
+    return next(p for p in kickoff.players if p["player_id"] == player_id)
 
 
 def open_play_frames(start: float, count: int = 30) -> list[Frame]:
@@ -971,6 +1068,287 @@ class TestKickoffGameFirstTouch:
         kickoff = detect_kickoffs(with_game_first_touch(frames, 1.8, "orange", 1))[0]
 
         assert kickoff.first_touch_player == "orange"
+
+
+class TestKickoffApproach:
+    """How each car played the kickoff, on frames shaped like real replays."""
+
+    def test_cancelled_forward_dodge_is_a_speedflip(self):
+        frames = with_flip(
+            countdown_frames(10.0),
+            "blue",
+            at=14.5,
+            torque=(1.84, 1.58),
+            pitch_share=0.1,
+        )
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "SPEEDFLIP"
+
+    def test_completed_flip_is_not_a_speedflip(self):
+        """The same dodge with its pitch left in is an ordinary diagonal flip."""
+        frames = with_flip(countdown_frames(10.0), "blue", at=14.5, torque=(1.84, 1.58))
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "STANDARD_DIAGONAL"
+
+    def test_dodge_that_lands_is_not_a_speedflip(self):
+        """A wavedash shows no pitch either, but its roof never comes round."""
+        frames = with_flip(
+            countdown_frames(10.0),
+            "blue",
+            at=14.5,
+            torque=(0.54, 2.19),
+            pitch_share=0.1,
+            rolls=False,
+        )
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "STANDARD_FRONTFLIP"
+
+    def test_side_dodge_has_no_pitch_to_cancel(self):
+        frames = with_flip(countdown_frames(10.0), "blue", at=14.5, torque=(2.6, 0.0))
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "STANDARD_DIAGONAL"
+
+    def test_flip_into_the_ball_is_not_a_speedflip(self):
+        """Contact ends the spin too soon after the dodge to judge a cancel."""
+        frames = with_flip(
+            countdown_frames(10.0),
+            "blue",
+            at=15.9,
+            torque=(1.84, 1.58),
+            pitch_share=0.1,
+        )
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "STANDARD_DIAGONAL"
+
+    def test_fast_car_that_only_jumped_is_not_a_speedflip(self):
+        """Every car meets the ball at about 2.1s, so speed and timing prove nothing."""
+        frames = []
+        for frame in countdown_frames(10.0):
+            if frame.timestamp > 15.0:
+                blue = replace(
+                    frame.get_player_by_id("blue"),
+                    velocity=Vec3(0.0, 2200.0, 0.0),
+                    is_on_ground=False,
+                )
+                position = blue.position
+                blue = replace(blue, position=Vec3(position.x, position.y, 60.0))
+                frame = replace(frame, players=[blue, frame.players[1]])
+            frames.append(frame)
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "STANDARD_BOOST"
+
+    @pytest.mark.parametrize(
+        ("torque", "expected"),
+        [
+            ((0.0, 2.24), "STANDARD_FRONTFLIP"),
+            ((0.4, 2.2), "STANDARD_FRONTFLIP"),
+            ((1.84, 1.58), "STANDARD_DIAGONAL"),
+            ((2.6, 0.0), "STANDARD_DIAGONAL"),
+        ],
+    )
+    def test_flip_type_comes_from_the_dodge_direction(self, torque, expected):
+        frames = with_flip(countdown_frames(10.0), "blue", at=15.9, torque=torque)
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == expected
+
+    def test_first_dodge_names_the_flip(self):
+        """A car that flipped early and again into the ball flipped diagonally."""
+        frames = with_flip(countdown_frames(10.0), "blue", at=14.5, torque=(1.84, 1.58))
+        frames = with_flip(frames, "blue", at=15.9, torque=(0.0, 2.24))
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "STANDARD_DIAGONAL"
+
+    def test_flip_after_contact_is_ignored(self):
+        frames = with_flip(countdown_frames(10.0), "blue", at=16.2, torque=(0.0, 2.24))
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "STANDARD_BOOST"
+
+    def test_back_car_that_stays_is_holding_not_faking(self):
+        frames = with_teammate(countdown_frames(10.0), "back", 0, Vec3(0, -4608, 17))
+
+        row = kickoff_row(detect_kickoffs(frames)[0], "back")
+
+        assert row["role"] == "BACK"
+        assert row["approach_type"] == "SUPPORT_HOLD"
+
+    def test_back_car_moving_up_is_cheating(self):
+        frames = with_teammate(
+            countdown_frames(10.0), "back", 0, Vec3(256, -3840, 17), drive=1000.0
+        )
+
+        row = kickoff_row(detect_kickoffs(frames)[0], "back")
+
+        assert row["role"] == "BACK"
+        assert row["approach_type"] == "SUPPORT_CHEAT"
+
+    def test_small_move_is_still_holding(self):
+        frames = with_teammate(
+            countdown_frames(10.0), "back", 0, Vec3(256, -3840, 17), drive=300.0
+        )
+
+        row = kickoff_row(detect_kickoffs(frames)[0], "back")
+
+        assert row["approach_type"] == "SUPPORT_HOLD"
+
+    def test_wing_leaving_the_ball_is_support(self):
+        frames = with_teammate(countdown_frames(10.0), "wing", 0, Vec3(2048, -2560, 17))
+
+        row = kickoff_row(detect_kickoffs(frames)[0], "wing")
+
+        assert row["role"] == "WING"
+        assert row["approach_type"] == "SUPPORT_HOLD"
+
+    def test_support_car_in_reach_reports_how_it_got_there(self):
+        frames = with_teammate(
+            countdown_frames(10.0), "back", 0, Vec3(256, -3840, 17), drive=1700.0
+        )
+        frames = with_flip(frames, "back", at=14.5, torque=(1.84, 1.58))
+
+        row = kickoff_row(detect_kickoffs(frames)[0], "back")
+
+        assert row["role"] == "BACK"
+        assert row["approach_type"] == "STANDARD_DIAGONAL"
+
+    def test_support_car_closing_on_the_ball_is_not_contesting_it(self):
+        """Cars cheating up pass through this range all the time."""
+        frames = with_teammate(
+            countdown_frames(10.0), "back", 0, Vec3(256, -3840, 17), drive=1500.0
+        )
+
+        row = kickoff_row(detect_kickoffs(frames)[0], "back")
+
+        assert row["approach_type"] == "SUPPORT_CHEAT"
+
+    def test_go_car_beaten_to_the_ball_is_not_a_fake(self):
+        """Still 600uu out and closing, it lost the race instead of declining it."""
+        kickoff = detect_kickoffs(countdown_frames(10.0, orange_drive=700.0))[0]
+
+        orange = kickoff_row(kickoff, "orange")
+        assert orange["time_to_first_touch"] is None
+        assert not orange["approach_type"].startswith("FAKE")
+
+    def test_go_car_that_never_goes_is_a_stationary_fake(self):
+        kickoff = detect_kickoffs(countdown_frames(10.0, orange_drive=0.0))[0]
+
+        assert kickoff_row(kickoff, "orange")["approach_type"] == "FAKE_STATIONARY"
+
+    def test_go_car_too_far_out_is_a_fake(self):
+        kickoff = detect_kickoffs(countdown_frames(10.0, orange_drive=500.0))[0]
+
+        assert kickoff_row(kickoff, "orange")["approach_type"] == "FAKE_AGGRESSIVE"
+
+    def test_go_car_driving_away_is_a_fake(self):
+        kickoff = detect_kickoffs(countdown_frames(10.0, orange_drive=-500.0))[0]
+
+        assert kickoff_row(kickoff, "orange")["approach_type"] == "FAKE_AGGRESSIVE"
+
+    def test_go_car_flipping_backward_is_a_halfflip_fake(self):
+        frames = with_flip(
+            countdown_frames(10.0, orange_drive=-500.0),
+            "orange",
+            at=14.5,
+            torque=(0.16, -2.24),
+        )
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "orange")["approach_type"] == "FAKE_HALFFLIP"
+
+    def test_level_spawns_give_go_to_the_car_that_went(self):
+        """Spawn order can't say who goes when a team's cars start level."""
+        frames = with_teammate(
+            countdown_frames(10.0, blue_drive=0.0),
+            "mate",
+            0,
+            Vec3(-2048, 0, 17),
+            drive=900.0,
+        )
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "mate")["role"] == "GO"
+        blue = kickoff_row(kickoff, "blue")
+        assert blue["role"] == "WING"
+        assert blue["approach_type"] == "SUPPORT_HOLD"
+
+    def test_level_spawns_keep_go_when_it_went(self):
+        frames = with_teammate(countdown_frames(10.0), "mate", 0, Vec3(-2048, 0, 17))
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["role"] == "GO"
+        assert kickoff_row(kickoff, "mate")["role"] == "WING"
+
+    def test_spawn_further_back_never_takes_go(self):
+        """Only level spawns are the team's choice; the nearer car is still GO."""
+        frames = with_teammate(
+            countdown_frames(10.0, blue_drive=0.0),
+            "back",
+            0,
+            Vec3(256, -3840, 17),
+            drive=1800.0,
+        )
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff_row(kickoff, "blue")["role"] == "GO"
+        assert kickoff_row(kickoff, "back")["role"] == "BACK"
+
+    def test_frames_without_rotation_data_never_read_as_speedflip(self):
+        """A dodge alone isn't a speedflip; the spin after it has to show the cancel."""
+        frames = with_flip(countdown_frames(10.0), "blue", at=14.5, torque=(1.84, 1.58))
+        stripped = []
+        for frame in frames:
+            players = [
+                replace(car, rotation=Vec3(0.0, 0.0, 0.0), angular_velocity=None)
+                for car in frame.players
+            ]
+            stripped.append(replace(frame, players=players))
+
+        kickoff = detect_kickoffs(stripped)[0]
+
+        assert kickoff_row(kickoff, "blue")["approach_type"] == "STANDARD_DIAGONAL"
+
+    def test_real_replay_approaches(self):
+        """Every GO car in this game speedflips, and every other car cheats up."""
+        rlreplay_rust = pytest.importorskip("rlreplay_rust")
+        if not getattr(rlreplay_rust, "RUST_CORE", False):
+            pytest.skip("Rust core not available")
+        replay = Path("Replay_files/testing_replay.replay")
+        if not replay.exists():
+            pytest.skip("testing_replay.replay not found")
+
+        adapter = get_adapter("rust")
+        header = adapter.parse_header(replay)
+        network = adapter.parse_network(replay)
+        frames = build_normalized_frames(header, network.frames)
+
+        kickoffs = detect_kickoffs(frames, header)
+
+        rows = [row for kickoff in kickoffs for row in kickoff.players]
+        goers = [row for row in rows if row["role"] == "GO"]
+        others = [row for row in rows if row["role"] != "GO"]
+        assert len(goers) == 20
+        assert {row["approach_type"] for row in goers} == {"SPEEDFLIP"}
+        assert {row["approach_type"] for row in others} == {"SUPPORT_CHEAT"}
 
 
 class TestBoostPickupDetection:
