@@ -11,12 +11,13 @@ from itertools import groupby
 from typing import Any
 
 from ..field_constants import Vec3
-from ..parser.types import BallFrame, Frame, Header, PlayerFrame
+from ..parser.types import BallFrame, Frame, Header, ParserTouchEvent, PlayerFrame
 from .constants import (
     BALL_STATIONARY_THRESHOLD,
     KICKOFF_CAR_STILL_SPEED,
     KICKOFF_CENTER_POSITION,
     KICKOFF_CONTACT_REACH,
+    KICKOFF_FIRST_TOUCH_LAG_S,
     KICKOFF_HOLD_MIN_S,
     KICKOFF_MAX_DURATION,
     KICKOFF_MIN_COOLDOWN,
@@ -39,9 +40,10 @@ def detect_kickoffs(
     - Boost consumption prior to the first meaningful action
     - Time-to-first-touch per player and overall first possession outcome
 
-    The contact time is exact to a frame. ``first_touch_player`` is the car the ball
-    leaves away from, so in a 50/50 it names who won the ball, which is what the
-    outcome means, and may not be who reached it first.
+    The contact time is exact to a frame. ``first_touch_player`` is the game's own
+    record where the replay has one. On older replays with no record it is the car
+    the ball leaves away from, so in a 50/50 it names who won the ball, and may not
+    be who the game credits.
     """
     if not frames:
         return []
@@ -108,6 +110,9 @@ def _detect_heuristic_kickoffs(
     kickoff_state: dict[str, Any] | None = None
     last_kickoff_end_time = -KICKOFF_MIN_COOLDOWN
     releases = _find_kickoff_releases(frames)
+    game_first_touches = [
+        event for frame in frames for event in frame.parser_first_touch_events
+    ]
 
     for index, frame in enumerate(frames):
         ball = frame.ball
@@ -153,6 +158,7 @@ def _detect_heuristic_kickoffs(
         duration_exceeded = elapsed >= KICKOFF_MAX_DURATION
 
         if ball_played or duration_exceeded:
+            _credit_game_first_touch(kickoff_state, frame, game_first_touches)
             kickoff_event = _finalize_kickoff(kickoff_state, frame, header)
             if kickoff_event is not None:
                 kickoffs.append(kickoff_event)
@@ -161,6 +167,7 @@ def _detect_heuristic_kickoffs(
 
     # Handle dangling kickoff if replay ends while still at center
     if kickoff_state is not None:
+        _credit_game_first_touch(kickoff_state, frames[-1], game_first_touches)
         kickoff_event = _finalize_kickoff(kickoff_state, frames[-1], header)
         if kickoff_event is not None:
             kickoffs.append(kickoff_event)
@@ -456,6 +463,33 @@ def _record_contact(state: dict[str, Any], frame: Frame) -> None:
         "team": state["players"][toucher.player_id]["team"],
         "time": rel_time,
     }
+
+
+def _credit_game_first_touch(
+    state: dict[str, Any],
+    closing_frame: Frame,
+    game_first_touches: list[ParserTouchEvent],
+) -> None:
+    """Replace the estimated toucher with the player the game recorded, if any.
+
+    The game's counter replicates up to a second after the touch, so it is looked for
+    past the frame that closes the window. The time of contact stays with the frames.
+    """
+    latest = closing_frame.timestamp + KICKOFF_FIRST_TOUCH_LAG_S
+    for event in game_first_touches:
+        pdata = state["players"].get(event.player_id)
+        if pdata is None or not state["t_start"] <= event.timestamp <= latest:
+            continue
+        first_touch = state.get("first_touch")
+        contact_time = first_touch["time"] if first_touch else None
+        if contact_time is not None:
+            pdata["contact_time"] = contact_time
+        state["first_touch"] = {
+            "player_id": event.player_id,
+            "team": pdata["team"],
+            "time": contact_time,
+        }
+        return
 
 
 def _finalize_kickoff(

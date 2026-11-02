@@ -288,7 +288,7 @@
           }
         },
         "outcome": { "type": "string", "enum": ["FIRST_POSSESSION_BLUE","FIRST_POSSESSION_ORANGE","NEUTRAL","GOAL_AGAINST","GOAL_FOR"] },
-        "first_touch_player": { "type": ["string","null"], "description": "The car the ball leaves away from. In a 50/50 this is who won the ball, who may not have reached it first" },
+        "first_touch_player": { "type": ["string","null"], "description": "Who the game credits with the first touch, on replays that record it. Otherwise the car the ball leaves away from, which in a 50/50 may not be who the game credits" },
         "time_to_first_touch": { "type": ["number","null"], "description": "Seconds from t_start to the ball first being played" },
         "source": { "type": "string", "enum": ["parser", "inferred"] }
       }
