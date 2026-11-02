@@ -1,6 +1,8 @@
 """Tests for kickoff analysis."""
 
+import json
 from dataclasses import replace
+from pathlib import Path
 
 from rlcoach.analysis.kickoffs import APPROACH_KEYS, analyze_kickoffs
 from rlcoach.events import GoalEvent, KickoffEvent, detect_kickoffs
@@ -49,6 +51,8 @@ class TestApproachKeys:
             "FAKE_STATIONARY",
             "FAKE_HALFFLIP",
             "FAKE_AGGRESSIVE",
+            "SUPPORT_CHEAT",
+            "SUPPORT_HOLD",
             "STANDARD",
             "UNKNOWN",
         ]
@@ -61,6 +65,19 @@ class TestApproachKeys:
         assert "FAKE_STATIONARY" in APPROACH_KEYS
         assert "FAKE_HALFFLIP" in APPROACH_KEYS
         assert "FAKE_AGGRESSIVE" in APPROACH_KEYS
+
+    def test_schema_lists_every_approach_key(self):
+        """The event enum, the count object and the analyzer must stay in step."""
+        schema_path = Path(__file__).parent.parent / "schemas"
+        schema = json.loads(
+            (schema_path / "replay_report.schema.json").read_text(encoding="utf-8")
+        )
+        definitions = schema["definitions"]
+        event = definitions["kickoffEvent"]["properties"]["players"]["items"]
+        counts = definitions["kickoffs"]["properties"]["approach_types"]
+
+        assert set(event["properties"]["approach_type"]["enum"]) == set(APPROACH_KEYS)
+        assert set(counts["properties"]) == set(APPROACH_KEYS)
 
 
 class TestKickoffAnalysis:
@@ -537,6 +554,56 @@ class TestKickoffApproachTypeVariants:
         orange = analyze_kickoffs(frames, events, team="ORANGE")
         assert orange["approach_types"]["STANDARD_DIAGONAL"] == 1
         assert orange["approach_types"]["STANDARD_WAVEDASH"] == 1
+
+    def test_support_jobs_are_counted_apart_from_fakes(self):
+        """A car doing a BACK or WING job never adds to the fake counts."""
+        frames = [
+            make_frame(0.0, [make_player("b1", 0), make_player("b2", 0)]),
+        ]
+        kickoffs = [
+            KickoffEvent(
+                phase="INITIAL",
+                t_start=0.0,
+                players=[
+                    {
+                        "player_id": "b1",
+                        "role": "BACK",
+                        "approach_type": "SUPPORT_HOLD",
+                    },
+                    {
+                        "player_id": "b2",
+                        "role": "WING",
+                        "approach_type": "SUPPORT_CHEAT",
+                    },
+                ],
+            ),
+            KickoffEvent(
+                phase="INITIAL",
+                t_start=20.0,
+                players=[
+                    {
+                        "player_id": "b1",
+                        "role": "BACK",
+                        "approach_type": "SUPPORT_HOLD",
+                    },
+                    {
+                        "player_id": "b2",
+                        "role": "GO",
+                        "approach_type": "FAKE_AGGRESSIVE",
+                    },
+                ],
+            ),
+        ]
+        events = {"kickoffs": kickoffs}
+
+        team = analyze_kickoffs(frames, events, team="BLUE")
+        player = analyze_kickoffs(frames, events, player_id="b1")
+
+        assert team["approach_types"]["SUPPORT_HOLD"] == 2
+        assert team["approach_types"]["SUPPORT_CHEAT"] == 1
+        assert team["approach_types"]["FAKE_AGGRESSIVE"] == 1
+        assert team["approach_types"]["UNKNOWN"] == 0
+        assert player["approach_types"]["SUPPORT_HOLD"] == 2
 
     def test_mixed_approach_types_player_level(self):
         """Test aggregation at player level with mixed approach types."""
