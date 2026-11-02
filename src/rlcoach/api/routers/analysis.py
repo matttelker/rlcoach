@@ -11,9 +11,8 @@ from sqlalchemy.orm import Session as DBSession
 from ...analysis.patterns import compute_pattern_analysis
 from ...analysis.weaknesses import detect_weaknesses
 from ...db import create_session, get_session
-from ...db.models import Benchmark, PlayerGameStats, Replay, UserReplay
+from ...db.models import Benchmark, PlayerGameStats, Replay
 from ...metrics import MetricDirection, get_metric
-from ..auth import OptionalUser
 
 router = APIRouter(tags=["analysis"])
 
@@ -57,7 +56,6 @@ def _metric_direction(metric: str) -> str:
 
 @router.get("/trends")
 async def get_trends(
-    user: OptionalUser,
     db: Annotated[DBSession, Depends(get_session)],
     metric: str = Query(..., description="Metric to trend (e.g., bcpm, goals)"),
     period: str = Query(default="30d", description="Time period (7d, 30d, 90d, all)"),
@@ -99,13 +97,6 @@ async def get_trends(
         .filter(PlayerGameStats.is_me == True)  # noqa: E712
         .filter(Replay.playlist == playlist)
     )
-
-    # This router is never mounted in SaaS mode. Local replays have no owner, so
-    # only scope to a user when a request actually carries one.
-    if user:
-        query = query.join(UserReplay, Replay.replay_id == UserReplay.replay_id).filter(
-            UserReplay.user_id == user.id
-        )
 
     if date_from:
         query = query.filter(Replay.play_date >= date_from)

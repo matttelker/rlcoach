@@ -15,7 +15,7 @@ class TestSchemaValidation:
     @pytest.fixture
     def examples_dir(self):
         """Path to examples directory."""
-        return Path(__file__).parent.parent / "examples"
+        return Path(__file__).parent / "fixtures"
 
     @pytest.fixture
     def success_report(self, examples_dir):

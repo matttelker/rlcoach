@@ -1,7 +1,3 @@
 [workspace]
-members = [
-    "parsers/rlinput",
-    "parsers/rlinput_py",
-    "parsers/rlreplay_rust",
-]
+members = ["parsers/rlreplay_rust"]
 resolver = "2"
