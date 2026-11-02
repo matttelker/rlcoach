@@ -83,33 +83,12 @@ def test_readme_and_api_reference_parser_contract_doc():
         assert term in readme
 
 
-def test_master_status_tracks_current_parser_contract_snapshot():
-    master_status = _read("codex/docs/master_status.md")
-    network_issue = _read("codex/docs/network-frames-integration-issue.md")
-
-    for content in (master_status, network_issue):
-        assert "2026-04-29" in content
-        assert "docs/parser_adapter.md" in content
-        assert "parser_event_coverage" in content
-        assert "event_provenance" in content
-        assert "scorecard_coverage" in content
-
-
 def test_status_docs_reference_current_parser_contract_and_no_stale_counts():
     docs = {
         "README.md": _read("README.md"),
         "docs/api.md": _read("docs/api.md"),
         "docs/parser_adapter.md": _read("docs/parser_adapter.md"),
-        "codex/docs/master_status.md": _read("codex/docs/master_status.md"),
-        "codex/docs/network-frames-integration-issue.md": _read(
-            "codex/docs/network-frames-integration-issue.md"
-        ),
     }
-
-    for content in docs.values():
-        assert "codex/docs/parser_adapter.md" not in content
-
-    assert "**Last updated:** 2026-04-29" in docs["codex/docs/master_status.md"]
 
     stale_test_count_claims = ["553 tests", "388 tests", "261 tests"]
     for path, content in docs.items():

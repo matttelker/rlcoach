@@ -28,12 +28,9 @@ Do not use system Python for repo work here.
 | --- | --- | --- |
 | Core Python logic | `src/rlcoach` and matching `tests/` files | `README.md` for operator-facing behavior |
 | Replay parser / Rust bridge | `parsers/rlreplay_rust` | Rust/build docs only if the bridge changes |
-| Scope or roadmap changes | current plan in `codex/Plans/2026-07-07-max-extraction-input-reconstruction-plan.md` | related ticket/docs only if the task expands scope |
-| Design notes or tickets | `codex/docs/`, `codex/tickets/` | only the touched note/ticket |
+| Reference docs | `docs/` | only the touched doc |
 | Replay fixtures | `assets/replays/` | Git LFS workflow as needed |
 | Schemas | `schemas/` | matching tests/fixtures |
-
-Do not read all of `codex/` or all planning docs for a local bug fix.
 
 ## Working Workflow
 
@@ -71,4 +68,4 @@ Do not read all of `codex/` or all planning docs for a local bug fix.
 
 - Do use `.venv` for direct Python commands. Do not call bare `python`, `python3`, or `pytest` and hope the shell is configured.
 - Do update matching tests and goldens when contracts change. Do not treat fixtures or Markdown outputs as disposable.
-- Do use `README.md` and the active plan doc when operator behavior or scope is in play. Do not default to reading the whole `codex/` tree.
+- Do use `README.md` when operator behavior is in play.

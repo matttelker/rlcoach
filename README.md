@@ -19,8 +19,6 @@ rlcoach is designed to provide detailed analysis of Rocket League replays withou
 - Markdown dossier generator mirrors the JSON schema and ships with golden fixtures.
 - Offline CLI viewer renders summaries from previously generated JSON reports.
 
-See the [implementation plan](codex/Plans/rlcoach_implementation_plan.md) for scope and roadmap.
-
 ## Quick Start
 
 ### Installation
@@ -110,19 +108,16 @@ source .venv/bin/activate && PYTHONPATH=src python scripts/parser_corpus_health.
 - `src/rlcoach/` — Main package source code
 - `tests/` — Test suite
 - `schemas/` — JSON schema definitions
-- `codex/Plans/` — Project planning and design documents
-- `codex/tickets/` — Development work items
-- `codex/logs/` — Engineering logs
-- `codex/docs/` — Developer docs (status, parser reliability notes, UI)
+- `docs/` — Reference docs
+- `gui/` — Local browser dashboard
 - `parsers/rlreplay_rust/` — Optional Rust parser adapter (pyo3)
 
 ## Documentation
 
-- [Implementation plan](codex/Plans/rlcoach_implementation_plan.md) — architecture and scope.
 - [Parser adapter contract](docs/parser_adapter.md) — Rust/null backend contract, fallback policy, parser event semantics, scorecard coverage, and corpus gates.
-- [Markdown mapping](codex/docs/json-report-markdown-mapping.md) — JSON → Markdown coverage matrix.
-- [Markdown composer plan](codex/docs/json-to-markdown-report-plan.md) — report generation roadmap.
-- [Offline UI guide](codex/docs/ui.md) — CLI viewer usage.
+- [Markdown mapping](docs/report-mapping.md) — JSON → Markdown coverage matrix.
+- [Mechanics detection](docs/mechanics-detection.md) — how each mechanic is detected.
+- [Offline UI guide](docs/offline-ui.md) — CLI viewer usage.
 
 ## Architecture
 
@@ -165,7 +160,7 @@ python -m rlcoach.ui view out/replay.json
 python -m rlcoach.ui view out/replay.json --player "DisplayName"
 ```
 
-See `codex/docs/ui.md` for usage.
+See `docs/offline-ui.md` for usage.
 
 ## Local Dashboard
 
@@ -178,4 +173,4 @@ MIT License - see LICENSE file for details.
 
 ## Contributing
 
-Please see the implementation plan and tickets under `codex/` for current development status.
+All work lands on `main`. Run `ruff`, `black` and `pytest` before each commit.

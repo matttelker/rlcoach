@@ -10,6 +10,8 @@ All Python commands MUST activate the venv first. System Python has no packages 
 source .venv/bin/activate && <command>
 ```
 
+On Windows there is no `bin/activate`, so call `.venv/Scripts/python.exe` directly.
+
 ## Build & Test Commands
 
 ```bash
