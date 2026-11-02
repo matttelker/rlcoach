@@ -66,21 +66,6 @@ SPEEDFLIP_SPIN_WINDOW_S = (0.08, 0.5)  # Spin sampled this long after a dodge (s
 SPEEDFLIP_MAX_PITCH_SHARE = 0.5  # Share of a flip's pitch rate left after a cancel
 MIN_ORIENTATION_SAMPLES = 5
 
-# Kickoff approach type keys
-APPROACH_TYPE_KEYS = [
-    "SPEEDFLIP",
-    "STANDARD_FRONTFLIP",
-    "STANDARD_DIAGONAL",
-    "STANDARD_WAVEDASH",
-    "STANDARD_BOOST",
-    "DELAY",
-    "FAKE_STATIONARY",
-    "FAKE_HALFFLIP",
-    "FAKE_AGGRESSIVE",
-    "STANDARD",  # Generic fallback
-    "UNKNOWN",
-]
-
 CHALLENGE_WINDOW_S = 1.2
 CHALLENGE_RADIUS_UU = 1000.0
 CHALLENGE_MIN_DISTANCE_UU = 200.0
