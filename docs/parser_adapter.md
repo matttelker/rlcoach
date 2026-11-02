@@ -6,13 +6,7 @@ This document defines the runtime contract between the parser bridge, normalizat
 
 ## Build And Dev Workflow
 
-Use the project virtual environment for every Python command:
-
-```bash
-source .venv/bin/activate && PYTHONPATH=src pytest -q
-source .venv/bin/activate && cd parsers/rlreplay_rust && cargo test
-source .venv/bin/activate && cd parsers/rlreplay_rust && maturin develop
-```
+To build and test the parser, see [AGENTS.md](../AGENTS.md#building-the-parser).
 
 ## Current Backend Posture
 
@@ -167,7 +161,7 @@ Invalid replay roots fail explicitly with `invalid_replay_root`; valid roots wit
 Core parser-analysis validation:
 
 ```bash
-source .venv/bin/activate && PYTHONPATH=src pytest \
+PYTHONPATH=src uv run pytest \
   tests/test_rust_adapter.py \
   tests/parser/test_rust_adapter_smoke.py \
   tests/test_parser_interface.py \
@@ -185,5 +179,5 @@ source .venv/bin/activate && PYTHONPATH=src pytest \
 Corpus-health gate:
 
 ```bash
-source .venv/bin/activate && PYTHONPATH=src python scripts/parser_corpus_health.py --roots replays,Replay_files --json
+PYTHONPATH=src uv run python scripts/parser_corpus_health.py --roots Replay_files --json
 ```
