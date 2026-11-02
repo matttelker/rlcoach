@@ -273,6 +273,7 @@ def test_unauthenticated_local_routers_are_excluded_from_saas_and_production(
 
     monkeypatch.setenv("SAAS_MODE", saas_mode)
     monkeypatch.setenv("ENVIRONMENT", environment)
-    paths = {route.path for route in create_app().routes}
+    client = TestClient(create_app())
 
-    assert paths.isdisjoint({"/dashboard", "/games", "/players", "/trends"})
+    for path in ("/dashboard", "/games", "/players", "/trends"):
+        assert client.get(path).status_code == 404

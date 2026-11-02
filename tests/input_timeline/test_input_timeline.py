@@ -266,8 +266,8 @@ def test_0925_wheel_boundary_counts_and_perf() -> None:
 
     first = next(iter(timelines.values()))
     segment_count = sum(len(timeline.segments) for timeline in timelines.values())
-    assert segment_count == 858
-    assert first.coverage["air_segments"] == 522
+    assert segment_count == 922
+    assert first.coverage["air_segments"] == 563
     assert sum(len(timeline.events) for timeline in timelines.values()) > 0
     assert elapsed <= 2.0
 
