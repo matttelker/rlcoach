@@ -16,7 +16,7 @@ export function Layout() {
       <nav className="w-56 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border)] flex flex-col">
         <div className="p-4 border-b border-[var(--color-border)]">
           <h1 className="text-xl font-bold text-[var(--color-primary)]">RLCoach</h1>
-          <p className="text-xs text-[var(--color-text-muted)]">AI Coaching Assistant</p>
+          <p className="text-xs text-[var(--color-text-muted)]">Local replay coach</p>
         </div>
         <div className="flex-1 py-4">
           {navItems.map((item) => (

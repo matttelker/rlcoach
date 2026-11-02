@@ -129,10 +129,4 @@ export async function tagPlayer(playerId: string, request: TagRequest): Promise<
   return data;
 }
 
-// Health check
-export async function getHealth(): Promise<{ status: string; version: string; database: string }> {
-  const { data } = await api.get('/health');
-  return data;
-}
-
 export default api;
