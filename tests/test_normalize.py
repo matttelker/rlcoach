@@ -708,10 +708,18 @@ class TestTimelineBuilding:
             ],
             "parser_tickmarks": [{"timestamp": 12.0, "kind": "goal_hint"}],
             "parser_kickoff_markers": [{"timestamp": 12.0, "phase": "INITIAL"}],
+            "parser_first_touch_events": [
+                {"timestamp": 12.0, "player_id": "player_1", "team": 1}
+            ],
         }
 
         timeline = build_timeline(header, [frame_dict])
         frame = timeline[0]
+
+        assert len(frame.parser_first_touch_events) == 1
+        assert frame.parser_first_touch_events[0].player_id == "player_1"
+        assert frame.parser_first_touch_events[0].team == 1
+        assert frame.parser_first_touch_events[0].timestamp == 0.0
 
         assert len(frame.parser_touch_events) == 1
         assert frame.parser_touch_events[0].player_id == "player_0"
@@ -805,6 +813,9 @@ class TestTimelineBuilding:
                     "attacker_team": 0,
                 }
             ],
+            "parser_first_touch_events": [
+                {"timestamp": 12.0, "player_id": "player_1", "team": 1}
+            ],
         }
 
         timeline = build_timeline(header, [frame_dict])
@@ -812,6 +823,7 @@ class TestTimelineBuilding:
 
         assert frame.parser_touch_events[0].player_id == "steam:123"
         assert frame.parser_demo_events[0].victim_id == "epic:456"
+        assert frame.parser_first_touch_events[0].player_id == "epic:456"
         assert frame.parser_demo_events[0].attacker_id == "steam:123"
         assert frame.parser_demo_events[0].timestamp == 0.0
 

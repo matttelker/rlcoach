@@ -14,7 +14,7 @@ REPLAY_PATH = Path("Replay_files/4985385d-2a6a-4bea-a312-8e539c7fd098.replay")
 PARITY_REPLAY_PATH = Path("Replay_files/0925.replay")
 
 
-def _load_frames(limit: int = 1200):
+def _load_frames(limit: int | None = 1200):
     adapter = RustAdapter()
     network = adapter.parse_network(REPLAY_PATH)
     if network is None:
@@ -181,10 +181,19 @@ def test_frames_expose_parser_event_carrier_lists():
     assert "parser_demo_events" in frame
     assert "parser_tickmarks" in frame
     assert "parser_kickoff_markers" in frame
+    assert "parser_first_touch_events" in frame
     assert isinstance(frame["parser_touch_events"], list)
     assert isinstance(frame["parser_demo_events"], list)
     assert isinstance(frame["parser_tickmarks"], list)
     assert isinstance(frame["parser_kickoff_markers"], list)
+    assert isinstance(frame["parser_first_touch_events"], list)
+
+
+def test_replay_before_the_counter_has_no_first_touch_events():
+    """This replay is net version 10, and ``MatchFirstTouches`` starts at 12."""
+    frames = _load_frames(limit=None)
+
+    assert not any(frame.get("parser_first_touch_events") for frame in frames)
 
 
 def test_real_replay_emits_parser_tickmarks():

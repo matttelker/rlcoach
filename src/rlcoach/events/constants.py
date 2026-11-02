@@ -55,6 +55,11 @@ KICKOFF_CENTER_POSITION = Vec3(0.0, 0.0, 93.15)
 KICKOFF_POSITION_TOLERANCE = 120.0
 KICKOFF_MAX_DURATION = 5.0
 KICKOFF_MIN_COOLDOWN = 5.0
+KICKOFF_HOLD_MIN_S = 2.0  # Ball and cars wait at least this long in a countdown
+KICKOFF_CAR_STILL_SPEED = 50.0  # Car speed while held for a countdown (units/s)
+KICKOFF_RESET_LEAD_S = 4.0  # Ball reset to cars released, as markers see it (s)
+KICKOFF_CONTACT_REACH = 400.0  # Car distance from the ball at contact (units)
+KICKOFF_FIRST_TOUCH_LAG_S = 1.5  # Allowed for the game's counter to replicate (s)
 KICKOFF_RESET_WINDOW = 6.0  # Kickoff events this close are one ball reset (s)
 MIN_ORIENTATION_SAMPLES = 5
 

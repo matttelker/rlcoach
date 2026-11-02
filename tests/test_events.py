@@ -98,6 +98,104 @@ def create_test_match(
     return frames, header
 
 
+FRAME_STEP = 1 / 30
+
+
+def countdown_frames(
+    reset: float,
+    phase: str = "INITIAL",
+    blue_drive: float = 920.0,
+    orange_drive: float = 800.0,
+    ball_exit: float = 1500.0,
+) -> list[Frame]:
+    """One kickoff as real replays record it, from ball reset to contact.
+
+    The ball drops onto the spot, which fires a second parser marker once it stops,
+    and the cars settle before the countdown holds them still. They are released 4s
+    after the reset, and the ball is played 2.1s later, leaving along +y at
+    ``ball_exit``. The drive speeds set how far each car is from it by then.
+    """
+    release = reset + 4.0
+    contact = release + 2.1
+    ball_drop = {0: (100.5, 0.0), 1: (98.8, -43.0), 2: (96.9, -65.0), 3: (94.3, -86.0)}
+
+    frames = []
+    for step in range(int((contact + 0.3 - reset) / FRAME_STEP)):
+        t = reset + step * FRAME_STEP
+        driving = max(0.0, t - release)
+        held_speed = 120.0 if step <= 10 else 8.0
+        blue_speed = blue_drive if driving else held_speed
+        orange_speed = orange_drive if driving else held_speed
+        players = [
+            replace(
+                create_test_player(
+                    "blue",
+                    0,
+                    Vec3(0.0, -2048.0 + blue_drive * driving, 17.0),
+                    boost=max(0, 33 - int(20.0 * driving)),
+                ),
+                velocity=Vec3(0.0, blue_speed, 0.0),
+            ),
+            replace(
+                create_test_player(
+                    "orange", 1, Vec3(0.0, 2048.0 - orange_drive * driving, 17.0)
+                ),
+                velocity=Vec3(0.0, -orange_speed, 0.0),
+            ),
+        ]
+
+        if t >= contact:
+            ball_pos = Vec3(0.0, ball_exit * (t - contact), 92.8)
+            ball_vel = Vec3(0.0, ball_exit, 0.0)
+        else:
+            height, drop_speed = ball_drop.get(step, (92.8, 0.0))
+            ball_pos = Vec3(0.0, 0.0, height)
+            ball_vel = Vec3(0.0, 0.0, drop_speed)
+
+        frame = create_test_frame(t, ball_pos, ball_vel, players)
+        if step in (0, 4):
+            marker = ParserKickoffMarker(timestamp=t, phase=phase)
+            frame = replace(frame, parser_kickoff_markers=[marker])
+        frames.append(frame)
+    return frames
+
+
+def open_play_frames(start: float, count: int = 30) -> list[Frame]:
+    """Frames away from the spot with every car moving."""
+    players = [
+        replace(
+            create_test_player(pid, team, Vec3(500.0, 1000.0, 17.0)),
+            velocity=Vec3(1000.0, 0.0, 0.0),
+        )
+        for pid, team in (("blue", 0), ("orange", 1))
+    ]
+    return [
+        create_test_frame(
+            start + step * FRAME_STEP,
+            Vec3(1500.0, 2500.0, 300.0),
+            Vec3(800.0, 0.0, 0.0),
+            players,
+        )
+        for step in range(count)
+    ]
+
+
+def with_game_first_touch(
+    frames: list[Frame], at: float, player_id: str, team: int
+) -> list[Frame]:
+    """Put a rise of the game's first-touch counter on the frame nearest ``at``."""
+    nearest = min(range(len(frames)), key=lambda i: abs(frames[i].timestamp - at))
+    event = ParserTouchEvent(timestamp=at, player_id=player_id, team=team)
+    return [
+        (
+            replace(frame, parser_first_touch_events=[event])
+            if index == nearest
+            else frame
+        )
+        for index, frame in enumerate(frames)
+    ]
+
+
 class TestGoalDetection:
     """Test goal event detection."""
 
@@ -575,6 +673,304 @@ class TestKickoffDetection:
 
         kickoffs = detect_kickoffs(frames)
         assert kickoffs == []
+
+
+class TestKickoffCountdown:
+    """Kickoffs on frames shaped like real replays, with a countdown."""
+
+    def test_one_event_per_kickoff(self):
+        """Two markers, a settling ball and a countdown are still one kickoff."""
+        kickoffs = detect_kickoffs(countdown_frames(10.0))
+
+        assert len(kickoffs) == 1
+        kickoff = kickoffs[0]
+        assert kickoff.source == "parser"
+        assert kickoff.t_start == pytest.approx(14.0, abs=2 * FRAME_STEP)
+        assert kickoff.outcome == "FIRST_POSSESSION_BLUE"
+        assert kickoff.first_touch_player == "blue"
+
+    def test_one_event_without_parser_markers(self):
+        """Gameplay state alone doesn't split a kickoff either."""
+        frames = [
+            replace(frame, parser_kickoff_markers=[])
+            for frame in countdown_frames(10.0)
+        ]
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].source == "inferred"
+
+    def test_times_count_from_release(self):
+        """The approach is timed from the release, not the ball reset."""
+        kickoff = detect_kickoffs(countdown_frames(10.0))[0]
+
+        assert kickoff.time_to_first_touch == pytest.approx(2.05, abs=0.1)
+        blue = next(p for p in kickoff.players if p["player_id"] == "blue")
+        assert blue["boost_used"] == 33
+        assert blue["time_to_first_touch"] == pytest.approx(2.05, abs=0.1)
+
+    def test_opening_kickoff_reaches_first_touch(self):
+        """The contact 6s into a replay falls inside the kickoff window."""
+        kickoffs = detect_kickoffs(countdown_frames(0.0))
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].first_touch_player == "blue"
+
+    def test_each_kickoff_counts_once(self):
+        frames = countdown_frames(0.0) + open_play_frames(7.0) + countdown_frames(30.0)
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert [round(kickoff.t_start) for kickoff in kickoffs] == [4, 34]
+        assert all(kickoff.first_touch_player == "blue" for kickoff in kickoffs)
+
+    def test_placeholder_frame_is_not_a_kickoff(self):
+        """With no ball, the parser reports a default ball on an empty frame."""
+        marker = ParserKickoffMarker(timestamp=8.0, phase="INITIAL")
+        placeholder = replace(
+            create_test_frame(8.0, Vec3(0.0, 0.0, 93.15), Vec3(0.0, 0.0, 0.0), []),
+            parser_kickoff_markers=[marker],
+        )
+        frames = (
+            countdown_frames(0.0)
+            + open_play_frames(7.0, count=15)
+            + [placeholder]
+            + open_play_frames(8.1)
+        )
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].t_start == pytest.approx(4.0, abs=2 * FRAME_STEP)
+
+    def test_twitch_during_countdown_keeps_the_release(self):
+        """One car jostling mid-countdown doesn't release the others."""
+
+        def twitch(frame: Frame) -> Frame:
+            if not 13.4 <= frame.timestamp <= 13.9:
+                return frame
+            jostled = replace(frame.players[0], velocity=Vec3(0.0, 97.0, 0.0))
+            return replace(frame, players=[jostled, frame.players[1]])
+
+        frames = [twitch(frame) for frame in countdown_frames(10.0)]
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].t_start == pytest.approx(14.0, abs=2 * FRAME_STEP)
+
+    def test_contact_is_found_with_the_car_still_out_of_touch_range(self):
+        """Positions refresh every few frames, so a car often reads 230uu out."""
+        kickoff = detect_kickoffs(countdown_frames(10.0, blue_drive=872.0))[0]
+
+        assert kickoff.first_touch_player == "blue"
+        assert kickoff.outcome == "FIRST_POSSESSION_BLUE"
+        assert kickoff.time_to_first_touch == pytest.approx(2.1, abs=2 * FRAME_STEP)
+
+    def test_ball_direction_decides_a_fifty_fifty(self):
+        """Both cars are level, and the ball leaves away from the one that won it."""
+        level = {"blue_drive": 900.0, "orange_drive": 900.0}
+
+        to_orange_side = countdown_frames(10.0, ball_exit=1500.0, **level)
+        to_blue_side = countdown_frames(10.0, ball_exit=-1500.0, **level)
+
+        assert detect_kickoffs(to_orange_side)[0].first_touch_player == "blue"
+        assert detect_kickoffs(to_blue_side)[0].first_touch_player == "orange"
+
+    def test_challenger_in_reach_is_not_a_fake(self):
+        """Losing the ball by a car length still counts as contesting it."""
+        frames = countdown_frames(10.0, orange_drive=830.0)
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        orange = next(p for p in kickoff.players if p["player_id"] == "orange")
+        assert kickoff.first_touch_player == "blue"
+        assert orange["time_to_first_touch"] == pytest.approx(2.1, abs=2 * FRAME_STEP)
+        assert not orange["approach_type"].startswith("FAKE")
+
+    def test_car_out_of_reach_is_not_contesting(self):
+        kickoff = detect_kickoffs(countdown_frames(10.0, orange_drive=500.0))[0]
+
+        orange = next(p for p in kickoff.players if p["player_id"] == "orange")
+        assert orange["time_to_first_touch"] is None
+
+    def test_hoops_launch_is_not_a_touch(self):
+        """Hoops throws the ball straight up at the release, with no car near it."""
+        frames = []
+        for frame in countdown_frames(10.0):
+            if 14.2 <= frame.timestamp < 16.1:
+                launched = replace(
+                    frame.ball,
+                    position=Vec3(0.0, 0.0, 300.0),
+                    velocity=Vec3(0.0, 0.0, 900.0),
+                )
+                frame = replace(frame, ball=launched)
+            frames.append(frame)
+
+        kickoff = detect_kickoffs(frames)[0]
+
+        assert kickoff.first_touch_player == "blue"
+        assert kickoff.time_to_first_touch == pytest.approx(2.1, abs=2 * FRAME_STEP)
+
+    def test_kickoff_nobody_plays_stays_neutral(self):
+        """The cars stop short, so the ball never moves before the replay ends."""
+        frames = countdown_frames(
+            10.0, blue_drive=300.0, orange_drive=300.0, ball_exit=0.0
+        )
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].t_start == pytest.approx(14.0, abs=2 * FRAME_STEP)
+        assert kickoffs[0].outcome == "NEUTRAL"
+        assert kickoffs[0].first_touch_player is None
+
+    def test_parser_phase_applies_to_the_kickoff(self):
+        kickoffs = detect_kickoffs(countdown_frames(310.0, phase="OT"))
+
+        assert len(kickoffs) == 1
+        assert kickoffs[0].phase == "OT"
+        assert kickoffs[0].t_start == pytest.approx(314.0, abs=2 * FRAME_STEP)
+
+    def test_real_replay_has_one_kickoff_per_countdown(self):
+        """Expected times are the stream's own countdown reaching zero."""
+        rlreplay_rust = pytest.importorskip("rlreplay_rust")
+        if not getattr(rlreplay_rust, "RUST_CORE", False):
+            pytest.skip("Rust core not available")
+        replay = Path("Replay_files/testing_replay.replay")
+        if not replay.exists():
+            pytest.skip("testing_replay.replay not found")
+
+        adapter = get_adapter("rust")
+        header = adapter.parse_header(replay)
+        network = adapter.parse_network(replay)
+        frames = build_normalized_frames(header, network.frames)
+
+        kickoffs = detect_kickoffs(frames, header)
+
+        released = [4.02, 28.97, 53.28, 82.44, 110.79, 250.21, 289.87, 341.90]
+        released += [398.72, 428.54]
+        assert [kickoff.t_start for kickoff in kickoffs] == pytest.approx(
+            released, abs=0.1
+        )
+        # The stream's bBallHasBeenHit, measured from each release.
+        played = [2.17, 1.9, 1.9, 1.93, 2.17, 2.2, 1.94, 1.91, 1.91, 2.21]
+        assert [kickoff.time_to_first_touch for kickoff in kickoffs] == pytest.approx(
+            played, abs=0.15
+        )
+
+
+class TestKickoffGameFirstTouch:
+    """The game's first-touch counter outranks the estimate from frames.
+
+    ``countdown_frames(10.0)`` plays the ball at 16.1 with blue closest, so the
+    frames alone credit blue.
+    """
+
+    @staticmethod
+    def kickoff_with_counter(at: float, player_id: str, team: int, **drives):
+        frames = countdown_frames(10.0, **drives) + open_play_frames(16.4, count=90)
+        return detect_kickoffs(with_game_first_touch(frames, at, player_id, team))[0]
+
+    def test_counter_names_the_first_touch(self):
+        kickoff = self.kickoff_with_counter(16.8, "orange", 1)
+
+        assert kickoff.first_touch_player == "orange"
+        assert kickoff.outcome == "FIRST_POSSESSION_ORANGE"
+
+    def test_counter_keeps_the_estimate_when_they_agree(self):
+        kickoff = self.kickoff_with_counter(16.8, "blue", 0)
+
+        assert kickoff.first_touch_player == "blue"
+        assert kickoff.outcome == "FIRST_POSSESSION_BLUE"
+
+    def test_contact_time_stays_with_the_frames(self):
+        estimated = detect_kickoffs(countdown_frames(10.0))[0]
+
+        kickoff = self.kickoff_with_counter(16.8, "orange", 1)
+
+        assert kickoff.time_to_first_touch == estimated.time_to_first_touch
+        assert kickoff.t_start == estimated.t_start
+
+    @pytest.mark.parametrize("lag", [0.0, 1.02])
+    def test_counter_counts_across_its_replication_lag(self, lag):
+        """It arrives 0-1.02s after contact on real replays, once the window closed."""
+        kickoff = self.kickoff_with_counter(16.1 + lag, "orange", 1)
+
+        assert kickoff.first_touch_player == "orange"
+
+    def test_counter_can_arrive_just_before_the_contact_frame(self):
+        """Contact reads up to a frame late, and a rise can replicate at once."""
+        kickoff = self.kickoff_with_counter(16.05, "orange", 1)
+
+        assert kickoff.first_touch_player == "orange"
+
+    @pytest.mark.parametrize("at", [13.9, 17.8])
+    def test_counter_outside_the_kickoff_is_ignored(self, at):
+        """A rise before the release or long after contact is some other moment."""
+        kickoff = self.kickoff_with_counter(at, "orange", 1)
+
+        assert kickoff.first_touch_player == "blue"
+        assert kickoff.outcome == "FIRST_POSSESSION_BLUE"
+
+    def test_counter_for_a_player_not_in_the_kickoff_keeps_the_estimate(self):
+        kickoff = self.kickoff_with_counter(16.8, "left_the_match", 1)
+
+        assert kickoff.first_touch_player == "blue"
+
+    def test_each_kickoff_takes_its_own_counter(self):
+        first = countdown_frames(0.0) + open_play_frames(6.4)
+        second = countdown_frames(30.0) + open_play_frames(36.4)
+        frames = with_game_first_touch(first, 6.8, "orange", 1)
+        frames += with_game_first_touch(second, 36.8, "blue", 0)
+
+        kickoffs = detect_kickoffs(frames)
+
+        assert [kickoff.first_touch_player for kickoff in kickoffs] == [
+            "orange",
+            "blue",
+        ]
+
+    def test_credited_car_out_of_reach_is_not_a_fake(self):
+        """Stale positions can read the real toucher beyond the reach limit."""
+        kickoff = self.kickoff_with_counter(16.8, "orange", 1, orange_drive=500.0)
+
+        orange = next(p for p in kickoff.players if p["player_id"] == "orange")
+        assert kickoff.first_touch_player == "orange"
+        assert orange["time_to_first_touch"] == kickoff.time_to_first_touch
+        assert not orange["approach_type"].startswith("FAKE")
+
+    def test_counter_without_a_contact_frame_has_no_time(self):
+        """A ball hit straight up shows no sideways speed, but the counter rises."""
+        frames = countdown_frames(
+            10.0, blue_drive=300.0, orange_drive=300.0, ball_exit=0.0
+        )
+
+        kickoff = detect_kickoffs(with_game_first_touch(frames, 16.3, "orange", 1))[0]
+
+        assert kickoff.first_touch_player == "orange"
+        assert kickoff.outcome == "FIRST_POSSESSION_ORANGE"
+        assert kickoff.time_to_first_touch is None
+
+    def test_frames_with_no_countdown_use_the_counter_too(self):
+        """A recording that starts mid-reset never shows a hold to release from."""
+        frames = [
+            create_test_frame(
+                1.0 + step * FRAME_STEP,
+                Vec3(0.0, 0.0, 93.15),
+                Vec3(0.0, 0.0, 0.0),
+                [
+                    create_test_player("blue", 0, Vec3(0.0, -150.0, 17.0)),
+                    create_test_player("orange", 1, Vec3(0.0, 2048.0, 17.0)),
+                ],
+            )
+            for step in range(10)
+        ] + open_play_frames(1.4)
+
+        kickoff = detect_kickoffs(with_game_first_touch(frames, 1.8, "orange", 1))[0]
+
+        assert kickoff.first_touch_player == "orange"
 
 
 class TestBoostPickupDetection:

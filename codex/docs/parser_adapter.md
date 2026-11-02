@@ -88,7 +88,8 @@ of frame dicts (network parsed with `must_parse_network_data`). Each frame:
   `"fallback_unclassified"`. The frame-level value degrades to the weakest source used by any
   emitted actor in that frame.
 - `boost_pad_events`, `parser_touch_events`, `parser_demo_events`, `parser_tickmarks`,
-  `parser_kickoff_markers` — the authoritative per-frame event streams (below).
+  `parser_kickoff_markers`, `parser_first_touch_events` — the authoritative per-frame event
+  streams (below).
 
 ### Player state per frame
 
@@ -117,7 +118,7 @@ jumping" apart from "parser had nothing to say."
 ### Authoritative per-frame event streams
 
 These are sparse — most frames carry empty lists. Each event is attached to the `Frame` where
-it occurs, so an event's position in the timeline is the frame it lives on. All four
+it occurs, so an event's position in the timeline is the frame it lives on. All five
 `parser_*` streams stamp `source = "parser"`.
 
 **`boost_pad_events`** (shape from `PadEvent` in `pads.rs`):
@@ -146,6 +147,12 @@ keyed off `replay.tick_marks` and attached to the frame matching each tickmark's
 **`parser_kickoff_markers`**: `{timestamp, phase, frame_index, source}`. `phase` is `"INITIAL"`
 or `"OT"` (inferred from header overtime and match length). Emitted on the rising edge of the
 ball being at center (within `120` uu of `(0, 0, 93.15)`) and stationary (speed `<= 60`).
+
+**`parser_first_touch_events`**: `{timestamp, player_id, team, frame_index, source}`, the same
+shape as `parser_touch_events`. Emitted when a player's `TAGame.PRI_TA:MatchFirstTouches` rises
+by one, so it names who the game credits with a kickoff's first touch. It lands on the frame
+the rise replicated, up to about a second after the touch. The counter starts at net version
+12, and a rise is dropped if the player's name has no unique header row.
 
 ## player_metadata
 
