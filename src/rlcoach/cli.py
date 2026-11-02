@@ -455,6 +455,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Process replay even if playing on an excluded account",
     )
 
+    mistakes_parser = subparsers.add_parser(
+        "mistakes",
+        help="List one player's mistakes in a replay and what to do instead",
+    )
+    mistakes_parser.add_argument(
+        "replay_file", type=str, help="Path to the .replay file"
+    )
+    mistakes_parser.add_argument(
+        "--player",
+        type=str,
+        help="Player to review (default: whoever saved the replay)",
+    )
+    mistakes_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print JSON instead of plain text",
+    )
+
     config_parser = subparsers.add_parser("config", help="Manage RLCoach configuration")
     config_parser.add_argument(
         "--init", action="store_true", help="Create template config file"
@@ -582,6 +600,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"JSON: {json_path}")
         print(f"Markdown: {markdown_path}")
         return 0 if not is_error else 1
+    elif args.command == "mistakes":
+        return handle_mistakes_command(args)
     elif args.command == "config":
         return handle_config_command(args)
     elif args.command == "benchmarks":
@@ -591,6 +611,23 @@ def main(argv: list[str] | None = None) -> int:
     else:
         parser.print_help()
         return 0
+
+
+def handle_mistakes_command(args) -> int:
+    """Handle the mistakes subcommand."""
+    from .analysis.mistakes import analyze_replay, format_report
+
+    try:
+        report = analyze_replay(Path(args.replay_file), player=args.player)
+    except (RLCoachError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(format_report(report))
+    return 0
 
 
 def handle_serve_command(args) -> int:
