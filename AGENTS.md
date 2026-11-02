@@ -85,7 +85,7 @@ uv run black --check src tests
 ```
 
 ```bash
-PYTHONPATH=src uv run pytest -q
+uv run pytest -q
 ```
 
 ```bash

@@ -161,7 +161,7 @@ Invalid replay roots fail explicitly with `invalid_replay_root`; valid roots wit
 Core parser-analysis validation:
 
 ```bash
-PYTHONPATH=src uv run pytest \
+uv run pytest \
   tests/test_rust_adapter.py \
   tests/parser/test_rust_adapter_smoke.py \
   tests/test_parser_interface.py \

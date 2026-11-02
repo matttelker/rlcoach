@@ -36,6 +36,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "."]
 python_files = ["test_*.py"]
 addopts = ["-v", "--tb=short"]
 markers = ["slow: slower or optional tests"]

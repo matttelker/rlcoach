@@ -41,8 +41,6 @@ jobs:
 
       - name: Test
         run: uv run --no-sync pytest -q
-        env:
-          PYTHONPATH: src
 
   rust:
     name: Rust
