@@ -2,290 +2,92 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
-  schedule:
-    - cron: "0 9 * * *"
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  PYTHON_VERSION: '3.11'
-  NODE_VERSION: '20'
+permissions:
+  contents: read
 
 jobs:
-  # Python Backend Tests
-  backend-test:
-    name: Backend Tests
+  python:
+    name: Python
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: rlcoach
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: rlcoach_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.3
 
-      - name: Install Rust (for parser)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install packages from the lockfile
+        run: uv sync --locked
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
+      - name: Build the Rust parser
+        run: uv run --no-sync maturin develop --uv --release -m parsers/rlreplay_rust/Cargo.toml
 
-      - name: Install dependencies
-        run: |
-          python -m venv .venv
-          . .venv/bin/activate
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      - name: Lint
+        run: uv run --no-sync ruff check src tests
 
-      - name: Build Rust parser
-        run: |
-          . .venv/bin/activate
-          cd parsers/rlreplay_rust
-          pip install maturin
-          maturin build --release
-          pip install ../../target/wheels/*.whl
-          cd ../rlinput_py
-          maturin build --release
-          pip install ../../target/wheels/*.whl
+      - name: Check formatting
+        run: uv run --no-sync black --check src tests
 
-      - name: Run linting
-        run: |
-          . .venv/bin/activate
-          ruff check src/
-          black --check src/
-
-      - name: Run type checks
-        run: |
-          . .venv/bin/activate
-          pip install mypy types-requests
-          mypy src/rlcoach --ignore-missing-imports || echo "Type check warnings (non-blocking)"
-        continue-on-error: true
-
-      - name: Run tests
+      - name: Test
+        run: uv run --no-sync pytest -q
         env:
-          REDIS_URL: redis://localhost:6379
           PYTHONPATH: src
-        run: |
-          make test-cov
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-
-  resim_smoke:
-    name: resim_smoke
+  rust:
+    name: Rust
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: read
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      # cargo test links libpython, which setup-python provides
+      - uses: actions/setup-python@v7.1.0
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+          python-version-file: .python-version
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          workspaces: .
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2.9.3
 
-      - name: Install dependencies and wheels
-        run: |
-          python -m venv .venv
-          . .venv/bin/activate
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install maturin
-          cd parsers/rlreplay_rust
-          maturin develop --release
-          cd ../rlinput_py
-          maturin develop --release
+      - name: Check formatting
+        run: cargo fmt --all --check
 
-      - name: Run V1 resim smoke
-        run: |
-          . .venv/bin/activate
-          python scripts/v1_resim.py \
-            --committed-fixtures-only \
-            --require-wheel \
-            --smoke \
-            --output-json /tmp/s1_resim_smoke.json
+      - name: Test
+        run: cargo test -p rlreplay_rust
 
-  # Frontend Tests
-  frontend-test:
-    name: Frontend Tests
+  dashboard:
+    name: Dashboard
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: gui
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          node-version: 24
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
 
-      - name: Install dependencies
-        working-directory: frontend
+      - name: Install packages from the lockfile
         run: npm ci
 
-      - name: Run linting
-        working-directory: frontend
+      - name: Lint
         run: npm run lint
 
-      - name: Run type check
-        working-directory: frontend
-        run: npm run typecheck
-
-      - name: Run tests
-        working-directory: frontend
-        run: npm run test -- --coverage
+      - name: Test
+        run: npm test
 
       - name: Build
-        working-directory: frontend
-        env:
-          NEXTAUTH_SECRET: ci-test-secret
-          NEXT_PUBLIC_API_URL: http://localhost:8000
         run: npm run build
-
-  # Docker Build Test
-  docker-build:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test]
-    permissions:
-      contents: read
-      packages: read
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build backend image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: backend/Dockerfile
-          target: production
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build worker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: worker/Dockerfile
-          target: production
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: frontend/Dockerfile
-          target: production
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            NEXTAUTH_URL=https://rlcoach.gg
-            NEXT_PUBLIC_API_URL=http://backend:8000
-
-  # Security Scan
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          ignore-unfixed: true
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-      - name: Python dependency check
-        run: |
-          python -m pip install --upgrade pip
-          pip install safety
-          if [ -f requirements.txt ]; then
-            safety check --file requirements.txt || echo "Security warnings found"
-          else
-            echo "requirements.txt not found; skipping safety file check"
-          fi
-        continue-on-error: true
