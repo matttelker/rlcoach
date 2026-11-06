@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 
 from rlcoach.analysis.mistakes import (
+    CATEGORIES,
+    CATEGORY,
+    INSTEAD,
     UnsupportedReplayError,
     build_context,
     check_supported_map,
@@ -18,6 +21,7 @@ from rlcoach.analysis.mistakes import (
     find_contacts,
     format_clock,
     game_clock,
+    goal_timeline,
     live_mask,
     load_full_frames,
     own_depth,
@@ -978,3 +982,68 @@ def test_load_full_frames_keeps_the_end_of_the_game():
     """The default timeline cuts replays at NumFrames/30 seconds."""
     _, frames = load_full_frames(Path("Replay_files/0925.replay"))
     assert frames[-1].timestamp == pytest.approx(323.09, abs=0.5)
+
+
+def test_every_mistake_kind_has_a_category():
+    assert set(CATEGORY) == set(INSTEAD)
+    assert set(CATEGORY.values()) == set(CATEGORIES)
+
+
+def test_a_goal_on_me_is_flagged_as_costing_a_goal():
+    frames, goal = _goal_scene(
+        me=lambda t: _car(ME, ORANGE, 0.0, 400.0),
+        mate=lambda t: _car(MATE, ORANGE, 3000.0, -3000.0),
+    )
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert flags[0].cost_goal is True
+    assert flags[0].category == "last_back"
+    assert reviews[0].seconds_left == pytest.approx(flags[0].seconds_left, abs=5.0)
+
+
+def test_moments_away_from_goals_do_not_cost_one():
+    frames, _ = _upfield_scene()
+    flags = detect_caught_upfield(_ctx(frames))
+    assert flags[0].cost_goal is False
+    assert flags[0].category == "rotation"
+    assert 0 < flags[0].seconds_left <= 300
+
+
+def _scored(*teams):
+    """A quiet game with goals by the given teams, one second apart."""
+
+    def players(t):
+        return [_car(ME, ORANGE, 0.0, 3000.0), _car(OPP, BLUE, 0.0, -3000.0)]
+
+    frames, origin = _play(len(teams) + 1.0, players, lambda t: _ball(0.0, 0.0))
+    goals = [
+        GoalEvent(
+            t=origin + i + 0.5,
+            scorer=ME if team == "ORANGE" else OPP,
+            team=team,
+        )
+        for i, team in enumerate(teams)
+    ]
+    return _ctx(frames, goals=goals)
+
+
+def test_goal_timeline_marks_the_winner_and_equalizers():
+    # Down 0-1, level at 1-1, behind 1-2, level 2-2, then win 3-2
+    ctx = _scored("BLUE", "ORANGE", "BLUE", "ORANGE", "ORANGE")
+    timeline = goal_timeline(ctx)
+
+    assert [g.score for g in timeline] == ["0-0", "0-1", "1-1", "1-2", "2-2"]
+    assert [g.ours for g in timeline] == [False, True, False, True, True]
+    assert [g.equalizer for g in timeline] == [False, True, False, True, False]
+    assert [g.winner for g in timeline] == [False, False, False, False, True]
+    assert all(g.by_you == g.ours for g in timeline)
+    assert timeline[1].scorer == "You"
+
+
+def test_goal_timeline_has_no_winner_in_a_loss():
+    ctx = _scored("ORANGE", "BLUE", "BLUE")
+    assert not any(g.winner for g in goal_timeline(ctx))
+
+
+def test_the_first_goal_of_a_one_nil_win_is_the_winner():
+    ctx = _scored("ORANGE")
+    assert goal_timeline(ctx)[0].winner is True

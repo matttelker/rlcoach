@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { getReplay } from '../api/client';
 import { Card, CardHeader, CardContent, SkeletonCard, ErrorState } from '../components';
 import { parseUtc } from './dataTransforms';
+import { GameReview } from './GameReview';
+import { prettyMap } from './coachTransforms';
 
 export function GameDetail() {
   const { replayId } = useParams<{ replayId: string }>();
@@ -61,15 +63,17 @@ export function GameDetail() {
             </span>
           </h1>
           <p className="text-sm text-[var(--color-text-muted)]">
-            {parseUtc(data.played_at_utc).toLocaleString()} • {data.playlist} • {data.map}
+            {parseUtc(data.played_at_utc).toLocaleString()} • {data.playlist} • {prettyMap(data.map)}
           </p>
         </div>
       </div>
 
+      <GameReview replayId={data.replay_id} />
+
       {/* Match Info */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold">Match Info</h2>
+          <h2 className="text-lg font-semibold">Match info</h2>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -85,10 +89,10 @@ export function GameDetail() {
             </div>
             <div>
               <div className="text-sm text-[var(--color-text-muted)]">Map</div>
-              <div className="text-lg font-medium">{data.map}</div>
+              <div className="text-lg font-medium">{prettyMap(data.map)}</div>
             </div>
             <div>
-              <div className="text-sm text-[var(--color-text-muted)]">Final Score</div>
+              <div className="text-sm text-[var(--color-text-muted)]">Final score</div>
               <div className="text-lg font-medium">{data.my_score} - {data.opponent_score}</div>
             </div>
           </div>

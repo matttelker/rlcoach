@@ -4,24 +4,161 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 
-import { Dashboard } from '../Dashboard';
+import { Coach } from '../Coach';
 import { GameDetail } from '../GameDetail';
-import type { DashboardResponse, ReplayDetail } from '../../types/api';
+import { GameReviewBody } from '../GameReview';
+import type {
+  CategorySummary,
+  CoachResponse,
+  ReplayDetail,
+  ReplayReview,
+} from '../../types/api';
 
-// These payloads mirror real API responses. Both pages once rendered against a
+// These payloads mirror real API responses. Pages once rendered against a
 // shape the API no longer sent, which type checks alone did not catch.
-const DASHBOARD: DashboardResponse = {
-  today: { games_played: 0, wins: 0, losses: 0, draws: 0, win_rate: null },
-  quick_stats: { avg_goals: 1.6, avg_saves: 1.5, avg_assists: 0.6, avg_bcpm: 412.4 },
-  recent_games: [
+const LAST_BACK: CategorySummary = {
+  category: 'last_back',
+  label: 'Last back',
+  flags: 4,
+  goals_cost: 4,
+  games: 10,
+  per_game: 0.4,
+  latest_per_game: 0.67,
+  before_per_game: 0.29,
+  sessions: [
+    { play_date: '2026-10-31', games: 7, flags: 2 },
+    { play_date: '2026-11-05', games: 3, flags: 2 },
+  ],
+  kinds: { last_back_upfield: 2, last_back_overcommit: 2 },
+  top_kind: 'last_back_upfield',
+  cue: 'As the last player back, hold near halfway and stay goal-side.',
+  clean_streak: 2,
+};
+
+const GOALKEEPING: CategorySummary = {
+  ...LAST_BACK,
+  category: 'goalkeeping',
+  label: 'Goalkeeping',
+  flags: 0,
+  goals_cost: 0,
+  per_game: 0,
+  latest_per_game: 0,
+  before_per_game: 0,
+  kinds: {},
+  top_kind: null,
+  cue: null,
+  clean_streak: 10,
+};
+
+const COACH: CoachResponse = {
+  playlist: 'STANDARD',
+  period: '30d',
+  rank: 'GC1',
+  game_count: 11,
+  reviewed_count: 10,
+  session: {
+    play_date: '2026-11-05',
+    wins: 2,
+    losses: 1,
+    draws: 0,
+    games: [
+      {
+        replay_id: 'abc',
+        played_at_utc: '2026-11-05T23:59:02',
+        result: 'WIN',
+        my_score: 5,
+        opponent_score: 4,
+        map: 'Stadium_P',
+        goals: 3,
+        assists: 1,
+        saves: 0,
+        shots: 4,
+        reviewed: true,
+        flags: 4,
+        goals_on_me: 2,
+      },
+      {
+        replay_id: 'def',
+        played_at_utc: '2026-11-06T00:21:26',
+        result: 'LOSS',
+        my_score: 3,
+        opponent_score: 4,
+        map: 'UtopiaStadium_Dusk_P',
+        goals: 2,
+        assists: 1,
+        saves: 2,
+        shots: 3,
+        reviewed: false,
+        flags: null,
+        goals_on_me: null,
+      },
+    ],
+  },
+  targets: [LAST_BACK],
+  categories: [LAST_BACK, GOALKEEPING],
+  highlights: [
     {
+      kind: 'winner',
+      title: 'Scored the winner',
+      detail: '5–4 on Stadium, with 1:09 left',
       replay_id: 'abc',
-      played_at_utc: '2026-11-01T03:56:53',
-      playlist: 'STANDARD',
-      result: 'WIN',
-      my_score: 6,
-      opponent_score: 3,
-      map: 'Stadium_Foggy_P',
+    },
+  ],
+};
+
+const REVIEW: ReplayReview = {
+  replay_id: 'abc',
+  status: 'ok',
+  error: null,
+  clears: 3,
+  clears_given_back: 1,
+  mistakes: [
+    {
+      kind: 'last_back_overcommit',
+      label: 'Last back overcommit',
+      category: 'last_back',
+      category_label: 'Last back',
+      t: 309.1,
+      seconds_left: 107,
+      clock: '1:47',
+      score: '4-2',
+      duration: 0,
+      what: "You were your team's last player back and went out at the ball.",
+      instead: 'When teammates are already challenging, stay in goal.',
+      outcome: 'You conceded right after.',
+      cost_goal: true,
+    },
+  ],
+  goals: [
+    {
+      t: 99.2,
+      seconds_left: 225,
+      clock: '3:45',
+      score: '1-0',
+      ours: true,
+      scorer: 'You',
+      by_me: true,
+      assist_by_me: false,
+      winner: false,
+      equalizer: false,
+      on_me: null,
+      summary: null,
+      lines: [],
+    },
+    {
+      t: 309.4,
+      seconds_left: 106,
+      clock: '1:46',
+      score: '4-2',
+      ours: false,
+      scorer: 'hezekkia',
+      by_me: false,
+      assist_by_me: false,
+      winner: false,
+      equalizer: false,
+      on_me: true,
+      summary: 'You were the last one back.',
+      lines: ['You were beaten by the shot (12 boost)'],
     },
   ],
 };
@@ -63,9 +200,15 @@ const REPLAY: ReplayDetail = {
   ],
 };
 
-function renderWithCache(queryKey: QueryKey, data: unknown, url: string, element: ReactElement) {
+function renderWithCache(
+  entries: [QueryKey, unknown][],
+  url: string,
+  element: ReactElement,
+) {
   const client = new QueryClient();
-  client.setQueryData(queryKey, data);
+  for (const [queryKey, data] of entries) {
+    client.setQueryData(queryKey, data);
+  }
 
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
@@ -79,22 +222,59 @@ function renderWithCache(queryKey: QueryKey, data: unknown, url: string, element
   );
 }
 
-describe('Dashboard', () => {
-  const html = renderWithCache(['dashboard'], DASHBOARD, '/', <Dashboard />);
+describe('Coach', () => {
+  const html = renderWithCache([[['coach', undefined, '30d'], COACH]], '/', <Coach />);
 
-  it('renders no placeholder text when no games were played today', () => {
+  it('renders no placeholder text', () => {
     expect(html).not.toContain('NaN');
     expect(html).not.toContain('undefined');
   });
 
-  it('shows the boost average and recent games', () => {
-    expect(html).toContain('412');
-    expect(html).toContain('6 - 3');
+  it('leads with the target that cost the most goals, and its cue', () => {
+    expect(html).toContain('Cost you 4 goals in 10 games');
+    expect(html).toContain('hold near halfway');
+    expect(html).toContain('Last back upfield ×2');
+  });
+
+  it('shows the session and says which games still need a review', () => {
+    expect(html).toContain('2 goals on you');
+    expect(html).toContain('Not reviewed');
+    expect(html).toContain('1 of 11 games have no mistake review yet');
+  });
+
+  it('links highlights to their game', () => {
+    expect(html).toContain('Scored the winner');
+    expect(html).toContain('href="/games/abc"');
+  });
+});
+
+describe('GameReviewBody', () => {
+  it('groups flagged moments by category and marks the goals they cost', () => {
+    const html = renderToStaticMarkup(<GameReviewBody review={REVIEW} />);
+    expect(html).toContain('Last back');
+    expect(html).toContain('cost 1 goal');
+    expect(html).toContain('1 of 1 on you');
+    expect(html).toContain('1 of 3 clears');
+  });
+
+  it('explains a missing review instead of showing an empty timeline', () => {
+    const html = renderToStaticMarkup(
+      <GameReviewBody review={{ ...REVIEW, status: 'missing', mistakes: [], goals: [] }} />,
+    );
+    expect(html).toContain('rlcoach reviews');
+    expect(html).not.toContain('Timeline');
   });
 });
 
 describe('GameDetail', () => {
-  const html = renderWithCache(['replay', 'abc'], REPLAY, '/games/abc', <GameDetail />);
+  const html = renderWithCache(
+    [
+      [['replay', 'abc'], REPLAY],
+      [['replay-review', 'abc'], REVIEW],
+    ],
+    '/games/abc',
+    <GameDetail />,
+  );
 
   it('renders both teams by player name', () => {
     expect(html).toContain('midnightmelker');
@@ -103,5 +283,10 @@ describe('GameDetail', () => {
 
   it('marks you on the orange team too', () => {
     expect(html).toContain('You');
+  });
+
+  it('puts the review timeline above the box score', () => {
+    expect(html.indexOf('Timeline')).toBeGreaterThan(-1);
+    expect(html.indexOf('Timeline')).toBeLessThan(html.indexOf('Match info'));
   });
 });

@@ -48,6 +48,12 @@ List one player's mistakes in a game and what to do instead:
 uv run rlcoach mistakes path/to/game.replay --player YourName
 ```
 
+Ingest stores that review for you in every new game, and the dashboard's Coach page builds your training targets from it. Review games you loaded before that:
+
+```bash
+uv run rlcoach reviews
+```
+
 Write a full JSON and Markdown report for a game:
 
 ```bash

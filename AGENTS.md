@@ -15,6 +15,7 @@ A local Rocket League replay coach for one player, on Windows. There are no acco
 | Normalize and events | `src/rlcoach/normalize.py`, `src/rlcoach/events/` |
 | Analysis modules | `src/rlcoach/analysis/` |
 | Mistake detector | `src/rlcoach/analysis/mistakes.py` |
+| Stored reviews, training targets and highlights | `src/rlcoach/db/reviews.py`, `src/rlcoach/coaching.py` |
 | JSON and Markdown reports | `src/rlcoach/report.py`, `src/rlcoach/report_markdown.py`, `schemas/` |
 | Database (SQLite, one file) | `src/rlcoach/db/` |
 | Local API (FastAPI) | `src/rlcoach/api/` |
@@ -117,7 +118,8 @@ Point `HOME` and `USERPROFILE` at a scratch folder when running pytest, so nothi
 - Mirror new source modules with tests under `tests/`. Build synthetic data with `tests/fixtures/builders.py`.
 - Analysis modules return `{"per_player": {...}, "per_team": {...}}`. Expensive analyzers are cached in `analysis/__init__.py`.
 - When the report changes, update `schemas/replay_report.schema.json`, the goldens in `tests/goldens/` and `docs/report-mapping.md` in the same change.
-- Changing database models or analysis means reloading replays, because `~/.rlcoach` holds results from the old code. There are no migrations.
+- Changing database models or analysis means reloading replays, because `~/.rlcoach` holds results from the old code. There are no migrations. New tables are the exception: `init_db` creates them in an existing database.
+- After changing the mistake detector, run `uv run rlcoach reviews --redo` so stored reviews match the new rules.
 - Keep analysis local. Nothing in the parser or analyzers may call the network.
 
 ## Git

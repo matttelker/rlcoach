@@ -13,7 +13,7 @@ const SEVERITY_STYLES = {
   neutral: 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] border-[var(--color-border)]',
 };
 
-export function Focus() {
+export function Benchmarks() {
   const [period] = useState('30d');
   const [rank] = useState('GC1');
   const [playlist, setPlaylist] = useState<string>();
@@ -46,8 +46,8 @@ export function Focus() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">Focus Areas</h1>
-        <p className="text-sm text-[var(--color-text-muted)]">Areas to improve and your strengths</p>
+        <h1 className="text-2xl font-bold text-[var(--color-text)]">Benchmarks</h1>
+        <p className="text-sm text-[var(--color-text-muted)]">Your averages against {rank} players</p>
         <p className="text-xs text-[var(--color-text-muted)] mt-1">{BENCHMARK_SOURCE}</p>
       </div>
 
@@ -66,7 +66,7 @@ export function Focus() {
         {/* Weaknesses */}
         <Card>
           <CardHeader>
-            <h2 className="text-lg font-semibold text-[var(--color-error)]">Areas to Improve</h2>
+            <h2 className="text-lg font-semibold text-[var(--color-error)]">Areas to improve</h2>
           </CardHeader>
           <CardContent>
             {weaknessesLoading ? (
@@ -107,7 +107,7 @@ export function Focus() {
         {/* Strengths */}
         <Card>
           <CardHeader>
-            <h2 className="text-lg font-semibold text-[var(--color-success)]">Your Strengths</h2>
+            <h2 className="text-lg font-semibold text-[var(--color-success)]">Your strengths</h2>
           </CardHeader>
           <CardContent>
             {weaknessesLoading ? (
@@ -146,7 +146,7 @@ export function Focus() {
       {/* Win/Loss Patterns */}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold">Win vs Loss Patterns</h2>
+          <h2 className="text-lg font-semibold">Win vs loss patterns</h2>
           {patternsData && (
             <p className="text-sm text-[var(--color-text-muted)]">
               Based on {patternsData.win_count} wins and {patternsData.loss_count} losses

@@ -9,22 +9,6 @@ export interface PaginatedResponse<T> {
   offset: number;
 }
 
-// Dashboard types
-export interface TodayStats {
-  games_played: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  win_rate: number | null;
-}
-
-export interface QuickStats {
-  avg_goals: number;
-  avg_saves: number;
-  avg_assists: number;
-  avg_bcpm: number | null;
-}
-
 interface ReplaySummary {
   replay_id: string;
   played_at_utc: string;
@@ -33,14 +17,6 @@ interface ReplaySummary {
   my_score: number;
   opponent_score: number;
   duration_seconds: number;
-}
-
-export type RecentGame = Omit<ReplaySummary, 'duration_seconds'> & { map: string };
-
-export interface DashboardResponse {
-  today: TodayStats;
-  quick_stats: QuickStats;
-  recent_games: RecentGame[];
 }
 
 // Game/Replay types
@@ -183,4 +159,112 @@ export interface PlayerDetail extends Player {
 export interface TagRequest {
   tagged?: boolean;
   notes?: string | null;
+}
+
+// Coaching types
+export interface CategorySession {
+  play_date: string;
+  games: number;
+  flags: number;
+}
+
+export interface CategorySummary {
+  category: string;
+  label: string;
+  flags: number;
+  goals_cost: number;
+  games: number;
+  per_game: number | null;
+  latest_per_game: number | null;
+  before_per_game: number | null;
+  sessions: CategorySession[];
+  kinds: Record<string, number>;
+  top_kind: string | null;
+  cue: string | null;
+  clean_streak: number;
+}
+
+export interface SessionGame {
+  replay_id: string;
+  played_at_utc: string;
+  result: GameResult | null;
+  my_score: number | null;
+  opponent_score: number | null;
+  map: string;
+  goals: number | null;
+  assists: number | null;
+  saves: number | null;
+  shots: number | null;
+  reviewed: boolean;
+  flags: number | null;
+  goals_on_me: number | null;
+}
+
+export interface CoachSession {
+  play_date: string;
+  wins: number;
+  losses: number;
+  draws: number;
+  games: SessionGame[];
+}
+
+export interface Highlight {
+  kind: 'winner' | 'equalizer' | 'clean' | 'streak' | 'improving' | 'benchmark';
+  title: string;
+  detail: string;
+  replay_id: string | null;
+}
+
+export interface CoachResponse {
+  playlist: string;
+  period: string;
+  rank: string;
+  game_count: number;
+  reviewed_count: number;
+  session: CoachSession | null;
+  targets: CategorySummary[];
+  categories: CategorySummary[];
+  highlights: Highlight[];
+}
+
+export interface ReviewMistake {
+  kind: string;
+  label: string;
+  category: string;
+  category_label: string;
+  t: number;
+  seconds_left: number;
+  clock: string;
+  score: string;
+  duration: number;
+  what: string;
+  instead: string;
+  outcome: string;
+  cost_goal: boolean;
+}
+
+export interface ReviewGoal {
+  t: number;
+  seconds_left: number;
+  clock: string;
+  score: string;
+  ours: boolean;
+  scorer: string;
+  by_me: boolean;
+  assist_by_me: boolean;
+  winner: boolean;
+  equalizer: boolean;
+  on_me: boolean | null;
+  summary: string | null;
+  lines: string[];
+}
+
+export interface ReplayReview {
+  replay_id: string;
+  status: 'ok' | 'unsupported' | 'error' | 'missing';
+  error: string | null;
+  clears: number;
+  clears_given_back: number;
+  mistakes: ReviewMistake[];
+  goals: ReviewGoal[];
 }

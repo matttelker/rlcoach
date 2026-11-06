@@ -58,6 +58,12 @@ class Replay(Base):
     player_stats = relationship(
         "PlayerGameStats", back_populates="replay", cascade="all, delete-orphan"
     )
+    review = relationship(
+        "GameReview",
+        uselist=False,
+        back_populates="replay",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("ix_replays_play_date", play_date.desc()),
@@ -176,6 +182,101 @@ class PlayerGameStats(Base):
     )
 
     replay = relationship("Replay", back_populates="player_stats")
+
+
+class GameReview(Base):
+    """The mistake detector's review of you in one game.
+
+    `status` is "ok", "unsupported" for arenas the rules don't fit, or "error".
+    """
+
+    __tablename__ = "game_reviews"
+
+    replay_id = Column(
+        String, ForeignKey("replays.replay_id", ondelete="CASCADE"), primary_key=True
+    )
+    player_id = Column(String, nullable=False)
+    status = Column(String, nullable=False)
+    error = Column(Text)
+    clears = Column(Integer, default=0)
+    clears_given_back = Column(Integer, default=0)
+    reviewed_at = Column(DateTime(timezone=True), default=_utc_now)
+
+    replay = relationship("Replay", back_populates="review")
+    mistakes = relationship(
+        "ReviewMistake",
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewMistake.t",
+    )
+    goals = relationship(
+        "ReviewGoal",
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewGoal.t",
+    )
+
+
+class ReviewMistake(Base):
+    """One flagged moment from a game review."""
+
+    __tablename__ = "review_mistakes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    replay_id = Column(
+        String,
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    t = Column(Float, nullable=False)
+    seconds_left = Column(Float, nullable=False)
+    clock = Column(String, nullable=False)
+    score = Column(String, nullable=False)
+    duration = Column(Float, default=0.0)
+    what = Column(Text, nullable=False)
+    instead = Column(Text, nullable=False)
+    outcome = Column(Text, default="")
+    cost_goal = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index("ix_review_mistakes_replay", "replay_id"),
+        Index("ix_review_mistakes_category", "category"),
+    )
+
+    review = relationship("GameReview", back_populates="mistakes")
+
+
+class ReviewGoal(Base):
+    """One goal by either team, with the defending review for goals against."""
+
+    __tablename__ = "review_goals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    replay_id = Column(
+        String,
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    t = Column(Float, nullable=False)
+    seconds_left = Column(Float, nullable=False)
+    clock = Column(String, nullable=False)
+    score = Column(String, nullable=False)  # Before the goal, your team first
+    ours = Column(Boolean, nullable=False)
+    scorer = Column(String, nullable=False)
+    by_me = Column(Boolean, default=False)
+    assist_by_me = Column(Boolean, default=False)
+    winner = Column(Boolean, default=False)
+    equalizer = Column(Boolean, default=False)
+    # Goals against only
+    on_me = Column(Boolean)
+    summary = Column(Text)
+    lines = Column(Text)  # JSON array
+
+    __table_args__ = (Index("ix_review_goals_replay", "replay_id"),)
+
+    review = relationship("GameReview", back_populates="goals")
 
 
 class DailyStats(Base):

@@ -1,12 +1,13 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import { Layout } from './components'
 import {
-  Dashboard,
+  Coach,
   Games,
   GameDetail,
+  Stats,
   Trends,
   Compare,
-  Focus,
+  Benchmarks,
   Players,
   PlayerDetail,
 } from './pages'
@@ -15,12 +16,15 @@ function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<Dashboard />} />
+        <Route index element={<Coach />} />
         <Route path="games" element={<Games />} />
         <Route path="games/:replayId" element={<GameDetail />} />
-        <Route path="trends" element={<Trends />} />
-        <Route path="compare" element={<Compare />} />
-        <Route path="focus" element={<Focus />} />
+        <Route path="stats" element={<Stats />}>
+          <Route index element={<Navigate to="trends" replace />} />
+          <Route path="trends" element={<Trends />} />
+          <Route path="compare" element={<Compare />} />
+          <Route path="benchmarks" element={<Benchmarks />} />
+        </Route>
         <Route path="players" element={<Players />} />
         <Route path="players/:playerId" element={<PlayerDetail />} />
       </Route>

@@ -143,6 +143,28 @@ INSTEAD = {
     ),
 }
 
+# Each kind belongs to one habit to train. The dashboard groups by these.
+CATEGORIES = {
+    "last_back": "Last back",
+    "rotation": "Rotation",
+    "clearing": "Clearing",
+    "goalkeeping": "Goalkeeping",
+    "boost": "Boost",
+}
+CATEGORY = {
+    "last_back_upfield": "last_back",
+    "last_back_overcommit": "last_back",
+    "caught_upfield": "rotation",
+    "double_commit": "rotation",
+    "clear_given_back": "clearing",
+    "missed_clear": "clearing",
+    "own_touch_in": "clearing",
+    "missed_save": "goalkeeping",
+    "no_save_attempt": "goalkeeping",
+    "behind_line": "goalkeeping",
+    "low_boost_challenge": "boost",
+}
+
 
 class UnsupportedReplayError(ValueError):
     """Raised for modes whose arena or rules break the detector's assumptions."""
@@ -171,6 +193,9 @@ class Mistake:
     what: str
     instead: str
     outcome: str = ""
+    category: str = ""
+    seconds_left: float = 0.0
+    cost_goal: bool = False  # The goal review blames this moment for a goal
 
 
 @dataclass(frozen=True)
@@ -184,6 +209,23 @@ class GoalReview:
     on_you: bool
     summary: str
     lines: tuple[str, ...]
+    seconds_left: float = 0.0
+
+
+@dataclass(frozen=True)
+class GoalMoment:
+    """One goal by either team, placed on the game clock."""
+
+    t: float
+    clock: str
+    seconds_left: float
+    score: str  # Before the goal, your team first
+    ours: bool
+    scorer: str
+    by_you: bool
+    assist_by_you: bool
+    winner: bool  # Gave your team the lead it kept
+    equalizer: bool
 
 
 @dataclass(frozen=True)
@@ -240,6 +282,8 @@ class MistakeReport:
     goals: list[GoalReview]
     mistakes: list[Mistake]
     clears: dict[str, int]
+    player_id: str = ""
+    goal_timeline: list[GoalMoment] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -530,7 +574,7 @@ def _score_at(ctx: Context, t: float) -> str:
     return f"{ours}-{theirs}"
 
 
-def _clock_at(ctx: Context, index: int) -> str:
+def _seconds_left_at(ctx: Context, index: int) -> float:
     """Read the clock at a frame. Only a tied game runs past zero.
 
     In any other game the clock sits at 0:00 until the ball next touches the
@@ -538,7 +582,11 @@ def _clock_at(ctx: Context, index: int) -> str:
     """
     ours, theirs = _tally(ctx, ctx.times[index])
     seconds = ctx.clock[index]
-    return format_clock(seconds if ours == theirs else max(seconds, 0.0))
+    return seconds if ours == theirs else max(seconds, 0.0)
+
+
+def _clock_at(ctx: Context, index: int) -> str:
+    return format_clock(_seconds_left_at(ctx, index))
 
 
 def _outcome_after(ctx: Context, t: float) -> str:
@@ -572,6 +620,8 @@ def _flag(ctx: Context, kind: str, index: int, duration: float, what: str) -> Mi
         what=what,
         instead=INSTEAD[kind],
         outcome=_outcome_after(ctx, t),
+        category=CATEGORY[kind],
+        seconds_left=round(_seconds_left_at(ctx, index), 1),
     )
 
 
@@ -1050,8 +1100,11 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
         on_you=kind is not None,
         summary=summary,
         lines=tuple(lines),
+        seconds_left=round(_seconds_left_at(ctx, goal_index), 1),
     )
-    flag = _flag(ctx, kind, moment, 0.0, what) if kind is not None else None
+    flag = None
+    if kind is not None:
+        flag = replace(_flag(ctx, kind, moment, 0.0, what), cost_goal=True)
     return review, flag
 
 
@@ -1070,24 +1123,71 @@ def review_conceded_goals(ctx: Context) -> tuple[list[GoalReview], list[Mistake]
     return reviews, flags
 
 
+def goal_timeline(ctx: Context) -> list[GoalMoment]:
+    """Place every goal on the clock and mark the winner and equalizers."""
+    mine = team_name(ctx.team)
+    goals = sorted(ctx.goals, key=lambda g: g.t)
+    final_ours = sum(1 for g in goals if g.team == mine)
+    final_theirs = len(goals) - final_ours
+    ours = theirs = 0
+    moments: list[GoalMoment] = []
+    for goal in goals:
+        index = ctx.index_at(goal.t)
+        is_ours = goal.team == mine
+        before = f"{ours}-{theirs}"
+        if is_ours:
+            ours += 1
+        else:
+            theirs += 1
+        moments.append(
+            GoalMoment(
+                t=round(goal.t, 2),
+                clock=_clock_at(ctx, index),
+                seconds_left=round(_seconds_left_at(ctx, index), 1),
+                score=before,
+                ours=is_ours,
+                scorer=ctx.name(goal.scorer),
+                by_you=goal.scorer == ctx.player_id,
+                assist_by_you=goal.assist == ctx.player_id,
+                winner=is_ours
+                and final_ours > final_theirs
+                and ours == final_theirs + 1,
+                equalizer=is_ours and ours == theirs,
+            )
+        )
+    return moments
+
+
 def _replay_owner(path: Path) -> str | None:
     import rlreplay_rust  # type: ignore
 
     return rlreplay_rust.header_property(str(path), "PlayerName")
 
 
-def analyze_replay(path: Path, player: str | None = None) -> MistakeReport:
-    """Review one player in a replay, defaulting to whoever saved it."""
+def analyze_replay(
+    path: Path, player: str | None = None, *, player_id: str | None = None
+) -> MistakeReport:
+    """Review one player in a replay, defaulting to whoever saved it.
+
+    `player_id` picks the player by the id the database stores, which survives
+    a name change. Otherwise `player` matches a display name.
+    """
     header, frames = load_full_frames(path)
     check_supported_map(header.map_name)
 
     identities = build_player_identities(header.players)
     names = {i.canonical_id: i.display_name for i in identities}
-    wanted = player or _replay_owner(path)
-    match = next((i for i in identities if wanted and i.display_name == wanted), None)
+    if player_id is not None:
+        match = next((i for i in identities if i.canonical_id == player_id), None)
+        wanted = player_id
+    else:
+        wanted = player or _replay_owner(path)
+        match = next(
+            (i for i in identities if wanted and i.display_name == wanted), None
+        )
     if match is None:
         options = ", ".join(sorted(names.values()))
-        raise ValueError(f"No player named {wanted!r}. Players: {options}")
+        raise ValueError(f"No player {wanted!r}. Players: {options}")
 
     goals = detect_goals(frames, header, header_only=False)
     touches = detect_touches(frames)
@@ -1121,6 +1221,8 @@ def analyze_replay(path: Path, player: str | None = None) -> MistakeReport:
         goals=reviews,
         mistakes=mistakes,
         clears=clears,
+        player_id=match.canonical_id,
+        goal_timeline=goal_timeline(ctx),
     )
 
 

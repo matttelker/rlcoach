@@ -235,3 +235,48 @@ class TestProcessReplayFile:
 
             # Should NOT be excluded - CasualAccount is an opponent, not "me"
             assert result.status == IngestionStatus.SUCCESS
+
+
+def _ingest_with_players(mock_config, tmp_path, players, review_side_effect=None):
+    replay_path = tmp_path / "test.replay"
+    replay_path.write_bytes(b"x" * 100)
+    with (
+        patch("rlcoach.pipeline.ingest_replay") as mock_ingest,
+        patch("rlcoach.pipeline.generate_report") as mock_report,
+        patch("rlcoach.pipeline.write_report") as mock_write,
+        patch("rlcoach.pipeline.init_db"),
+        patch("rlcoach.pipeline.review_game") as mock_review,
+    ):
+        mock_ingest.return_value = {"sha256": "abc123", "status": "success"}
+        mock_report.return_value = {
+            "replay_id": "test123",
+            "players": players,
+            "metadata": {},
+            "teams": {"blue": {"score": 0}, "orange": {"score": 0}},
+        }
+        mock_write.return_value = "test123"
+        mock_review.side_effect = review_side_effect
+        result = process_replay_file(replay_path, mock_config)
+    return result, mock_review, replay_path
+
+
+def test_ingest_reviews_my_mistakes(mock_config, tmp_path):
+    me = {"player_id": "steam:me123", "display_name": "TestPlayer"}
+    result, review, path = _ingest_with_players(mock_config, tmp_path, [me])
+
+    assert result.status == IngestionStatus.SUCCESS
+    review.assert_called_once_with("test123", path, "steam:me123")
+
+
+def test_ingest_skips_the_review_when_i_am_not_in_the_game(mock_config, tmp_path):
+    other = {"player_id": "steam:other", "display_name": "Someone"}
+    _, review, _ = _ingest_with_players(mock_config, tmp_path, [other])
+    review.assert_not_called()
+
+
+def test_a_failed_review_still_stores_the_game(mock_config, tmp_path):
+    me = {"player_id": "steam:me123", "display_name": "TestPlayer"}
+    result, _, _ = _ingest_with_players(
+        mock_config, tmp_path, [me], review_side_effect=RuntimeError("db locked")
+    )
+    assert result.status == IngestionStatus.SUCCESS

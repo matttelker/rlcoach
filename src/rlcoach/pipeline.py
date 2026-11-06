@@ -16,6 +16,7 @@ from enum import Enum
 from pathlib import Path
 
 from .config import RLCoachConfig, compute_play_date
+from .db.reviews import review_game
 from .db.session import init_db
 from .db.writer import PlayerNotFoundError, ReplayExistsError, write_report
 from .identity import PlayerIdentityResolver
@@ -136,7 +137,13 @@ def process_replay_file(
         )
         write_report_atomically(report, json_report_path, pretty=True)
 
-        write_report(report, file_hash, config)
+        replay_id = write_report(report, file_hash, config)
+
+        if me is not None:
+            try:
+                review_game(replay_id, path, me["player_id"])
+            except Exception as e:  # noqa: BLE001 - the game itself is stored
+                logger.warning(f"Could not store the mistake review for {path}: {e}")
 
         logger.info(f"Processed {path} -> {replay_id}")
 

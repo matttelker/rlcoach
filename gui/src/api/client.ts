@@ -1,6 +1,5 @@
 import axios from 'axios';
 import type {
-  DashboardResponse,
   Game,
   ReplayDetail,
   ReplayFull,
@@ -14,18 +13,14 @@ import type {
   PaginatedResponse,
   TagRequest,
   GameResult,
+  CoachResponse,
+  ReplayReview,
 } from '../types/api';
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
 });
-
-// Dashboard
-export async function getDashboard(): Promise<DashboardResponse> {
-  const { data } = await api.get<DashboardResponse>('/dashboard');
-  return data;
-}
 
 // Games
 interface ListParams {
@@ -105,6 +100,22 @@ export type WeaknessesParams = Partial<CompareParams>;
 
 export async function getWeaknesses(params: WeaknessesParams = {}): Promise<WeaknessesResponse> {
   const { data } = await api.get<WeaknessesResponse>('/weaknesses', { params });
+  return data;
+}
+
+// Coaching
+export interface CoachParams {
+  playlist?: string;
+  period?: string;
+}
+
+export async function getCoach(params: CoachParams = {}): Promise<CoachResponse> {
+  const { data } = await api.get<CoachResponse>('/coach', { params });
+  return data;
+}
+
+export async function getReplayReview(replayId: string): Promise<ReplayReview> {
+  const { data } = await api.get<ReplayReview>(`/replays/${encodeURIComponent(replayId)}/review`);
   return data;
 }
 

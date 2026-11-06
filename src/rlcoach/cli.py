@@ -473,6 +473,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Print JSON instead of plain text",
     )
 
+    reviews_parser = subparsers.add_parser(
+        "reviews",
+        help="Review your mistakes in loaded games that don't have a review yet",
+    )
+    reviews_parser.add_argument(
+        "--redo",
+        action="store_true",
+        help="Review every loaded game again, for after the detector changes",
+    )
+
     config_parser = subparsers.add_parser("config", help="Manage RLCoach configuration")
     config_parser.add_argument(
         "--init", action="store_true", help="Create template config file"
@@ -602,6 +612,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not is_error else 1
     elif args.command == "mistakes":
         return handle_mistakes_command(args)
+    elif args.command == "reviews":
+        return handle_reviews_command(args)
     elif args.command == "config":
         return handle_config_command(args)
     elif args.command == "benchmarks":
@@ -627,6 +639,39 @@ def handle_mistakes_command(args) -> int:
         print(json.dumps(report.to_dict(), indent=2))
     else:
         print(format_report(report))
+    return 0
+
+
+def handle_reviews_command(args) -> int:
+    """Review loaded games that have no stored mistake review."""
+    from .db.reviews import games_to_review, review_game
+    from .db.session import init_db
+
+    config_path = get_default_config_path()
+    try:
+        config = load_config(config_path)
+        config.validate()
+    except (ConfigError, FileNotFoundError) as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 1
+
+    init_db(config.db_path)
+    games = games_to_review(redo=args.redo)
+    if not games:
+        print("Every loaded game already has a review.")
+        return 0
+
+    counts: dict[str, int] = {}
+    for number, (replay_id, source_file, player_id) in enumerate(games, start=1):
+        if not Path(source_file).exists():
+            status = "missing file"
+        else:
+            status = review_game(replay_id, source_file, player_id)
+        counts[status] = counts.get(status, 0) + 1
+        print(f"[{number}/{len(games)}] {Path(source_file).name}: {status}")
+
+    summary = ", ".join(f"{n} {status}" for status, n in sorted(counts.items()))
+    print(f"Reviewed {len(games)} games: {summary}")
     return 0
 
 
