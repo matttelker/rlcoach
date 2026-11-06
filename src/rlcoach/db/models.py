@@ -279,40 +279,6 @@ class ReviewGoal(Base):
     review = relationship("GameReview", back_populates="goals")
 
 
-class DailyStats(Base):
-    __tablename__ = "daily_stats"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    play_date = Column(Date, nullable=False)
-    playlist = Column(String, nullable=False)
-    games_played = Column(Integer, default=0)
-    wins = Column(Integer, default=0)
-    losses = Column(Integer, default=0)
-    draws = Column(Integer, default=0)
-    win_rate = Column(Float)
-
-    # Averaged stats
-    avg_goals = Column(Float)
-    avg_assists = Column(Float)
-    avg_saves = Column(Float)
-    avg_shots = Column(Float)
-    avg_shooting_pct = Column(Float)
-    avg_bcpm = Column(Float)
-    avg_boost = Column(Float)
-    avg_speed_kph = Column(Float)
-    avg_supersonic_pct = Column(Float)
-    avg_behind_ball_pct = Column(Float)
-    avg_first_man_pct = Column(Float)
-    avg_challenge_win_pct = Column(Float)
-
-    updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
-
-    __table_args__ = (
-        UniqueConstraint("play_date", "playlist", name="uq_daily_playlist"),
-        Index("ix_daily_stats_lookup", play_date.desc(), "playlist"),
-    )
-
-
 class Benchmark(Base):
     __tablename__ = "benchmarks"
 

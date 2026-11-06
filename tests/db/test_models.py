@@ -18,7 +18,6 @@ def test_create_tables(tmp_path):
     assert "replays" in tables
     assert "players" in tables
     assert "player_game_stats" in tables
-    assert "daily_stats" in tables
     assert "benchmarks" in tables
 
 

@@ -17,7 +17,6 @@ from ..db.session import create_session, init_db
 from .routers import (
     analysis_router,
     coach_router,
-    dashboard_router,
     games_router,
     players_router,
 )
@@ -77,7 +76,6 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(games_router)
-    app.include_router(dashboard_router)
     app.include_router(analysis_router)
     app.include_router(players_router)
     app.include_router(coach_router)

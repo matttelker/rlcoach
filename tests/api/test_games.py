@@ -39,12 +39,7 @@ def mock_config(tmp_path):
 @pytest.fixture
 def db_with_data(mock_config):
     """Initialize database with test data."""
-    from rlcoach.db.models import (
-        DailyStats,
-        Player,
-        PlayerGameStats,
-        Replay,
-    )
+    from rlcoach.db.models import Player, PlayerGameStats, Replay
     from rlcoach.db.session import create_session, init_db, reset_engine
 
     init_db(mock_config.db_path)
@@ -86,20 +81,6 @@ def db_with_data(mock_config):
             )
         )
 
-    session.add(
-        DailyStats(
-            play_date=date(2024, 12, 23),
-            playlist="DOUBLES",
-            games_played=5,
-            wins=3,
-            losses=2,
-            draws=0,
-            win_rate=60.0,
-            avg_goals=2.0,
-            avg_bcpm=375.0,
-        )
-    )
-
     session.commit()
     session.close()
 
@@ -115,34 +96,6 @@ def client(db_with_data):
         from rlcoach.api.app import create_app
 
         yield TestClient(create_app())
-
-
-class TestDashboardEndpoint:
-    """Tests for GET /dashboard."""
-
-    def test_dashboard_returns_summary(self, client):
-        """Should return dashboard summary."""
-        response = client.get("/dashboard")
-        assert response.status_code == 200
-        data = response.json()
-
-        assert "today" in data
-        assert "recent_games" in data
-        assert "quick_stats" in data
-
-    def test_dashboard_includes_today_stats(self, client):
-        """Should include today's stats structure."""
-        response = client.get("/dashboard")
-        data = response.json()
-
-        # today key should always exist (may be empty dict if no games today)
-        assert "today" in data
-        # Structure check: if there are stats, they should have these keys
-        today = data.get("today", {})
-        if today:
-            assert "games_played" in today
-            assert "wins" in today
-            assert "losses" in today
 
 
 class TestGamesEndpoint:
@@ -246,54 +199,6 @@ class TestReplayFullEndpoint:
 
         assert "replay" in data
         assert "player_stats" in data
-
-
-class TestDashboardToday:
-    """Today's dashboard totals span every playlist."""
-
-    def test_today_sums_all_playlists(self, client):
-        from datetime import date as date_cls
-
-        from rlcoach.db.models import DailyStats
-        from rlcoach.db.session import create_session
-
-        session = create_session()
-        for playlist, games, wins in (("DOUBLES", 1, 1), ("STANDARD", 3, 1)):
-            session.add(
-                DailyStats(
-                    play_date=date_cls.today(),
-                    playlist=playlist,
-                    games_played=games,
-                    wins=wins,
-                    losses=games - wins,
-                    draws=0,
-                )
-            )
-        session.commit()
-        session.close()
-
-        today = client.get("/dashboard").json()["today"]
-
-        assert today["games_played"] == 4
-        assert today["wins"] == 2
-        assert today["losses"] == 2
-        assert today["win_rate"] == 50.0
-
-    def test_today_has_every_field_when_no_games_were_played(self, client):
-        today = client.get("/dashboard").json()["today"]
-
-        assert today == {
-            "games_played": 0,
-            "wins": 0,
-            "losses": 0,
-            "draws": 0,
-            "win_rate": None,
-        }
-
-    def test_quick_stats_average_boost_per_minute(self, client):
-        quick_stats = client.get("/dashboard").json()["quick_stats"]
-
-        assert quick_stats["avg_bcpm"] == pytest.approx(370.0)
 
 
 class TestReplayPlayerNames:

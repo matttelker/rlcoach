@@ -7,7 +7,6 @@ from typing import Any
 
 from ..config import IdentityConfig, RLCoachConfig, compute_play_date
 from ..identity import PlayerIdentityResolver
-from .aggregates import update_daily_stats
 from .models import Player, PlayerGameStats, Replay
 from .session import create_session
 
@@ -340,7 +339,6 @@ def write_report(
     1. Upserts all players
     2. Inserts the replay record
     3. Inserts player stats
-    4. Updates daily aggregations
 
     Args:
         report: Parsed JSON report from generate_report()
@@ -366,21 +364,5 @@ def write_report(
 
     # Step 3: Insert player stats (with role flags)
     insert_player_stats(report, config)
-
-    # Step 4: Update daily stats aggregation
-    metadata = report.get("metadata", {})
-    playlist = metadata.get("playlist", "UNKNOWN")
-
-    played_at_str = metadata.get("started_at_utc", "")
-    if played_at_str:
-        played_at_str = played_at_str.replace("Z", "+00:00")
-        played_at_utc = datetime.fromisoformat(played_at_str)
-    else:
-        played_at_utc = datetime.now(UTC)
-    play_date = compute_play_date(played_at_utc, config.preferences.timezone)
-
-    # Only aggregate for recognized playlists
-    if playlist in {"DUEL", "DOUBLES", "STANDARD"}:
-        update_daily_stats(play_date, playlist)
 
     return replay_id

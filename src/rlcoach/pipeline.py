@@ -4,7 +4,6 @@ This module provides the complete pipeline for:
 1. Ingesting replay files (validation, hashing)
 2. Generating analysis reports
 3. Writing to database
-4. Updating daily statistics
 """
 
 from __future__ import annotations

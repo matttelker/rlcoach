@@ -3,7 +3,6 @@
 from .models import (
     Base,
     Benchmark,
-    DailyStats,
     GameReview,
     Player,
     PlayerGameStats,
@@ -18,7 +17,6 @@ __all__ = [
     "Replay",
     "Player",
     "PlayerGameStats",
-    "DailyStats",
     "Benchmark",
     "GameReview",
     "ReviewMistake",
