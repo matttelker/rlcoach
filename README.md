@@ -14,7 +14,7 @@ uv sync --inexact --python 3.14
 npm --prefix gui ci
 ```
 
-Build the Rust parser next. [AGENTS.md](AGENTS.md#building-the-parser) has the commands. Without it you only get header data: no positions, boost or touches.
+Build the Rust parser next. [AGENTS.md](AGENTS.md#building-the-parser) has the commands. rlcoach can't read replays without it.
 
 Create a config:
 

@@ -13,13 +13,18 @@ The only users are the player, through the dashboard, and Claude, through chats 
 | Area | Where |
 | --- | --- |
 | Rust parser (pyo3, boxcars) | `parsers/rlreplay_rust/` |
-| Python adapters over the parser | `src/rlcoach/parser/` |
+| Python side of the parser | `src/rlcoach/parser/` |
+| Checking a replay file before parsing it | `src/rlcoach/replay_file.py` |
+| One replay read once: header, frames and events | `src/rlcoach/game.py` |
 | Normalize and events | `src/rlcoach/normalize.py`, `src/rlcoach/events/` |
 | Analysis modules | `src/rlcoach/analysis/` |
+| One game's stats, as the database stores them | `src/rlcoach/report.py` |
+| Loading a replay into the database | `src/rlcoach/pipeline.py`, `src/rlcoach/db/games.py` |
+| Game modes and playlists | `src/rlcoach/modes.py` |
 | Mistake detector | `src/rlcoach/analysis/mistakes.py` |
 | Stored reviews, training targets and highlights | `src/rlcoach/db/reviews.py`, `src/rlcoach/coaching.py` |
 | Your right or wrong grades on the review's calls | `src/rlcoach/db/grades.py` |
-| One replay end to end, held in memory | `src/rlcoach/report.py` |
+| Your stats against your wins, losses and a rank | `src/rlcoach/compare.py` |
 | Database (SQLite, one file) | `src/rlcoach/db/` |
 | Local API (FastAPI) | `src/rlcoach/api/` |
 | Dashboard (React, Vite) | `gui/` |

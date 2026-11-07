@@ -10,9 +10,9 @@ To build and test the parser, see [AGENTS.md](../AGENTS.md#building-the-parser).
 
 ## Current Backend Posture
 
-- Default backend policy is diagnostics-first with explicit degradation.
-- `null` adapter remains a header-only fallback.
-- `rust` adapter remains the primary network-data backend (boxcars + pyo3).
+- The Rust parser (boxcars + pyo3) is the only one. `rlcoach.parser.read_header` and
+  `read_network` call it.
+- A replay it reads no frames from doesn't load: there is no header-only mode.
 - Network failures must produce structured diagnostics, never silent fallback.
 
 ## Header Contract
@@ -113,7 +113,7 @@ touch, demo, kickoff, shot, and save surfaces.
 
 ## Diagnostics And Degradation Semantics
 
-`network_diagnostics` must preserve:
+`NetworkFrames.diagnostics` preserves:
 
 - `status`
 - `error_code`
@@ -121,18 +121,6 @@ touch, demo, kickoff, shot, and save surfaces.
 - `frames_emitted`
 - `attempted_backends`
 
-Degraded and unavailable states are valid outputs.
-
-`scorecard` and `scorecard_coverage` fields measure whether parser output is usable for downstream analysis; the exact fields are listed below.
-
-## Scorecard
-
-Reports include `quality.parser.scorecard` with:
-
-- `usable_network_parse`
-- `non_empty_player_frame_coverage`
-- `player_identity_coverage`
-- `network_frame_count`
-- `non_empty_player_frames`
-- `players_with_identity`
-- `expected_players`
+Degraded and unavailable states are valid outputs of the parser. Loading a game
+needs at least one frame: a parse that returns none stops the load with the reason,
+instead of storing a game without frames.
