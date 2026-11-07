@@ -20,6 +20,7 @@ from typing import Any
 from .analysis import aggregate_analysis
 from .config import IdentityConfig
 from .events import (
+    KickoffEvent,
     build_timeline,
     detect_boost_pickups,
     detect_challenge_events,
@@ -115,6 +116,17 @@ def _apply_map_playlist(playlist: str, map_name: str | None) -> str:
     if is_core and (map_name or "").startswith(_EXTRA_MODE_MAP_PREFIXES):
         return "EXTRA_MODE"
     return playlist
+
+
+def _went_to_overtime(header: Any, kickoffs: list[KickoffEvent]) -> bool:
+    """Tell if the match went to overtime.
+
+    Current replay headers carry no overtime flag, so the overtime kickoff decides.
+    An older header that does say so still counts.
+    """
+    return bool(getattr(header, "overtime", None)) or any(
+        kickoff.phase == "OT" for kickoff in kickoffs
+    )
 
 
 def _serialize_value(obj: Any) -> Any:
@@ -350,7 +362,7 @@ def generate_report(
             "playlist": playlist_value,
             "map": header.map_name or "unknown",
             "team_size": max(1, int(header.team_size or 1)),
-            "overtime": bool(getattr(header, "overtime", False) or False),
+            "overtime": _went_to_overtime(header, kickoffs),
             "mutators": getattr(header, "mutators", {}) or {},
             "match_guid": getattr(header, "match_guid", None) or "unknown",
             "started_at_utc": getattr(header, "started_at_utc", None) or _utc_now_iso(),

@@ -10,7 +10,7 @@ This matrix maps every field in `schemas/replay_report.schema.json` to the plann
 | `replay_id`, `source_file`, `generated_at_utc` | Provenance block | Provide replay identifier, absolute path, and generation timestamp. |
 | `schema_version` | Provenance block | Listed with schema recap and appendix cross-link. |
 | `metadata.engine_build` | Metadata summary | Labelled as game build. |
-| `metadata.playlist`, `metadata.map`, `metadata.team_size`, `metadata.overtime` | Match overview table | Combined with match duration and frame rate. |
+| `metadata.playlist`, `metadata.map`, `metadata.team_size`, `metadata.overtime` | Match overview table | Combined with match duration and frame rate. Overtime is "Yes" when `events.kickoffs[]` has an `OT` kickoff, since current replay headers carry no overtime flag. |
 | `metadata.mutators` | Match overview table | Rendered as key-value list; empty map -> "None". |
 | `metadata.match_guid` | Metadata summary | Shown under provenance for cross-system tracing. |
 | `metadata.duration_seconds`, `metadata.recorded_frame_hz`, `metadata.total_frames` | Metadata summary | Used to compute per-minute normalizations and tick rate. |

@@ -25,7 +25,9 @@ To build and test the parser, see [AGENTS.md](../AGENTS.md#building-the-parser).
 The parser header contract includes:
 
 - `playlist_id`, `map_name`, `team_size`
-- `engine_build`, `match_guid`, `overtime`, `mutators`
+- `engine_build`, `match_guid`, `overtime`, `mutators` (current replay headers carry
+  no overtime flag, so `overtime` is unset and the report reads it from the overtime
+  kickoff instead)
 - `team0_score`, `team1_score`, `match_length`
 - `players`, `goals`, `highlights`
 - `quality_warnings`
