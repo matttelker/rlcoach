@@ -12,7 +12,7 @@ from typing import Any
 
 from .events import (
     detect_boost_pickups,
-    detect_challenge_events,
+    detect_challenges,
     detect_demos,
     detect_goals,
     detect_kickoffs,
@@ -71,7 +71,7 @@ def game_from_frames(path: Path, header: Header, frames: list[Frame]) -> Game:
         frames=frames,
         goals=detect_goals(frames, header),
         touches=touches,
-        challenges=detect_challenge_events(frames, touches),
+        challenges=detect_challenges(frames, touches),
         demos=detect_demos(frames),
         kickoffs=detect_kickoffs(frames, header),
         boost_pickups=detect_boost_pickups(frames),

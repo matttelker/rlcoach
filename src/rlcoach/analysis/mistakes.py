@@ -18,8 +18,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from ..events.types import ChallengeEvent, GoalEvent
-from ..events.utils import team_name
+from ..events.types import ChallengeEvent, GoalEvent, team_name
 from ..field_constants import FieldConstants
 from ..game import Game, read_game
 from ..identity import build_player_identities

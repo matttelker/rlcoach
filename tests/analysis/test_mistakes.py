@@ -424,18 +424,7 @@ def _challenge(winner, my_boost, ball_vy=1500.0):
 
     frames, origin = _play(1.2, players, ball)
     event = ChallengeEvent(
-        t=origin + 0.5,
-        first_player=ME,
-        second_player=OPP,
-        first_team="ORANGE",
-        second_team="BLUE",
-        outcome="LOSS" if winner == "BLUE" else "WIN",
-        winner_team=winner,
-        location=Vec3(0.0, 0.0, 300.0),
-        depth_m=0.0,
-        duration=0.2,
-        risk_first=0.5,
-        risk_second=0.5,
+        t=origin + 0.5, first_player=ME, second_player=OPP, winner_team=winner
     )
     return frames, event
 

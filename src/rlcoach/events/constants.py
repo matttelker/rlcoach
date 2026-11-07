@@ -9,24 +9,7 @@ from __future__ import annotations
 from ..field_constants import FIELD, Vec3
 from .types import PadEnvelope
 
-GOAL_LINE_THRESHOLD = FIELD.BACK_WALL_Y - FIELD.GOAL_DEPTH  # Front plane of goal
-GOAL_EXIT_THRESHOLD = GOAL_LINE_THRESHOLD - 200.0
-GOAL_LOOKBACK_WINDOW_S = 1.0  # Look back up to 1 second before goal frame
-MIN_SHOT_VELOCITY_UU_S = 500.0  # Minimum velocity to consider as valid shot speed
-
-DEMO_POSITION_TOLERANCE = 500.0  # Max distance for demo attacker detection (units)
-
 TOUCH_PROXIMITY_THRESHOLD = 200.0  # Distance for player-ball contact (units)
-TOUCH_DEBOUNCE_TIME = 0.2  # seconds
-TOUCH_LOCATION_EPS = 120.0  # uu
-MIN_BALL_SPEED_FOR_TOUCH = 120.0  # uu/s
-MIN_RELATIVE_SPEED_FOR_TOUCH = 180.0  # uu/s
-
-# Touch context thresholds
-WALL_PROXIMITY_THRESHOLD = 150.0  # Distance from wall to consider wall touch
-CEILING_HEIGHT_THRESHOLD = 1900.0  # Height to consider ceiling touch
-AERIAL_HEIGHT_THRESHOLD = 300.0  # Height to consider aerial touch
-HALF_VOLLEY_HEIGHT = 100.0  # Height for half volley detection
 
 BOOST_PICKUP_MIN_GAIN = 1.0  # Minimum net gain to record a pickup event
 BOOST_HISTORY_WINDOW_S = 0.45
@@ -44,11 +27,7 @@ RESPAWN_DISTANCE_THRESHOLD = 800.0
 CHAIN_PAD_RADIUS = 1500.0
 MIN_PAD_EVENT_COVERAGE = 0.5  # Share of boost-delta pickups pad events must match
 
-# Pad neutral zone
-CENTERLINE_TOLERANCE = 1200.0  # Within this Y range is considered neutral half
 PAD_NEUTRAL_TOLERANCE = 100.0  # Only halfway-line pads; the next row is 1000uu out
-
-PAUSE_GAP_SECONDS = 1.0  # A longer gap between frames is a goal replay
 
 BALL_STATIONARY_THRESHOLD = 50.0  # Ball speed for kickoff detection (units/s)
 KICKOFF_CENTER_POSITION = Vec3(0.0, 0.0, 93.15)
@@ -70,18 +49,6 @@ DODGE_MIN_PITCH_TORQUE = 0.4  # Weaker pitch torque can't show a cancel
 SPEEDFLIP_SPIN_WINDOW_S = (0.08, 0.5)  # Spin sampled this long after a dodge (s)
 SPEEDFLIP_MAX_PITCH_SHARE = 0.5  # Share of a flip's pitch rate left after a cancel
 MIN_ORIENTATION_SAMPLES = 5
-
-CHALLENGE_WINDOW_S = 1.2
-CHALLENGE_RADIUS_UU = 1000.0
-CHALLENGE_MIN_DISTANCE_UU = 200.0
-CHALLENGE_MIN_BALL_SPEED_KPH = 15.0
-NEUTRAL_RETOUCH_WINDOW_S = 0.25
-
-# Challenge risk calculation weights
-RISK_LOW_BOOST_THRESHOLD = 20
-RISK_AHEAD_OF_BALL_WEIGHT = 0.4
-RISK_LOW_BOOST_WEIGHT = 0.3
-RISK_LAST_MAN_WEIGHT = 0.3
 
 PAD_ENVELOPES: dict[int, PadEnvelope] = {}
 for _pad in FIELD.BOOST_PADS:

@@ -9,8 +9,11 @@ from __future__ import annotations
 from rlcoach.field_constants import Vec3
 from rlcoach.parser.types import (
     BallFrame,
+    BoostPadEventFrame,
     Frame,
     ParserComponentEvent,
+    ParserDemoEvent,
+    ParserTouchEvent,
     PlayerFrame,
     Quaternion,
     Rotation,
@@ -145,13 +148,18 @@ def create_test_frame(
     players: list[PlayerFrame],
     ball: BallFrame | None = None,
     component_events: list[ParserComponentEvent] | None = None,
+    *,
+    touches: list[ParserTouchEvent] | None = None,
+    demos: list[ParserDemoEvent] | None = None,
+    pad_events: list[BoostPadEventFrame] | None = None,
 ) -> Frame:
-    """Create a test Frame with player and ball data.
+    """Create a test Frame with player and ball data, and the parser's events.
 
     Args:
         timestamp: Frame timestamp in seconds
         players: List of PlayerFrame objects
         ball: BallFrame (defaults to centered stationary ball)
+        touches, demos, pad_events: The parser's events on this frame
 
     Returns:
         Frame with specified data
@@ -164,6 +172,9 @@ def create_test_frame(
         ball=ball,
         players=players,
         component_events=component_events or [],
+        parser_touch_events=touches or [],
+        parser_demo_events=demos or [],
+        boost_pad_events=pad_events or [],
     )
 
 

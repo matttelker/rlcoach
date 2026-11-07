@@ -1,44 +1,71 @@
-"""Event type definitions for Rocket League replay analysis.
-
-This module contains all dataclasses and enums used to represent
-game events detected from replay data.
-"""
+"""The events found in a game's frames, as the stats and the review read them."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 from ..field_constants import Vec3
 
+TEAM_NAMES = {0: "BLUE", 1: "ORANGE"}
+
+
+def team_name(team: int | None) -> str:
+    """ "BLUE" for team 0, "ORANGE" for team 1, "UNKNOWN" for anything else."""
+    return TEAM_NAMES.get(team, "UNKNOWN")
+
+
+def distance(a: Vec3, b: Vec3) -> float:
+    dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+
+
+def speed(v: Vec3) -> float:
+    return math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+
 
 @dataclass(frozen=True)
 class GoalEvent:
-    """Goal event with scorer and shot metrics."""
+    """A goal, the team that scored it, its scorer and their likely assist."""
 
-    t: float  # Timestamp from match start
-    frame: int | None = None
-    scorer: str | None = None  # Player ID who scored
-    team: str | None = None  # "BLUE" or "ORANGE"
-    assist: str | None = None  # Player ID with assist
-    shot_speed_kph: float = 0.0
-    distance_m: float = 0.0
-    on_target: bool = True
-    tickmark_lead_seconds: float = 0.0
+    t: float
+    team: str  # "BLUE" or "ORANGE"
+    scorer: str | None = None
+    assist: str | None = None
+
+
+@dataclass(frozen=True)
+class TouchEvent:
+    """A touch the parser saw, where the car was, and how fast the ball went."""
+
+    t: float
+    player_id: str
+    location: Vec3
+    ball_speed_kph: float = 0.0
+
+
+@dataclass(frozen=True)
+class ChallengeEvent:
+    """Two opponents touching the ball one after the other: a 50/50.
+
+    The winner is the team of the second touch, unless a third came straight
+    after, which makes it nobody's.
+    """
+
+    t: float
+    first_player: str
+    second_player: str
+    winner_team: str | None
 
 
 @dataclass(frozen=True)
 class DemoEvent:
-    """Demolition event with victim and attacker."""
+    """A demolition. The game doesn't always say who did it."""
 
     t: float
     victim: str
     attacker: str | None = None
-    team_attacker: str | None = None  # "BLUE" or "ORANGE"
-    team_victim: str | None = None
-    location: Vec3 | None = None
-    source: str = "inferred"
 
 
 @dataclass(frozen=True)
@@ -85,61 +112,3 @@ class PadEnvelope:
     radius: float
     max_distance: float
     height_tolerance: float
-
-
-class TouchContext(Enum):
-    """Context of a ball touch based on car state."""
-
-    GROUND = "ground"  # Car on ground when touching ball
-    AERIAL = "aerial"  # Car in air, ball also elevated
-    WALL = "wall"  # Car on/near wall when hitting ball
-    CEILING = "ceiling"  # Car on ceiling
-    HALF_VOLLEY = "half_volley"  # Just left ground (jumping touch)
-    UNKNOWN = "unknown"
-
-
-@dataclass(frozen=True)
-class TouchEvent:
-    """Player-ball contact event."""
-
-    t: float
-    player_id: str
-    location: Vec3
-    frame: int | None = None
-    ball_speed_kph: float = 0.0
-    outcome: str = "NEUTRAL"  # Simplified classification
-    is_save: bool = False
-    touch_context: TouchContext = TouchContext.UNKNOWN
-    car_height: float = 0.0
-    is_first_touch: bool = False
-    source: str = "inferred"
-
-
-@dataclass(frozen=True)
-class ChallengeEvent:
-    """50/50 contest event between opposing players."""
-
-    t: float
-    first_player: str
-    second_player: str
-    first_team: str
-    second_team: str
-    outcome: str  # Perspective of first player: WIN/LOSS/NEUTRAL
-    winner_team: str | None
-    location: Vec3
-    depth_m: float
-    duration: float
-    risk_first: float
-    risk_second: float
-
-
-@dataclass(frozen=True)
-class TimelineEvent:
-    """Timeline entry for chronological event aggregation."""
-
-    t: float
-    type: str  # Event type from schema enum
-    frame: int | None = None
-    player_id: str | None = None
-    team: str | None = None
-    data: dict[str, Any] | None = None

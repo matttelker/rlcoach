@@ -1,147 +1,50 @@
-"""Demolition detection for Rocket League replays.
+"""Demos: the parser's demolition events, with the game's repeats taken out.
 
-Detects player demolition events from state transitions.
+The game can report one demolition more than once, first without the attacker.
+A report of the same car within 5 s and 200 uu of the last one is a repeat,
+and it fills in the attacker if the first left it out.
 """
 
 from __future__ import annotations
 
-from ..parser.types import Frame
-from .constants import DEMO_POSITION_TOLERANCE
-from .types import DemoEvent
-from .utils import distance_3d
+from ..parser.types import Frame, Vec3
+from .types import DemoEvent, distance
 
-PARSER_DEMO_ECHO_WINDOW_S = 5.0
-PARSER_DEMO_ECHO_LOCATION_TOLERANCE_UU = 200.0
+REPEAT_WINDOW_S = 5.0
+REPEAT_REACH_UU = 200.0
+
+
+def _is_repeat(
+    earlier: DemoEvent, where_then: Vec3 | None, later: DemoEvent, where: Vec3 | None
+) -> bool:
+    if later.t - earlier.t > REPEAT_WINDOW_S:
+        return False
+    if where_then is None or where is None:
+        return True
+    return distance(where_then, where) <= REPEAT_REACH_UU
 
 
 def detect_demos(frames: list[Frame]) -> list[DemoEvent]:
-    """Detect demolition events from player state transitions.
-
-    Args:
-        frames: Normalized frame data
-
-    Returns:
-        List of detected demo events
-    """
-    if not frames:
-        return []
-
-    parser_demos = _demos_from_parser_events(frames)
-    if parser_demos:
-        return parser_demos
-
-    demos = []
-    previous_demo_states = {}  # Track player demolition states
-
-    for frame in frames:
-        for player in frame.players:
-            player_id = player.player_id
-            was_demolished = previous_demo_states.get(player_id, False)
-            is_demolished = player.is_demolished
-
-            # Detect demolition state transition (False -> True)
-            if not was_demolished and is_demolished:
-                # Find potential attacker - nearest enemy player
-                attacker = None
-                attacker_team = None
-                min_distance = float("inf")
-
-                for other_player in frame.players:
-                    if (
-                        other_player.player_id != player_id
-                        and other_player.team != player.team
-                        and not other_player.is_demolished
-                    ):
-                        distance = distance_3d(player.position, other_player.position)
-                        if (
-                            distance < DEMO_POSITION_TOLERANCE
-                            and distance < min_distance
-                        ):
-                            min_distance = distance
-                            attacker = other_player.player_id
-                            attacker_team = (
-                                "BLUE" if other_player.team == 0 else "ORANGE"
-                            )
-
-                victim_team = "BLUE" if player.team == 0 else "ORANGE"
-
-                demo = DemoEvent(
-                    t=frame.timestamp,
-                    victim=player_id,
-                    attacker=attacker,
-                    team_attacker=attacker_team,
-                    team_victim=victim_team,
-                    location=player.position,
-                    source="inferred",
-                )
-                demos.append(demo)
-
-            previous_demo_states[player_id] = is_demolished
-
-    return demos
-
-
-def _demos_from_parser_events(frames: list[Frame]) -> list[DemoEvent]:
-    """Convert parser-emitted demo lists into event-layer DemoEvent objects."""
-    converted: list[DemoEvent] = []
+    """Each demolition once, in time order."""
+    demos: list[tuple[DemoEvent, Vec3 | None]] = []
     seen: set[tuple[float, str]] = set()
-    recent_by_victim: dict[str, tuple[int, DemoEvent]] = {}
+    last_of: dict[str, int] = {}  # Each victim's latest demo, by index in demos
     for frame in frames:
-        for event in getattr(frame, "parser_demo_events", []) or []:
-            victim = event.victim_id
-            key = (round(float(event.timestamp), 4), victim)
+        for event in frame.parser_demo_events:
+            key = (round(event.timestamp, 4), event.victim_id)
             if key in seen:
                 continue
             seen.add(key)
-            team_victim = (
-                "BLUE"
-                if event.victim_team == 0
-                else "ORANGE" if event.victim_team == 1 else None
-            )
-            team_attacker = (
-                "BLUE"
-                if event.attacker_team == 0
-                else "ORANGE" if event.attacker_team == 1 else None
-            )
-            victim_position = next(
-                (
-                    player.position
-                    for player in frame.players
-                    if player.player_id == victim
-                ),
-                None,
-            )
             demo = DemoEvent(
-                t=float(event.timestamp),
-                victim=victim,
-                attacker=event.attacker_id,
-                team_attacker=team_attacker,
-                team_victim=team_victim,
-                location=victim_position,
-                source=event.source or "parser",
+                t=event.timestamp, victim=event.victim_id, attacker=event.attacker_id
             )
-            previous = recent_by_victim.get(victim)
-            if previous is not None:
-                previous_index, previous_demo = previous
-                if _is_parser_demo_echo(previous_demo, demo):
-                    if previous_demo.attacker is None and demo.attacker is not None:
-                        converted[previous_index] = demo
-                        recent_by_victim[victim] = (previous_index, demo)
-                    continue
-
-            recent_by_victim[victim] = (len(converted), demo)
-            converted.append(demo)
-    converted.sort(key=lambda demo: demo.t)
-    return converted
-
-
-def _is_parser_demo_echo(previous: DemoEvent, current: DemoEvent) -> bool:
-    """Return true when two parser events describe the same demolition."""
-    if current.t - previous.t > PARSER_DEMO_ECHO_WINDOW_S:
-        return False
-    if previous.location is None or current.location is None:
-        return True
-    return (
-        distance_3d(previous.location, current.location)
-        <= PARSER_DEMO_ECHO_LOCATION_TOLERANCE_UU
-    )
+            car = frame.get_player_by_id(event.victim_id)
+            where = car.position if car else None
+            earlier = last_of.get(demo.victim)
+            if earlier is not None and _is_repeat(*demos[earlier], demo, where):
+                if demos[earlier][0].attacker is None and demo.attacker is not None:
+                    demos[earlier] = (demo, where)
+                continue
+            last_of[demo.victim] = len(demos)
+            demos.append((demo, where))
+    return sorted((demo for demo, _ in demos), key=lambda demo: demo.t)
