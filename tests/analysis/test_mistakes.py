@@ -911,9 +911,14 @@ def test_last_back_in_their_half_is_on_me_even_with_the_ball_further_up():
     reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
     assert reviews[0].on_you is True
     assert [f.kind for f in flags] == ["last_back_upfield"]
+    assert flags[0].what == (
+        "You were your team's last player back, 8 m into their half when the shot "
+        "came."
+    )
 
 
 def test_last_back_and_upfield_of_the_ball_is_on_me():
+    """In my own half, but the ball got past me before the shot."""
     frames, goal = _goal_scene(
         me=lambda t: _car(ME, ORANGE, 0.0, 400.0),
         mate=lambda t: _car(MATE, ORANGE, 3000.0, -3000.0),
@@ -921,6 +926,23 @@ def test_last_back_and_upfield_of_the_ball_is_on_me():
     reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
     assert reviews[0].on_you is True
     assert [f.kind for f in flags] == ["last_back_upfield"]
+    assert flags[0].what == (
+        "You were your team's last player back and the ball was already between "
+        "you and your net when the shot came."
+    )
+    assert "Go no further than halfway" in flags[0].instead
+
+
+def test_last_back_in_their_half_with_the_ball_past_me_says_both():
+    frames, goal = _goal_scene(
+        me=lambda t: _car(ME, ORANGE, 0.0, -1500.0),
+        mate=lambda t: _car(MATE, ORANGE, 3000.0, -3000.0),
+    )
+    _, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert flags[0].what == (
+        "You were your team's last player back, 15 m into their half, and the ball "
+        "was already between you and your net when the shot came."
+    )
 
 
 def test_goal_review_ignores_the_ball_left_in_the_net_by_the_last_goal():

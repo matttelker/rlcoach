@@ -135,8 +135,9 @@ INSTEAD = {
         "and drive forward, or powerslide around, so you can still reach it."
     ),
     "last_back_upfield": (
-        "As the last player back, hold near halfway and stay goal-side. Let "
-        "your teammates play the ball, and drop back when it gets past them."
+        "As the last player back, keep the ball in front of you. Go no further "
+        "than halfway, and only when your team has the ball deep in their end. "
+        "When it comes loose, drop toward your back post before it gets past you."
     ),
     "last_back_overcommit": (
         "When teammates are already challenging, stay in goal. Be the save "
@@ -1089,12 +1090,24 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
         and _past_kickoff(ctx, decision)
     ):
         my_depth = ctx.depth(last_back.position.y)
-        if my_depth < ball_depth or my_depth < -UPFIELD_DEPTH:
+        ball_past_me = my_depth < ball_depth
+        in_their_half = my_depth < -UPFIELD_DEPTH
+        if ball_past_me or in_their_half:
             kind = "last_back_upfield"
-            what = (
-                "You were your team's last player back, and you were too far "
-                "upfield when the shot came."
+            # Say which it was: most of these happen in your own half
+            where = (
+                f", {-my_depth / 100:.0f} m into their half," if in_their_half else ""
             )
+            if ball_past_me:
+                what = (
+                    f"You were your team's last player back{where} and the ball "
+                    "was already between you and your net when the shot came."
+                )
+            else:
+                what = (
+                    f"You were your team's last player back, {-my_depth / 100:.0f} m "
+                    "into their half when the shot came."
+                )
         elif (
             -ctx.depth(last_back.velocity.y) >= OVERCOMMIT_SPEED
             and _closing_speed(last_back, decision_frame.ball) >= OVERCOMMIT_SPEED

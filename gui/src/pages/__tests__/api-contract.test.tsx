@@ -31,7 +31,7 @@ const LAST_BACK: CategorySummary = {
   ],
   kinds: { last_back_upfield: 2, last_back_overcommit: 2 },
   top_kind: 'last_back_upfield',
-  cue: 'As the last player back, hold near halfway and stay goal-side.',
+  cue: 'As the last player back, keep the ball in front of you. Go no further than halfway.',
   clean_streak: 2,
 };
 
@@ -232,7 +232,7 @@ describe('Coach', () => {
 
   it('leads with the target that cost the most goals, and its cue', () => {
     expect(html).toContain('Cost you 4 goals in 10 games');
-    expect(html).toContain('hold near halfway');
+    expect(html).toContain('keep the ball in front of you');
     expect(html).toContain('Last back upfield ×2');
   });
 
