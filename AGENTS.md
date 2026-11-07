@@ -1,11 +1,13 @@
 # rlcoach
 
-A local Rocket League replay coach for one player, on Windows. There are no accounts and no hosting, and analysis never touches the network. Replays go in; a browser dashboard, Markdown reports and a list of mistakes come out.
+A local Rocket League replay coach for one player, on Windows. There are no accounts and no hosting, and analysis never touches the network. Replays go in; a list of mistakes and personal training targets come out, on a browser dashboard called Soccar Doctor.
+
+The only users are the player, through the dashboard, and Claude, through chats that read the local API and database. Keep what serves those and the coaching, and delete the rest rather than maintain it. [docs/rewrite-plan.md](docs/rewrite-plan.md) tracks replacing the code inherited from the original project.
 
 ## How it fits together
 
 ```text
-.replay -> Rust parser -> normalize -> events -> analysis -> report -> SQLite -> API -> dashboard
+.replay -> Rust parser -> normalize -> events -> analysis -> SQLite -> API -> dashboard
 ```
 
 | Area | Where |
@@ -17,13 +19,13 @@ A local Rocket League replay coach for one player, on Windows. There are no acco
 | Mistake detector | `src/rlcoach/analysis/mistakes.py` |
 | Stored reviews, training targets and highlights | `src/rlcoach/db/reviews.py`, `src/rlcoach/coaching.py` |
 | Your right or wrong grades on the review's calls | `src/rlcoach/db/grades.py` |
-| JSON and Markdown reports | `src/rlcoach/report.py`, `src/rlcoach/report_markdown.py`, `schemas/` |
+| One replay end to end, held in memory | `src/rlcoach/report.py` |
 | Database (SQLite, one file) | `src/rlcoach/db/` |
 | Local API (FastAPI) | `src/rlcoach/api/` |
 | Dashboard (React, Vite) | `gui/` |
 | Bundled benchmarks | `src/rlcoach/data/` |
 
-Your config is `~/.rlcoach/config.toml`. Your database and reports live under `~/.rlcoach/`.
+Your config is `~/.rlcoach/config.toml`. Your database is `~/.rlcoach/data/rlcoach.db`.
 
 ## Setup
 
@@ -117,10 +119,9 @@ Point `HOME` and `USERPROFILE` at a scratch folder when running pytest, so nothi
 ## Rules
 
 - Check parser, analysis and report changes against real replays in `Replay_files/`, not only synthetic data. Replay coaching numbers are easy to get plausibly wrong.
-- For any stat in a report, run `tests/analysis/test_ballchasing_parity.py`, which compares one real replay with Ballchasing's own CSV. Keep its bounds tight.
+- For any stat the dashboard shows, run `tests/analysis/test_ballchasing_parity.py`, which compares one real replay with Ballchasing's own CSV. Keep its bounds tight.
 - Mirror new source modules with tests under `tests/`. Build synthetic data with `tests/fixtures/builders.py`.
-- Analysis modules return `{"per_player": {...}, "per_team": {...}}`. Expensive analyzers are cached in `analysis/__init__.py`.
-- When the report changes, update `schemas/replay_report.schema.json`, the goldens in `tests/goldens/` and `docs/report-mapping.md` in the same change.
+- `analysis/__init__.py` runs each stat analyzer once per team and once per player. Add a stat only when the dashboard or the coaching will read it.
 - Changing database models or analysis means reloading replays, because `~/.rlcoach` holds results from the old code. There are no migrations. New tables are the exception: `init_db` creates them in an existing database.
 - After changing the mistake detector, run `uv run rlcoach reviews --redo` so stored reviews match the new rules.
 - Keep analysis local. Nothing in the parser or analyzers may call the network.

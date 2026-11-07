@@ -1,6 +1,6 @@
 # rlcoach
 
-A local Rocket League replay coach. It reads your `.replay` files, works out what happened, and shows you a dashboard, a Markdown report and a list of the mistakes worth fixing. Everything runs on your own PC, with no accounts and no network calls from the analysis.
+A local Rocket League replay coach for one player. It reads your `.replay` files, finds the mistakes worth fixing and turns them into training targets on a dashboard called Soccar Doctor. Everything runs on your own PC, with no accounts and no network calls from the analysis.
 
 ## Setup
 
@@ -36,9 +36,15 @@ npm --prefix gui run build
 uv run rlcoach autostart on
 ```
 
-Open http://localhost:8000. It loads your existing replays and every new one as it lands. `uv run rlcoach stop` and `uv run rlcoach start` stop and start it, `uv run rlcoach autostart off` stops it starting at sign-in, and its output goes to `~/.rlcoach/serve.log`.
+Open http://localhost:8000. It loads your existing replays and every new one as it lands, reviews your mistakes in each, and builds your training targets on the Coach page. `uv run rlcoach stop` and `uv run rlcoach start` stop and start it, `uv run rlcoach autostart off` stops it starting at sign-in, and its output goes to `~/.rlcoach/serve.log`.
 
 To run it in a terminal instead, use `uv run rlcoach serve` and press Ctrl+C to stop.
+
+Load a replay from outside the watch folder:
+
+```bash
+uv run rlcoach ingest path/to/game.replay
+```
 
 List one player's mistakes in a game and what to do instead:
 
@@ -46,26 +52,23 @@ List one player's mistakes in a game and what to do instead:
 uv run rlcoach mistakes path/to/game.replay --player YourName
 ```
 
-Ingest stores that review for you in every new game, and the dashboard's Coach page builds your training targets from it. Review games you loaded before that:
+Review games that don't have a review yet, or redo every review after the rules change:
 
 ```bash
 uv run rlcoach reviews
 ```
 
-Write a full JSON and Markdown report for a game:
-
 ```bash
-uv run rlcoach report-md path/to/game.replay --adapter rust --out out --pretty
+uv run rlcoach reviews --redo
 ```
 
 ## Benchmarks
 
-On startup the server loads the bundled benchmarks for any playlist that has none. Doubles and Standard have their own files, with C2, C3 and GC1 rows measured by ballchasing.com. Ballchasing groups every Grand Champion tier together, so the GC1 rows combine GC1 through SSL. Add other ranks or playlists with `uv run rlcoach benchmarks import <file>`.
+On startup the server loads the bundled benchmarks for any playlist that has none. Doubles and Standard have their own files, with C2, C3 and GC1 rows measured by ballchasing.com. Ballchasing groups every Grand Champion tier together, so the GC1 rows combine GC1 through SSL.
 
 ## Docs
 
 - [AGENTS.md](AGENTS.md): how the code is laid out, how to build and test it, and the working rules.
+- [docs/rewrite-plan.md](docs/rewrite-plan.md): what's left of the original code and the plan to replace it.
 - [gui/README.md](gui/README.md): the dashboard.
 - [docs/parser_adapter.md](docs/parser_adapter.md): what the parser returns and how it reports problems.
-- [docs/report-mapping.md](docs/report-mapping.md): how the JSON report maps to the Markdown report.
-- [docs/mechanics-detection.md](docs/mechanics-detection.md): how each mechanic is detected.

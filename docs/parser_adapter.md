@@ -2,7 +2,7 @@
 
 Canonical path: `docs/parser_adapter.md`.
 
-This document defines the runtime contract between the parser bridge, normalization layer, event detectors, and report output.
+This document defines the runtime contract between the parser bridge, normalization layer and event detectors.
 
 ## Build And Dev Workflow
 
@@ -14,11 +14,6 @@ To build and test the parser, see [AGENTS.md](../AGENTS.md#building-the-parser).
 - `null` adapter remains a header-only fallback.
 - `rust` adapter remains the primary network-data backend (boxcars + pyo3).
 - Network failures must produce structured diagnostics, never silent fallback.
-- JSON, Markdown, and corpus-health surfaces report parser scorecard coverage as current behavior.
-- JSON and Markdown reports surface parser diagnostics plus scorecard coverage for the selected backend.
-- Current corpus-health snapshot (2026-04-29): 202 replay files, 100% header success,
-  99.50% usable network parses, 31,807 parser-authored event carriers, and one known
-  degraded replay classified as `boxcars_unknown_attribute_network_error`.
 
 ## Header Contract
 
@@ -112,12 +107,6 @@ emits only a step of one. The counter exists from net version 12 on, so older re
 none, and `detect_kickoffs` then estimates `first_touch_player` from frames. A rise is dropped
 if its player's name has no unique header row.
 
-Corpus-health tracks parser event/provenance coverage across these carriers:
-
-- `parser_event_coverage` reports touch, demo, tickmark, and kickoff-marker replay/frame coverage.
-- `event_provenance` reports parser-vs-inferred prevalence for touch, demo, and kickoff event surfaces where provenance is observable.
-- `parser_event_totals` and `parser_event_source_counts` preserve the raw aggregate event counts.
-
 Parser event `source` values preserve provenance. Parser-authored carriers should use `source="parser"`; inferred downstream events retain `source="inferred"` when parser authority is absent.
 Timeline entries carry the same provenance in their `data.source` field for parser-backed
 touch, demo, kickoff, shot, and save surfaces.
@@ -132,11 +121,11 @@ touch, demo, kickoff, shot, and save surfaces.
 - `frames_emitted`
 - `attempted_backends`
 
-Degraded and unavailable states are valid outputs and are expected in corpus-health reporting.
+Degraded and unavailable states are valid outputs.
 
 `scorecard` and `scorecard_coverage` fields measure whether parser output is usable for downstream analysis; the exact fields are listed below.
 
-## Scorecard And Corpus-Health Semantics
+## Scorecard
 
 Reports include `quality.parser.scorecard` with:
 
@@ -147,39 +136,3 @@ Reports include `quality.parser.scorecard` with:
 - `non_empty_player_frames`
 - `players_with_identity`
 - `expected_players`
-
-The corpus harness extends those per-report scorecard semantics across replay roots and also reports:
-
-- `scorecard_coverage`
-- `parser_event_totals`
-- `parser_event_coverage`
-- `parser_event_source_counts`
-- `event_provenance`
-
-Invalid replay roots fail explicitly with `invalid_replay_root`; valid roots with no `.replay` files fail explicitly with `no_replays_found`.
-
-## Test And Corpus-Health Commands
-
-Core parser-analysis validation:
-
-```bash
-uv run pytest \
-  tests/test_rust_adapter.py \
-  tests/parser/test_rust_adapter_smoke.py \
-  tests/test_parser_interface.py \
-  tests/test_normalize.py \
-  tests/test_events.py \
-  tests/test_events_calibration_synthetic.py \
-  tests/test_analysis_mechanics_contract.py \
-  tests/test_analysis_mechanics_advanced.py \
-  tests/test_schema_validation.py \
-  tests/test_schema_validation_hardening.py \
-  tests/test_docs_parser_contract.py \
-  tests/test_benchmarks.py -q
-```
-
-Corpus-health gate:
-
-```bash
-PYTHONPATH=src uv run python scripts/parser_corpus_health.py --roots Replay_files --json
-```
