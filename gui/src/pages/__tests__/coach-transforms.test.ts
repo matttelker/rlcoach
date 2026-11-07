@@ -7,8 +7,10 @@ import {
   gradeAccuracy,
   groupByCategory,
   headline,
+  isMixedPlaylist,
   prettyMap,
   sessionTitle,
+  teamSizeLabel,
   timelineX,
 } from '../coachTransforms';
 
@@ -117,6 +119,17 @@ describe('labels', () => {
   it('reads map ids as names', () => {
     expect(prettyMap('UtopiaStadium_Dusk_P')).toBe('Utopia Stadium Dusk');
     expect(prettyMap('Stadium_P')).toBe('Stadium');
+  });
+
+  it('names modes by team size', () => {
+    expect(teamSizeLabel('DOUBLES')).toBe('2v2');
+    expect(teamSizeLabel('STANDARD')).toBe('3v3');
+    expect(teamSizeLabel('EXTRA_MODE')).toBe('EXTRA_MODE');
+  });
+
+  it('tells a combined playlist from a single one', () => {
+    expect(isMixedPlaylist('DOUBLES,STANDARD')).toBe(true);
+    expect(isMixedPlaylist('DOUBLES')).toBe(false);
   });
 
   it('names recent sessions by day', () => {

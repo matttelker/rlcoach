@@ -284,6 +284,56 @@ def test_coach_skips_a_latest_game_the_dashboard_has_no_view_for(client):
     assert client.get("/coach").json()["playlist"] == "DOUBLES"
 
 
+def test_coach_shows_several_playlists_together(client):
+    _add_newer_game("doubles", "DOUBLES")
+    data = client.get("/coach", params={"playlist": "DOUBLES,STANDARD"}).json()
+    assert data["playlist"] == "DOUBLES,STANDARD"
+    assert data["game_count"] == 4
+    games = data["session"]["games"]
+    assert [g["replay_id"] for g in games] == ["doubles", "unreviewed", "win"]
+    assert [g["playlist"] for g in games] == ["DOUBLES", "STANDARD", "STANDARD"]
+
+
+def test_coach_rejects_an_empty_playlist_list(client):
+    assert client.get("/coach", params={"playlist": ","}).status_code == 400
+
+
+def _add_goals_benchmark(playlist):
+    """A benchmark your fixture average of 1 goal a game clearly beats."""
+    from rlcoach.db.models import Benchmark
+    from rlcoach.db.session import create_session
+
+    session = create_session()
+    session.add(
+        Benchmark(
+            metric="goals",
+            playlist=playlist,
+            rank_tier="GC1",
+            median_value=0.5,
+            p25_value=0.4,
+            p75_value=0.6,
+            source="test",
+        )
+    )
+    session.commit()
+    session.close()
+
+
+def _benchmark_titles(client, playlist):
+    highlights = client.get("/coach", params={"playlist": playlist}).json()[
+        "highlights"
+    ]
+    return [h["title"] for h in highlights if h["kind"] == "benchmark"]
+
+
+def test_coach_benchmark_strengths_name_the_playlist_only_when_mixed(client):
+    _add_goals_benchmark("STANDARD")
+    assert _benchmark_titles(client, "STANDARD") == ["More goals than GC1 players"]
+    assert _benchmark_titles(client, "DOUBLES,STANDARD") == [
+        "More goals than GC1 players in Standard"
+    ]
+
+
 def test_coach_falls_back_to_the_configured_playlist_with_no_games(config):
     from rlcoach.db.session import init_db, reset_engine
 

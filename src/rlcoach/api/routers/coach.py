@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any
 
@@ -64,8 +65,27 @@ def _latest_playlist(session) -> str | None:
     return latest.playlist if latest else None
 
 
-def _benchmark_strengths(session, stats: list[PlayerGameStats], playlist: str, rank):
-    """Stats where your average beats the target rank's spread."""
+def _playlists(value: str) -> list[str]:
+    """One playlist, or several joined by commas such as "DOUBLES,STANDARD"."""
+    names = dict.fromkeys(p.strip().upper() for p in value.split(",") if p.strip())
+    if not names:
+        raise HTTPException(status_code=400, detail="playlist is empty")
+    return list(names)
+
+
+def _benchmark_strengths(
+    session,
+    stats: list[PlayerGameStats],
+    playlist: str,
+    rank,
+    *,
+    say_playlist: bool = False,
+):
+    """Stats where your average beats the target rank's spread.
+
+    Benchmarks are per playlist, so a view of several playlists compares each
+    one on its own and names it.
+    """
     if not stats:
         return []
     averages = {}
@@ -89,7 +109,8 @@ def _benchmark_strengths(session, stats: list[PlayerGameStats], playlist: str, r
     return [
         {
             "kind": "benchmark",
-            "title": f"More {r.metric} than {rank} players",
+            "title": f"More {r.metric} than {rank} players"
+            + (f" in {playlist.capitalize()}" if say_playlist else ""),
             "detail": (
                 f"{r.my_value:.1f} a game, {rank} average {r.benchmark_median:.1f}"
             ),
@@ -108,14 +129,15 @@ async def get_coach(
     """Training targets, mistakes by category, the latest session and highlights.
 
     Without a playlist it shows the one you played last, so a new session shows
-    up whichever playlist it's in.
+    up whichever playlist it's in. List several, such as "DOUBLES,STANDARD", to
+    see them together.
     """
     date_from = _date_from(period)
     rank = _target_rank()
 
     session = create_session()
     try:
-        playlist = _resolve_playlist(playlist or _latest_playlist(session))
+        playlists = _playlists(_resolve_playlist(playlist or _latest_playlist(session)))
         query = (
             session.query(Replay, PlayerGameStats)
             .outerjoin(
@@ -129,7 +151,7 @@ async def get_coach(
                 selectinload(Replay.review).selectinload(GameReview.mistakes),
                 selectinload(Replay.review).selectinload(GameReview.goals),
             )
-            .filter(Replay.playlist == playlist)
+            .filter(Replay.playlist.in_(playlists))
         )
         if date_from is not None:
             query = query.filter(Replay.play_date >= date_from)
@@ -169,9 +191,18 @@ async def get_coach(
 
         categories = summarize_categories(reviewed)
         highlights = find_highlights(reviewed, categories)
-        highlights += _benchmark_strengths(
-            session, [s for _, s in rows if s is not None], playlist, rank
-        )
+        stats_by_playlist: dict[str, list[PlayerGameStats]] = defaultdict(list)
+        for replay, stats in rows:
+            if stats is not None:
+                stats_by_playlist[replay.playlist].append(stats)
+        for name in playlists:
+            highlights += _benchmark_strengths(
+                session,
+                stats_by_playlist[name],
+                name,
+                rank,
+                say_playlist=len(playlists) > 1,
+            )
 
         latest_session = None
         if rows:
@@ -185,6 +216,7 @@ async def get_coach(
                 "games": [
                     {
                         "replay_id": r.replay_id,
+                        "playlist": r.playlist,
                         "played_at_utc": r.played_at_utc.isoformat(),
                         "result": r.result,
                         "my_score": r.my_score,
@@ -211,7 +243,7 @@ async def get_coach(
             }
 
         return {
-            "playlist": playlist,
+            "playlist": ",".join(playlists),
             "period": period,
             "rank": rank,
             "game_count": len(rows),

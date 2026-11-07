@@ -65,6 +65,7 @@ const COACH: CoachResponse = {
     games: [
       {
         replay_id: 'abc',
+        playlist: 'STANDARD',
         played_at_utc: '2026-11-05T23:59:02',
         result: 'WIN',
         my_score: 5,
@@ -80,6 +81,7 @@ const COACH: CoachResponse = {
       },
       {
         replay_id: 'def',
+        playlist: 'STANDARD',
         played_at_utc: '2026-11-06T00:21:26',
         result: 'LOSS',
         my_score: 3,
@@ -258,11 +260,40 @@ describe('Coach', () => {
     expect(html).toContain('href="/games/abc"');
   });
 
+  it('leaves out the mode of each game when it shows one playlist', () => {
+    expect(html).not.toContain('3v3');
+  });
+
   it('leaves out the grades tally until you grade something', () => {
     expect(html).not.toContain('How its calls hold up');
   });
 });
 
+
+describe('Coach with Doubles and Standard together', () => {
+  const mixed: CoachResponse = {
+    ...COACH,
+    playlist: 'DOUBLES,STANDARD',
+    session: {
+      ...COACH.session!,
+      games: [{ ...COACH.session!.games[0], playlist: 'DOUBLES' }, COACH.session!.games[1]],
+    },
+  };
+  const html = renderWithCache([[['coach', undefined, '30d'], mixed]], '/', <Coach />);
+
+  it('selects the combined option', () => {
+    expect(html).toContain('<option value="DOUBLES,STANDARD" selected="">Doubles and Standard</option>');
+  });
+
+  it('marks each session game with its mode', () => {
+    expect(html).toContain('2v2');
+    expect(html).toContain('3v3');
+  });
+
+  it('warns that trends can come from the mix of modes', () => {
+    expect(html).toContain('a change can come from which mode you played');
+  });
+});
 describe('Coach grades', () => {
   const html = renderWithCache(
     [

@@ -8,6 +8,24 @@ export const PERIOD_OPTIONS = [
   { value: 'all', label: 'All time' },
 ];
 
+// The Coach page can also show Doubles and Standard together
+export const COACH_PLAYLISTS = [
+  { value: 'STANDARD', label: 'Standard' },
+  { value: 'DOUBLES', label: 'Doubles' },
+  { value: 'DOUBLES,STANDARD', label: 'Doubles and Standard' },
+  { value: 'DUEL', label: 'Duel' },
+];
+
+export function isMixedPlaylist(playlist: string): boolean {
+  return playlist.includes(',');
+}
+
+const TEAM_SIZES: Record<string, string> = { DUEL: '1v1', DOUBLES: '2v2', STANDARD: '3v3' };
+
+export function teamSizeLabel(playlist: string): string {
+  return TEAM_SIZES[playlist] ?? playlist;
+}
+
 export const REGULATION_SECONDS = 300;
 
 // Map names arrive as internal ids like "UtopiaStadium_Dusk_P".

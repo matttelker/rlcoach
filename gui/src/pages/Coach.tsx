@@ -8,13 +8,13 @@ import {
   ErrorState,
   NoGamesEmpty,
   PageHeader,
-  PlaylistSelect,
   ResultMark,
   SectionTitle,
   SelectField,
 } from '../components';
 import type { CategorySummary, CoachResponse, CoachSession, Highlight, RuleGrades } from '../types/api';
 import {
+  COACH_PLAYLISTS,
   PERIOD_OPTIONS,
   categoryTrend,
   formatRate,
@@ -22,7 +22,9 @@ import {
   headline,
   kindLabel,
   prettyMap,
+  isMixedPlaylist,
   sessionTitle,
+  teamSizeLabel,
 } from './coachTransforms';
 
 // A replay lands about 30 seconds after a match ends, so check that often
@@ -44,7 +46,12 @@ export function Coach() {
     <div className="space-y-14">
       <div>
         <PageHeader title="Coach" note="What to work on next, and what's going well">
-          <PlaylistSelect value={playlist ?? data?.playlist} onChange={setPlaylist} />
+          <SelectField
+            label="Playlist"
+            value={playlist ?? data?.playlist ?? ''}
+            options={COACH_PLAYLISTS}
+            onChange={setPlaylist}
+          />
           <SelectField label="Period" value={period} options={PERIOD_OPTIONS} onChange={setPeriod} />
         </PageHeader>
 
@@ -135,6 +142,7 @@ export function CoachBody({ data }: { data: CoachResponse }) {
 
   const unreviewed = data.game_count - data.reviewed_count;
   const [first, ...rest] = data.targets;
+  const mixed = isMixedPlaylist(data.playlist);
 
   return (
     <div className="space-y-14">
@@ -156,12 +164,15 @@ export function CoachBody({ data }: { data: CoachResponse }) {
         )}
       </section>
 
-      {data.session && <SessionBlock session={data.session} />}
+      {data.session && <SessionBlock session={data.session} mixed={mixed} />}
 
       <section>
         <SectionTitle
           title="Mistakes by category"
-          note={`${data.reviewed_count} reviewed games, your latest session against the ones before`}
+          note={
+            `${data.reviewed_count} reviewed games, your latest session against the ones before` +
+            (mixed ? '. With Doubles and Standard together, a change can come from which mode you played' : '')
+          }
         />
         <CategoryTable categories={data.categories} />
       </section>
@@ -266,7 +277,7 @@ function KindChips({ kinds }: { kinds: Record<string, number> }) {
   );
 }
 
-function SessionBlock({ session }: { session: CoachSession }) {
+function SessionBlock({ session, mixed }: { session: CoachSession; mixed: boolean }) {
   const record = `${session.wins}–${session.losses}${session.draws ? `–${session.draws}` : ''}`;
   return (
     <section>
@@ -284,7 +295,14 @@ function SessionBlock({ session }: { session: CoachSession }) {
                 className="grid grid-cols-[5.5rem_minmax(0,1fr)] sm:grid-cols-[5.5rem_minmax(0,10rem)_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-3 hover:bg-[var(--color-bg-tertiary)]"
               >
                 <ResultMark result={g.result} score={`${g.my_score}–${g.opponent_score}`} />
-                <span className="font-semibold truncate">{prettyMap(g.map)}</span>
+                <span className="font-semibold truncate">
+                  {prettyMap(g.map)}
+                  {mixed && (
+                    <span className="ml-2 text-[13px] font-normal text-[var(--color-text-muted)]">
+                      {teamSizeLabel(g.playlist)}
+                    </span>
+                  )}
+                </span>
                 <span className="col-start-2 sm:col-start-auto flex gap-3 text-[14px] text-[var(--color-text-muted)]">
                   <span title="Goals">
                     <span className="text-[var(--color-text)]">{g.goals ?? 0}</span> G

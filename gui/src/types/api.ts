@@ -173,6 +173,7 @@ export interface CategorySummary {
 
 export interface SessionGame {
   replay_id: string;
+  playlist: string;
   played_at_utc: string;
   result: GameResult | null;
   my_score: number | null;
@@ -203,6 +204,7 @@ export interface Highlight {
 }
 
 export interface CoachResponse {
+  /** One playlist, or several joined by commas such as "DOUBLES,STANDARD" */
   playlist: string;
   period: string;
   rank: string;
