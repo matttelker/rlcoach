@@ -1,4 +1,9 @@
-"""Configuration management for RLCoach."""
+"""Your settings, read from ~/.rlcoach/config.toml.
+
+The file says who you are in replays, where Rocket League saves them, and how
+the dashboard opens. Keys it doesn't know are ignored, so an old file still
+loads.
+"""
 
 from __future__ import annotations
 
@@ -9,18 +14,42 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .metrics import VALID_PLAYLISTS, VALID_RANKS
+from .metrics import VALID_RANKS
+from .modes import COACHED_PLAYLISTS
+
+ACCOUNT_PATTERN = re.compile(r"^(steam|epic|psn|xbox|switch):[a-zA-Z0-9_-]+$")
+DEFAULT_WATCH_FOLDER = "~/Documents/My Games/Rocket League/TAGame/Demos"
+DEFAULT_DATA_DIR = "~/.rlcoach/data"
+
+CONFIG_TEMPLATE = """\
+# rlcoach settings
+
+[identity]
+# Your accounts as "platform:id", with platform one of steam, epic, psn, xbox
+# or switch. Accounts are checked first, then names, which ignore case.
+platform_ids = []
+display_names = ["YourName"]
+# Accounts whose replays you don't want loaded at all
+excluded_names = []
+
+[paths]
+# Rocket League saves your replays here
+watch_folder = "~/Documents/My Games/Rocket League/TAGame/Demos"
+data_dir = "~/.rlcoach/data"
+
+[preferences]
+# Playlist the stats pages open on: STANDARD, DOUBLES or DUEL
+primary_playlist = "STANDARD"
+# Rank the benchmarks compare you with: C2, C3, GC1, GC2, GC3 or SSL
+target_rank = "GC1"
+# Decides which day a game belongs to, such as "America/New_York".
+# Leave it out to use this computer's timezone.
+# timezone = "America/New_York"
+"""
 
 
 class ConfigError(Exception):
-    """Configuration error."""
-
-    pass
-
-
-# Valid platform prefixes
-VALID_PLATFORMS = {"steam", "epic", "psn", "xbox", "switch"}
-PLATFORM_ID_PATTERN = re.compile(r"^(steam|epic|psn|xbox|switch):[a-zA-Z0-9_-]+$")
+    """The config file is missing or says something that can't be used."""
 
 
 @dataclass
@@ -44,138 +73,93 @@ class PreferencesConfig:
 
 
 @dataclass
-class TeammatesConfig:
-    tagged: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
 class RLCoachConfig:
     identity: IdentityConfig
     paths: PathsConfig
     preferences: PreferencesConfig
-    teammates: TeammatesConfig = field(default_factory=TeammatesConfig)
 
     @property
     def db_path(self) -> Path:
         return self.paths.data_dir / "rlcoach.db"
 
     def validate(self) -> None:
-        """Validate configuration, raising ConfigError if invalid."""
-        # Must have at least one identity method
-        if not self.identity.platform_ids and not self.identity.display_names:
+        """Raise ConfigError for the first setting that can't be used."""
+        identity, prefs = self.identity, self.preferences
+        if not identity.platform_ids and not identity.display_names:
             raise ConfigError(
-                "Configuration requires at least one platform_id or display_name "
-                "in [identity]"
+                "Say who you are: [identity] needs a platform_id or a display_name"
             )
-
-        for pid in self.identity.platform_ids:
-            if not PLATFORM_ID_PATTERN.match(pid):
+        for account in identity.platform_ids:
+            if not ACCOUNT_PATTERN.match(account):
                 raise ConfigError(
-                    f"Invalid platform_id format '{pid}'. "
-                    "Must be 'platform:id' where platform is one of: "
-                    f"{', '.join(sorted(VALID_PLATFORMS))}"
+                    f"platform_id {account!r} isn't 'platform:id' with platform "
+                    "one of steam, epic, psn, xbox or switch"
                 )
-
-        if self.preferences.target_rank not in VALID_RANKS:
+        if prefs.target_rank not in VALID_RANKS:
             raise ConfigError(
-                f"Invalid target_rank '{self.preferences.target_rank}'. "
-                f"Must be one of: {', '.join(sorted(VALID_RANKS))}"
+                f"target_rank {prefs.target_rank!r} isn't one of "
+                f"{', '.join(sorted(VALID_RANKS))}"
             )
-
-        if self.preferences.primary_playlist not in VALID_PLAYLISTS:
+        if prefs.primary_playlist not in COACHED_PLAYLISTS:
             raise ConfigError(
-                f"Invalid primary_playlist '{self.preferences.primary_playlist}'. "
-                f"Must be one of: {', '.join(sorted(VALID_PLAYLISTS))}"
+                f"primary_playlist {prefs.primary_playlist!r} isn't one of "
+                f"{', '.join(COACHED_PLAYLISTS)}"
             )
-
-        if self.preferences.timezone is not None:
+        if prefs.timezone is not None:
             try:
-                ZoneInfo(self.preferences.timezone)
-            except ZoneInfoNotFoundError as e:
+                ZoneInfo(prefs.timezone)
+            except (ZoneInfoNotFoundError, ValueError) as e:
                 raise ConfigError(
-                    f"Invalid timezone '{self.preferences.timezone}'. "
-                    "Must be a valid IANA timezone (e.g., 'America/Los_Angeles')"
+                    f"timezone {prefs.timezone!r} isn't an IANA name like "
+                    "'America/New_York'"
                 ) from e
-
-        display_set = {n.casefold().strip() for n in self.identity.display_names}
-        excluded_set = {n.casefold().strip() for n in self.identity.excluded_names}
-        overlap = display_set & excluded_set
-        if overlap:
-            overlap_str = ", ".join(sorted(overlap))
+        both = {n.casefold().strip() for n in identity.display_names} & {
+            n.casefold().strip() for n in identity.excluded_names
+        }
+        if both:
             raise ConfigError(
-                f"Name(s) cannot appear in both display_names and excluded_names: "
-                f"{overlap_str}"
+                f"{', '.join(sorted(both))} can't be both a display_name and an "
+                "excluded_name"
             )
 
-    def get_timezone(self) -> ZoneInfo:
-        """Get the configured timezone or system default."""
-        if self.preferences.timezone:
-            return ZoneInfo(self.preferences.timezone)
-        # Use system timezone
-        return datetime.now().astimezone().tzinfo  # type: ignore
+
+def compute_play_date(played_at_utc: datetime, timezone: str | None) -> date:
+    """The day a game was played on in your timezone, or this computer's."""
+    zone = ZoneInfo(timezone) if timezone else datetime.now().astimezone().tzinfo
+    return played_at_utc.astimezone(zone).date()
 
 
-def compute_play_date(utc_time: datetime, timezone_name: str | None) -> date:
-    """Compute the local play date from a UTC timestamp.
-
-    Args:
-        utc_time: UTC timestamp of when the game was played
-        timezone_name: IANA timezone name, or None for system timezone
-
-    Returns:
-        Local date in the configured timezone
-    """
-    if timezone_name:
-        tz = ZoneInfo(timezone_name)
-    else:
-        # Use system timezone
-        tz = datetime.now().astimezone().tzinfo
-
-    local_time = utc_time.astimezone(tz)
-    return local_time.date()
-
-
-def load_config(config_path: Path) -> RLCoachConfig:
-    """Load configuration from TOML file."""
-    if not config_path.exists():
-        raise ConfigError(f"Config file not found: {config_path}")
-
-    with open(config_path, "rb") as f:
-        data = tomllib.load(f)
-
-    identity_data = data.get("identity", {})
-    identity = IdentityConfig(
-        platform_ids=identity_data.get("platform_ids", []),
-        display_names=identity_data.get("display_names", []),
-        excluded_names=identity_data.get("excluded_names", []),
-    )
-
-    paths_data = data.get("paths", {})
-    paths = PathsConfig(
-        watch_folder=Path(paths_data.get("watch_folder", "~/Replays")).expanduser(),
-        data_dir=Path(paths_data.get("data_dir", "~/.rlcoach/data")).expanduser(),
-    )
-
-    prefs_data = data.get("preferences", {})
-    preferences = PreferencesConfig(
-        primary_playlist=prefs_data.get("primary_playlist", "DOUBLES"),
-        target_rank=prefs_data.get("target_rank", "GC1"),
-        timezone=prefs_data.get("timezone"),
-    )
-
-    teammates_data = data.get("teammates", {})
-    teammates = TeammatesConfig(
-        tagged=teammates_data.get("tagged", {}),
-    )
-
+def load_config(path: Path) -> RLCoachConfig:
+    """Read the config file. Raises ConfigError if there isn't one."""
+    if not path.exists():
+        raise ConfigError(f"Config file not found: {path}")
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"{path} isn't valid TOML: {e}") from e
+    identity = data.get("identity", {})
+    paths = data.get("paths", {})
+    prefs = data.get("preferences", {})
     return RLCoachConfig(
-        identity=identity,
-        paths=paths,
-        preferences=preferences,
-        teammates=teammates,
+        identity=IdentityConfig(
+            platform_ids=list(identity.get("platform_ids", [])),
+            display_names=list(identity.get("display_names", [])),
+            excluded_names=list(identity.get("excluded_names", [])),
+        ),
+        paths=PathsConfig(
+            watch_folder=Path(
+                paths.get("watch_folder", DEFAULT_WATCH_FOLDER)
+            ).expanduser(),
+            data_dir=Path(paths.get("data_dir", DEFAULT_DATA_DIR)).expanduser(),
+        ),
+        preferences=PreferencesConfig(
+            primary_playlist=prefs.get("primary_playlist", "DOUBLES"),
+            target_rank=prefs.get("target_rank", "GC1"),
+            timezone=prefs.get("timezone"),
+        ),
     )
 
 
 def get_default_config_path() -> Path:
-    """Get the default config file path."""
     return Path.home() / ".rlcoach" / "config.toml"

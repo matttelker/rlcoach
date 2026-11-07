@@ -1,171 +1,135 @@
-from datetime import UTC, datetime
+"""Tests for reading and checking the config file."""
+
+from __future__ import annotations
+
+import tomllib
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
 
 from rlcoach.config import (
+    CONFIG_TEMPLATE,
     ConfigError,
     IdentityConfig,
     PathsConfig,
     PreferencesConfig,
     RLCoachConfig,
     compute_play_date,
+    get_default_config_path,
     load_config,
 )
 
 
-def test_load_config_from_valid_toml(tmp_path):
-    config_file = tmp_path / "config.toml"
-    config_file.write_text("""
+def _write(tmp_path, text):
+    path = tmp_path / "config.toml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _config(**preferences):
+    return RLCoachConfig(
+        identity=IdentityConfig(platform_ids=["epic:abc"]),
+        paths=PathsConfig(watch_folder=Path("w"), data_dir=Path("d")),
+        preferences=PreferencesConfig(**preferences),
+    )
+
+
+def test_a_full_file_loads_every_setting(tmp_path):
+    path = _write(
+        tmp_path,
+        """
 [identity]
-platform_ids = ["steam:76561198012345678"]
-display_names = ["TestPlayer"]
+platform_ids = ["steam:123"]
+display_names = ["Me"]
+excluded_names = ["Smurf"]
 
 [paths]
-watch_folder = "~/Replays"
-data_dir = "~/.rlcoach/data"
+watch_folder = "C:/Demos"
+data_dir = "~/rl-data"
 
 [preferences]
-primary_playlist = "DOUBLES"
-target_rank = "GC1"
-timezone = "America/Los_Angeles"
-""")
+primary_playlist = "STANDARD"
+target_rank = "GC2"
+timezone = "Europe/London"
 
-    config = load_config(config_file)
-
-    assert config.identity.platform_ids == ["steam:76561198012345678"]
-    assert config.preferences.timezone == "America/Los_Angeles"
-
-
-def test_compute_play_date_with_timezone():
-    """play_date should be computed from UTC time + configured timezone."""
-    # 2024-12-24 02:00 UTC = 2024-12-23 18:00 PST (still Dec 23 in LA)
-    utc_time = datetime(2024, 12, 24, 2, 0, 0, tzinfo=UTC)
-
-    play_date = compute_play_date(utc_time, "America/Los_Angeles")
-
-    assert play_date.isoformat() == "2024-12-23"
-
-
-def test_compute_play_date_with_system_timezone():
-    """Should use system timezone when not configured."""
-    utc_time = datetime(2024, 12, 24, 12, 0, 0, tzinfo=UTC)
-
-    # None means use system timezone
-    play_date = compute_play_date(utc_time, None)
-
-    # Verify it returns a date (value depends on machine timezone).
-    assert play_date is not None
-
-
-def test_validate_timezone_invalid():
-    """Invalid IANA timezone should fail validation."""
-    config = RLCoachConfig(
-        identity=IdentityConfig(platform_ids=["steam:123"]),
-        paths=PathsConfig(
-            watch_folder=Path("~/Replays"),
-            data_dir=Path("~/.rlcoach/data"),
-        ),
-        preferences=PreferencesConfig(timezone="Invalid/Timezone"),
+[teammates]
+old_section = "ignored"
+""",
     )
-
-    with pytest.raises(ConfigError, match="timezone"):
-        config.validate()
-
-
-def test_validate_platform_id_format():
-    """Platform ID must be in format 'platform:id'."""
-    config = RLCoachConfig(
-        identity=IdentityConfig(platform_ids=["invalid_format"]),
-        paths=PathsConfig(
-            watch_folder=Path("~/Replays"),
-            data_dir=Path("~/.rlcoach/data"),
-        ),
-        preferences=PreferencesConfig(),
-    )
-
-    with pytest.raises(ConfigError, match="platform"):
-        config.validate()
-
-
-def test_validate_excluded_names_overlap():
-    """Names cannot appear in both display_names and excluded_names."""
-    config = RLCoachConfig(
-        identity=IdentityConfig(
-            display_names=["MainAccount", "TrainingAccount"],
-            excluded_names=[
-                "CasualAccount",
-                "mainaccount",
-            ],  # Overlap (case-insensitive)
-        ),
-        paths=PathsConfig(
-            watch_folder=Path("~/Replays"),
-            data_dir=Path("~/.rlcoach/data"),
-        ),
-        preferences=PreferencesConfig(),
-    )
-
-    with pytest.raises(ConfigError, match="display_names and excluded_names"):
-        config.validate()
-
-
-def test_validate_excluded_names_no_overlap():
-    """Non-overlapping names should pass validation."""
-    config = RLCoachConfig(
-        identity=IdentityConfig(
-            display_names=["MainAccount"],
-            excluded_names=["CasualAccount"],
-        ),
-        paths=PathsConfig(
-            watch_folder=Path("~/Replays"),
-            data_dir=Path("~/.rlcoach/data"),
-        ),
-        preferences=PreferencesConfig(),
-    )
-
-    # Should not raise
+    config = load_config(path)
+    assert config.identity == IdentityConfig(["steam:123"], ["Me"], ["Smurf"])
+    assert config.paths.watch_folder == Path("C:/Demos")
+    assert config.paths.data_dir == Path.home() / "rl-data"
+    assert config.db_path == Path.home() / "rl-data" / "rlcoach.db"
+    assert config.preferences == PreferencesConfig("STANDARD", "GC2", "Europe/London")
     config.validate()
 
 
-def test_load_config_with_excluded_names(tmp_path):
-    """Should load excluded_names from TOML config."""
-    config_file = tmp_path / "config.toml"
-    config_file.write_text("""
-[identity]
-platform_ids = ["steam:123"]
-display_names = ["MainAccount"]
-excluded_names = ["CasualAccount", "FamilyAccount"]
-
-[paths]
-watch_folder = "~/Replays"
-data_dir = "~/.rlcoach/data"
-
-[preferences]
-primary_playlist = "DOUBLES"
-target_rank = "GC1"
-""")
-
-    config = load_config(config_file)
-
-    assert config.identity.excluded_names == ["CasualAccount", "FamilyAccount"]
+def test_missing_settings_take_their_defaults(tmp_path):
+    config = load_config(_write(tmp_path, '[identity]\ndisplay_names = ["Me"]\n'))
+    assert config.preferences == PreferencesConfig("DOUBLES", "GC1", None)
+    assert config.paths.data_dir == Path.home() / ".rlcoach" / "data"
+    assert config.paths.watch_folder.name == "Demos"
 
 
-def test_load_config_excluded_names_defaults_empty(tmp_path):
-    """excluded_names should default to empty list if not specified."""
-    config_file = tmp_path / "config.toml"
-    config_file.write_text("""
-[identity]
-display_names = ["MainAccount"]
+def test_the_template_is_valid_toml_that_loads(tmp_path):
+    tomllib.loads(CONFIG_TEMPLATE)
+    config = load_config(_write(tmp_path, CONFIG_TEMPLATE))
+    config.validate()
+    assert config.identity.display_names == ["YourName"]
 
-[paths]
-watch_folder = "~/Replays"
-data_dir = "~/.rlcoach/data"
 
-[preferences]
-primary_playlist = "DOUBLES"
-target_rank = "GC1"
-""")
+def test_a_missing_or_broken_file_is_a_config_error(tmp_path):
+    with pytest.raises(ConfigError, match="not found"):
+        load_config(tmp_path / "nope.toml")
+    with pytest.raises(ConfigError, match="isn't valid TOML"):
+        load_config(_write(tmp_path, "[identity\n"))
 
-    config = load_config(config_file)
 
-    assert config.identity.excluded_names == []
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        (
+            RLCoachConfig(
+                IdentityConfig(),
+                PathsConfig(Path("w"), Path("d")),
+                PreferencesConfig(),
+            ),
+            "Say who you are",
+        ),
+        (
+            RLCoachConfig(
+                IdentityConfig(platform_ids=["origin:abc"]),
+                PathsConfig(Path("w"), Path("d")),
+                PreferencesConfig(),
+            ),
+            "isn't 'platform:id'",
+        ),
+        (_config(target_rank="Diamond"), "target_rank 'Diamond'"),
+        (_config(primary_playlist="HOOPS"), "primary_playlist 'HOOPS'"),
+        (_config(timezone="Mars/Olympus"), "timezone 'Mars/Olympus'"),
+        (
+            RLCoachConfig(
+                IdentityConfig(display_names=["Me "], excluded_names=["me"]),
+                PathsConfig(Path("w"), Path("d")),
+                PreferencesConfig(),
+            ),
+            "both a display_name and an excluded_name",
+        ),
+    ],
+)
+def test_validate_names_the_bad_setting(config, message):
+    with pytest.raises(ConfigError, match=message):
+        config.validate()
+
+
+def test_the_play_date_is_the_day_in_your_timezone():
+    late = datetime(2026, 3, 1, 3, 30, tzinfo=UTC)
+    assert compute_play_date(late, "America/New_York") == date(2026, 2, 28)
+    assert compute_play_date(late, "Europe/London") == date(2026, 3, 1)
+    assert isinstance(compute_play_date(late, None), date)
+
+
+def test_the_default_config_lives_in_your_home_folder():
+    assert get_default_config_path() == Path.home() / ".rlcoach" / "config.toml"

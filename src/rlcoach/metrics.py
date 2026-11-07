@@ -1,5 +1,5 @@
 """The stats the dashboard can chart or compare, which way is better for each,
-and the ranks and playlists the benchmarks cover."""
+and the ranks the benchmarks can name. The playlists are in modes.py."""
 
 from __future__ import annotations
 
@@ -44,7 +44,6 @@ DIRECTIONS: dict[str, MetricDirection] = {
 }
 
 VALID_RANKS = frozenset({"C2", "C3", "GC1", "GC2", "GC3", "SSL"})
-VALID_PLAYLISTS = frozenset({"DUEL", "DOUBLES", "STANDARD"})
 
 
 def is_valid_metric(key: str) -> bool:
