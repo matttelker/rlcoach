@@ -780,6 +780,70 @@ def test_a_hard_shot_with_no_time_to_react_is_not_on_me():
     assert any("beaten" in line for line in reviews[0].lines)
 
 
+def test_a_shot_struck_right_in_front_of_me_is_not_a_missed_save():
+    """From a real goal: the shot left 6 m from me and passed me 0.15 s later.
+
+    It took over a second more to reach the line, where a teammate missed it.
+    """
+
+    def keeper(t):
+        z = 40.0 if t < 1.1 else 40.0 + 500.0 * (t - 1.1)
+        return _car(MATE, ORANGE, 100.0, 5100.0, z=z, vz=500.0)
+
+    def players(t):
+        return [
+            _car(ME, ORANGE, -280.0, 2600.0),
+            keeper(t),
+            _car(OPP, BLUE, 0.0, 1950.0, z=300.0),
+        ]
+
+    def ball(t):
+        if t < 0.2:
+            return _ball(0.0, 2050.0, 100.0, vy=-50.0)
+        return _ball(0.0, 2050.0 + 2500.0 * (t - 0.2), 100.0, vy=2500.0)
+
+    frames, origin = _play(1.5, players, ball)
+    goal = GoalEvent(t=origin + 1.44, scorer=OPP, team="BLUE")
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert flags == []
+    assert reviews[0].on_you is False
+    assert any(line.startswith("You were beaten") for line in reviews[0].lines)
+    assert any("mate jumped for it and missed" in line for line in reviews[0].lines)
+
+
+def test_a_save_is_judged_after_the_shot_not_by_the_challenge_before_it():
+    """I was beside the ball before the shot, then got back and missed it.
+
+    My closest point came before the shot, but the save chance came at the
+    line over a second after it.
+    """
+
+    def me(t):
+        if t < 0.2:
+            return _car(ME, ORANGE, -250.0, 3800.0)
+        y = min(3800.0 + 1400.0 * (t - 0.2), 5050.0)
+        z = 17.0 if t < 1.2 else 17.0 + 500.0 * (t - 1.2)
+        return _car(ME, ORANGE, -330.0, y, z=z, vz=500.0 if t >= 1.2 else 0.0)
+
+    def players(t):
+        return [
+            me(t),
+            _car(MATE, ORANGE, 3000.0, -3000.0),
+            _car(OPP, BLUE, 0.0, 3700.0, z=100.0),
+        ]
+
+    def ball(t):
+        if t < 0.2:  # Rolling across the box, too quick to count as slow
+            return _ball(0.0, 3800.0, 100.0, vx=1200.0)
+        return _ball(0.0, 3800.0 + 1100.0 * (t - 0.2), 100.0, vy=1100.0)
+
+    frames, origin = _play(1.5, players, ball)
+    goal = GoalEvent(t=origin + 1.42, scorer=OPP, team="BLUE")
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert reviews[0].on_you is True
+    assert [f.kind for f in flags] == ["missed_save"]
+
+
 def test_sitting_in_goal_while_a_shot_goes_past_me_is_no_save_attempt():
     """From a real goal: 1.2 s of warning, and it went in 5.5 m to one side."""
 

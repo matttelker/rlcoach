@@ -951,8 +951,8 @@ def _review_defender(
     """Work out what one defender did about a goal."""
     first = ctx.index_at(ctx.times[cross] - GOAL_REVIEW_WINDOW_S)
     heights: list[float] = []
-    closest = math.inf
-    moment = cross
+    closest = after_shot = math.inf
+    moment = shot_moment = cross
     for index in range(first, cross + 1):
         frame = ctx.frames[index]
         car = frame.get_player_by_id(car_id)
@@ -962,6 +962,8 @@ def _review_defender(
         gap = _distance(car.position, frame.ball.position)
         if gap < closest:
             closest, moment = gap, index
+        if index >= last_touch and gap < after_shot:
+            after_shot, shot_moment = gap, index
     if not heights:
         return DefenderRole("demolished", "was demolished", cross)
 
@@ -1000,10 +1002,17 @@ def _review_defender(
     if speed < SLOW_BALL_SPEED:
         text = "reached a slow ball and didn't clear it"
         return DefenderRole("missed_clear", text, moment, closest, speed)
-    if not had_time:
+    # A save is judged on the ball's path after the last touch, and the time to
+    # react runs until the ball reached you, not the line. In goal the two
+    # match. Out in front of the shooter the ball can be past you before you
+    # could move.
+    reaction = ctx.times[shot_moment] - ctx.times[last_touch]
+    if after_shot >= MISS_RANGE or reaction < SAVE_REACTION_S:
         return DefenderRole("beaten", "was beaten by the shot", moment)
+    velocity = ctx.frames[shot_moment].ball.velocity
+    speed = math.hypot(velocity.x, velocity.y, velocity.z)
     text = "jumped for it and missed" if jumped else "couldn't reach it"
-    return DefenderRole("missed_save", text, moment, closest, speed)
+    return DefenderRole("missed_save", text, shot_moment, after_shot, speed)
 
 
 def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | None]:
