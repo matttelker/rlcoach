@@ -127,6 +127,6 @@ Point `HOME` and `USERPROFILE` at a scratch folder when running pytest, so nothi
 
 ## Git
 
-- There is one branch, `main`, and it tracks `fork/main`. Short-lived branches merge back quickly.
-- Never push to `origin`. That's the upstream project this was forked from; `fork` is yours.
+- There is one branch, `main`, and it tracks `origin/main` (matttelker/rlcoach). Short-lived branches merge back quickly.
+- This started as a fork of treygoff24/rlcoach, which is no longer followed. Don't add it as a remote or sync with it.
 - Commits are conventional: `type(scope): description`.
