@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from .events import (
     BoostPickupEvent,
@@ -46,18 +45,6 @@ class Game:
     demos: list[DemoEvent]
     kickoffs: list[KickoffEvent]
     boost_pickups: list[BoostPickupEvent]
-
-    @property
-    def events(self) -> dict[str, list[Any]]:
-        """The events by kind, the way the stat analyzers take them."""
-        return {
-            "goals": self.goals,
-            "demos": self.demos,
-            "kickoffs": self.kickoffs,
-            "boost_pickups": self.boost_pickups,
-            "touches": self.touches,
-            "challenges": self.challenges,
-        }
 
 
 def game_from_frames(path: Path, header: Header, frames: list[Frame]) -> Game:

@@ -47,7 +47,6 @@ def test_a_real_replay_is_parsed_once_into_frames_and_events(counted):
     # 5-4 on the scoreboard
     assert len(game.goals) == 9
     assert game.touches and game.kickoffs and game.boost_pickups
-    assert game.events["touches"] is game.touches
 
 
 def test_a_header_already_read_is_not_read_again(monkeypatch):
@@ -85,14 +84,6 @@ def test_events_come_from_the_frames_given():
     assert game.frames is frames
     assert game.touches == detect_touches(frames)
     assert game.goals == [] and game.demos == []
-    assert set(game.events) == {
-        "goals",
-        "demos",
-        "kickoffs",
-        "boost_pickups",
-        "touches",
-        "challenges",
-    }
 
 
 TIED = Path("Replay_files/70c0e78e-ea32-4722-a951-937baa40efc9.replay")
