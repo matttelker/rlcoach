@@ -1,18 +1,15 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 import { getComparison } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonChart, ErrorState, NoDataEmpty, PlaylistSelect } from '../components';
+import { Card, SkeletonChart, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField } from '../components';
+import { PERIOD_OPTIONS } from './coachTransforms';
 import { BENCHMARK_HINT, BENCHMARK_SOURCE, buildCompareChartData, isOnTarget } from './dataTransforms';
+import { AXIS_PROPS, TOOLTIP_PROPS } from './chartStyle';
 
-const RANK_OPTIONS = ['SSL', 'GC3', 'GC2', 'GC1', 'C3', 'C2'];
+const RANK_OPTIONS = ['SSL', 'GC3', 'GC2', 'GC1', 'C3', 'C2'].map((r) => ({ value: r, label: r }));
 
-const PERIOD_OPTIONS = [
-  { value: '7d', label: 'Last 7 Days' },
-  { value: '30d', label: 'Last 30 Days' },
-  { value: '90d', label: 'Last 90 Days' },
-  { value: 'all', label: 'All Time' },
-];
+const signed = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 
 export function Compare() {
   const [rank, setRank] = useState('GC1');
@@ -24,154 +21,95 @@ export function Compare() {
     queryFn: () => getComparison({ rank, period, playlist }),
   });
 
-  if (error) {
-    return <ErrorState message="Failed to load comparison" />;
-  }
-
   const chartData = buildCompareChartData(data?.comparisons);
   const activePlaylist = playlist ?? data?.playlist;
   const noGames = (
     <NoDataEmpty
-      message={`No ${activePlaylist} games in this period`}
+      message={`No ${activePlaylist ?? ''} games in this period`}
       description="Try a longer period or another playlist."
     />
   );
 
+  if (error) {
+    return <ErrorState message="The comparison didn't load. Check that the server is running." />;
+  }
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">Compare</h1>
-        <p className="text-sm text-[var(--color-text-muted)]">Compare your stats to rank benchmarks</p>
-        <p className="text-xs text-[var(--color-text-muted)] mt-1">{BENCHMARK_SOURCE}</p>
-      </div>
+    <div>
+      <PageHeader
+        title="Compare"
+        note={
+          <>
+            Your averages against a rank's median{data ? `, from ${data.game_count} games` : ''}.
+            <span className="block text-[13px] mt-1">{BENCHMARK_SOURCE}</span>
+          </>
+        }
+      >
+        <SelectField label="Rank" value={rank} options={RANK_OPTIONS} onChange={setRank} />
+        <SelectField label="Period" value={period} options={PERIOD_OPTIONS} onChange={setPeriod} />
+        <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
+      </PageHeader>
 
-      {/* Controls */}
-      <Card>
-        <CardContent className="flex flex-wrap gap-4 items-center">
-          <div>
-            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Target Rank</label>
-            <select
-              value={rank}
-              onChange={(e) => setRank(e.target.value)}
-              className="bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]"
-            >
-              {RANK_OPTIONS.map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Period</label>
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]"
-            >
-              {PERIOD_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
-          {data && (
-            <div className="ml-auto text-sm text-[var(--color-text-muted)]">
-              Based on {data.game_count} games
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Gap Chart */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold">Gap to {rank}</h2>
-        </CardHeader>
-        <CardContent>
+      <div className="space-y-6">
+        <Card className="p-4 sm:p-6">
+          <h2 className="type-display text-[19px]">Gap to {rank}</h2>
+          <p className="text-[13px] text-[var(--color-text-muted)] mt-1 mb-5">
+            Teal bars are on the right side of the median, red bars are short of it.
+          </p>
           {isLoading ? (
             <SkeletonChart />
           ) : data?.game_count === 0 ? (
             noGames
           ) : chartData.length === 0 ? (
-            <NoDataEmpty
-              message={`No ${rank} benchmarks for ${activePlaylist}`}
-              description={BENCHMARK_HINT}
-            />
+            <NoDataEmpty message={`No ${rank} benchmarks for ${activePlaylist}`} description={BENCHMARK_HINT} />
           ) : (
-            <div className="h-80">
+            <div style={{ height: Math.max(200, chartData.length * 44 + 40) }}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis
-                    type="number"
-                    stroke="var(--color-text-muted)"
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 12 }}
-                    tickFormatter={(v) => `${v > 0 ? '+' : ''}${v}%`}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="metric"
-                    stroke="var(--color-text-muted)"
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 12 }}
-                    width={80}
-                  />
+                <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 0 }}>
+                  <CartesianGrid horizontal={false} stroke="var(--color-border)" />
+                  <XAxis type="number" {...AXIS_PROPS} tickFormatter={(v) => `${v > 0 ? '+' : ''}${v}%`} />
+                  <YAxis type="category" dataKey="metric" {...AXIS_PROPS} width={88} />
+                  <ReferenceLine x={0} stroke="var(--color-text-muted)" />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'var(--color-bg-secondary)',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: '8px',
-                    }}
-                    labelStyle={{ color: 'var(--color-text)' }}
-                    formatter={(value) => {
-                      const numValue = Number(value) || 0;
-                      return [`${numValue > 0 ? '+' : ''}${numValue.toFixed(1)}%`, 'Difference'];
-                    }}
+                    {...TOOLTIP_PROPS}
+                    cursor={{ fill: 'var(--color-bg-tertiary)' }}
+                    formatter={(value) => [signed(Number(value) || 0), 'Against the median']}
                   />
-                  <Bar dataKey="difference" radius={[0, 4, 4, 0]}>
-                    {chartData.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={entry.onTarget ? 'var(--color-success)' : 'var(--color-error)'}
-                      />
+                  <Bar dataKey="difference" barSize={18} radius={4}>
+                    {chartData.map((entry) => (
+                      <Cell key={entry.metric} fill={entry.onTarget ? 'var(--chart-good)' : 'var(--chart-bad)'} />
                     ))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </Card>
 
-      {/* Comparison Table */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold">Detailed Comparison</h2>
-        </CardHeader>
-        <CardContent className="p-0">
+        <Card className="overflow-x-auto">
           {isLoading ? (
-            <div className="p-4">Loading...</div>
+            <div className="p-5 text-[var(--color-text-muted)]">Loading…</div>
           ) : data?.comparisons.length === 0 ? (
             noGames
           ) : (
-            <table className="w-full">
+            <table className="w-full min-w-[32rem]">
               <thead>
                 <tr className="border-b border-[var(--color-border)]">
-                  <th className="text-left p-4 text-sm font-medium text-[var(--color-text-muted)]">Metric</th>
-                  <th className="text-center p-4 text-sm font-medium text-[var(--color-text-muted)]">Your Avg</th>
-                  <th className="text-center p-4 text-sm font-medium text-[var(--color-text-muted)]">{rank} Median</th>
-                  <th className="text-center p-4 text-sm font-medium text-[var(--color-text-muted)]">Difference</th>
+                  <th className="th text-left pl-5">Stat</th>
+                  <th className="th text-right">You</th>
+                  <th className="th text-right">{rank} median</th>
+                  <th className="th text-right pr-5">Difference</th>
                 </tr>
               </thead>
               <tbody>
                 {data?.comparisons.map((c) => (
-                  <tr key={c.metric} className="border-b border-[var(--color-border)]">
-                    <td className="p-4 font-medium">{c.metric.toUpperCase()}</td>
-                    <td className="p-4 text-center">{c.my_value.toFixed(2)}</td>
-                    <td className="p-4 text-center text-[var(--color-text-muted)]">
-                      {c.target_median?.toFixed(2) ?? '-'}
+                  <tr key={c.metric} className="border-b last:border-b-0 border-[var(--color-border)]">
+                    <td className="px-3 pl-5 py-3 font-semibold">{c.metric.toUpperCase()}</td>
+                    <td className="px-3 py-3 text-right">{c.my_value.toFixed(2)}</td>
+                    <td className="px-3 py-3 text-right text-[var(--color-text-muted)]">
+                      {c.target_median?.toFixed(2) ?? '–'}
                     </td>
-                    <td className="p-4 text-center">
+                    <td className="px-3 pr-5 py-3 text-right font-semibold">
                       {c.difference_pct !== null ? (
                         <span
                           className={
@@ -180,10 +118,10 @@ export function Compare() {
                               : 'text-[var(--color-error)]'
                           }
                         >
-                          {c.difference_pct > 0 ? '+' : ''}{c.difference_pct.toFixed(1)}%
+                          {signed(c.difference_pct)}
                         </span>
                       ) : (
-                        '-'
+                        '–'
                       )}
                     </td>
                   </tr>
@@ -191,8 +129,8 @@ export function Compare() {
               </tbody>
             </table>
           )}
-        </CardContent>
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }

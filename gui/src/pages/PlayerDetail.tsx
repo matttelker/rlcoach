@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getPlayer, tagPlayer } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonCard, ErrorState } from '../components';
+import { Card, SkeletonCard, ErrorState } from '../components';
 import { parseUtc } from './dataTransforms';
 
 export function PlayerDetail() {
@@ -18,8 +18,7 @@ export function PlayerDetail() {
   });
 
   const tagMutation = useMutation({
-    mutationFn: ({ tagged, notes }: { tagged: boolean; notes?: string }) =>
-      tagPlayer(playerId!, { tagged, notes }),
+    mutationFn: ({ tagged, notes }: { tagged: boolean; notes?: string }) => tagPlayer(playerId!, { tagged, notes }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['player', playerId] });
       queryClient.invalidateQueries({ queryKey: ['players'] });
@@ -28,7 +27,7 @@ export function PlayerDetail() {
   });
 
   if (error) {
-    return <ErrorState message="Failed to load player" />;
+    return <ErrorState message="This player didn't load. Check that the server is running." />;
   }
 
   if (isLoading) {
@@ -41,124 +40,99 @@ export function PlayerDetail() {
   }
 
   if (!data) {
-    return <ErrorState message="Player not found" />;
+    return <ErrorState message="There's no player with this id." />;
   }
 
+  const date = (value: string | null) => (value ? parseUtc(value).toLocaleDateString() : 'Unknown');
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
+    <div className="space-y-8">
+      <header>
         <Link
           to="/players"
-          className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          className="inline-flex items-center gap-1 text-[14px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
+          Players
         </Link>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">{data.display_name}</h1>
-          <p className="text-sm text-[var(--color-text-muted)]">
-            {data.platform || 'Unknown Platform'} • {data.games_with_me} games together
-          </p>
+        <div className="flex flex-wrap items-end gap-4 mt-4">
+          <div className="mr-auto">
+            <h1 className="type-display text-[30px] sm:text-[36px] break-all">{data.display_name}</h1>
+            <p className="mt-2 text-[var(--color-text-muted)]">{data.platform || 'Unknown platform'}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => tagMutation.mutate({ tagged: !data.is_tagged_teammate })}
+            disabled={tagMutation.isPending}
+            aria-pressed={data.is_tagged_teammate}
+            className={data.is_tagged_teammate ? 'btn btn-primary' : 'btn'}
+          >
+            {data.is_tagged_teammate ? 'Tagged as teammate' : 'Tag as teammate'}
+          </button>
         </div>
-        <button
-          onClick={() => tagMutation.mutate({
-            tagged: !data.is_tagged_teammate,
-          })}
-          disabled={tagMutation.isPending}
-          className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
-            data.is_tagged_teammate
-              ? 'bg-[var(--color-primary)] text-white'
-              : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text)] hover:bg-[var(--color-border)]'
-          }`}
-        >
-          {data.is_tagged_teammate ? '★ Tagged' : '☆ Tag Teammate'}
-        </button>
-      </div>
+      </header>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Player Info */}
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold">Player Info</h2>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <span className="text-[var(--color-text-muted)]">First Seen</span>
-                <span>
-                  {data.first_seen_utc
-                    ? parseUtc(data.first_seen_utc).toLocaleDateString()
-                    : 'Unknown'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[var(--color-text-muted)]">Last Seen</span>
-                <span>
-                  {data.last_seen_utc
-                    ? parseUtc(data.last_seen_utc).toLocaleDateString()
-                    : 'Unknown'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[var(--color-text-muted)]">Games Together</span>
-                <span>{data.games_with_me}</span>
-              </div>
-            </div>
-          </CardContent>
+      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-6 items-start">
+        <Card className="p-5">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3">
+            <dt className="text-[var(--color-text-muted)]">Games together</dt>
+            <dd className="type-score text-[24px] text-right">{data.games_with_me}</dd>
+            <dt className="text-[var(--color-text-muted)]">First seen</dt>
+            <dd className="text-right">{date(data.first_seen_utc)}</dd>
+            <dt className="text-[var(--color-text-muted)]">Last seen</dt>
+            <dd className="text-right">{date(data.last_seen_utc)}</dd>
+          </dl>
         </Card>
 
-        {/* Notes */}
-        <Card>
-          <CardHeader className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold">Notes</h2>
+        <Card className="p-5">
+          <div className="flex items-baseline justify-between gap-4 mb-3">
+            <h2 className="type-display text-[19px]">Notes</h2>
             {!isEditing && (
               <button
+                type="button"
                 onClick={() => {
                   setNotes(data.teammate_notes || '');
                   setIsEditing(true);
                 }}
-                className="text-sm text-[var(--color-primary)] hover:text-[var(--color-primary-dark)]"
+                className="btn"
               >
-                Edit
+                Edit notes
               </button>
             )}
-          </CardHeader>
-          <CardContent>
-            {isEditing ? (
-              <div className="space-y-3">
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Add notes about this player..."
-                  className="w-full h-24 bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] resize-none"
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => tagMutation.mutate({
-                      tagged: data.is_tagged_teammate,
-                      notes,
-                    })}
-                    disabled={tagMutation.isPending}
-                    className="px-4 py-2 rounded-lg bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-dark)] transition-colors"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => setIsEditing(false)}
-                    className="px-4 py-2 rounded-lg bg-[var(--color-bg-tertiary)] text-[var(--color-text)] hover:bg-[var(--color-border)] transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
+          </div>
+          {isEditing ? (
+            <div className="space-y-3">
+              <label className="sr-only" htmlFor="player-notes">
+                Notes about {data.display_name}
+              </label>
+              <textarea
+                id="player-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="How they play, what works with them…"
+                className="field w-full h-28 resize-y"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => tagMutation.mutate({ tagged: data.is_tagged_teammate, notes })}
+                  disabled={tagMutation.isPending}
+                  className="btn btn-primary"
+                >
+                  Save notes
+                </button>
+                <button type="button" onClick={() => setIsEditing(false)} className="btn">
+                  Cancel
+                </button>
               </div>
-            ) : (
-              <p className="text-[var(--color-text-muted)]">
-                {data.teammate_notes || 'No notes yet. Click Edit to add some.'}
-              </p>
-            )}
-          </CardContent>
+            </div>
+          ) : (
+            <p className={data.teammate_notes ? 'whitespace-pre-wrap' : 'text-[var(--color-text-muted)]'}>
+              {data.teammate_notes || 'No notes yet.'}
+            </p>
+          )}
         </Card>
       </div>
     </div>

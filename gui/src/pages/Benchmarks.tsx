@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getWeaknesses, getPatterns } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonCard, ErrorState, NoDataEmpty, PlaylistSelect } from '../components';
+import type { Weakness } from '../types/api';
+import { Card, SkeletonCard, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect } from '../components';
 import { BENCHMARK_HINT, BENCHMARK_SOURCE } from './dataTransforms';
 
-const SEVERITY_STYLES = {
-  critical: 'bg-[var(--color-error)]/20 text-[var(--color-error)] border-[var(--color-error)]/50',
-  high: 'bg-[var(--color-error)]/20 text-[var(--color-error)] border-[var(--color-error)]/50',
-  medium: 'bg-[var(--color-warning)]/20 text-[var(--color-warning)] border-[var(--color-warning)]/50',
-  low: 'bg-blue-500/20 text-blue-400 border-blue-500/50',
-  strength: 'bg-[var(--color-success)]/20 text-[var(--color-success)] border-[var(--color-success)]/50',
-  neutral: 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] border-[var(--color-border)]',
+const SEVERITY_MARK: Record<Weakness['severity'] | 'strength', string> = {
+  critical: 'var(--chart-bad)',
+  high: 'var(--chart-bad)',
+  medium: 'var(--chart-flag)',
+  low: 'var(--color-text-muted)',
+  neutral: 'var(--color-border)',
+  strength: 'var(--chart-good)',
 };
 
 export function Benchmarks() {
@@ -29,7 +30,7 @@ export function Benchmarks() {
   });
 
   if (weaknessesError || patternsError) {
-    return <ErrorState message="Failed to load focus areas" />;
+    return <ErrorState message="Benchmarks didn't load. Check that the server is running." />;
   }
 
   const activePlaylist = playlist ?? weaknessesData?.playlist;
@@ -44,156 +45,131 @@ export function Benchmarks() {
         : null;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">Benchmarks</h1>
-        <p className="text-sm text-[var(--color-text-muted)]">Your averages against {rank} players</p>
-        <p className="text-xs text-[var(--color-text-muted)] mt-1">{BENCHMARK_SOURCE}</p>
-      </div>
+    <div>
+      <PageHeader
+        title="Benchmarks"
+        note={
+          <>
+            Your last 30 days against {rank} players{weaknessesData ? `, from ${weaknessesData.game_count} games` : ''}.
+            <span className="block text-[13px] mt-1">{BENCHMARK_SOURCE}</span>
+          </>
+        }
+      >
+        <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
+      </PageHeader>
 
-      <Card>
-        <CardContent className="flex flex-wrap gap-4 items-center">
-          <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
-          {weaknessesData && (
-            <div className="ml-auto text-sm text-[var(--color-text-muted)]">
-              Based on {weaknessesData.game_count} games
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Weaknesses */}
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold text-[var(--color-error)]">Areas to improve</h2>
-          </CardHeader>
-          <CardContent>
+      <div className="space-y-6">
+        <div className="grid lg:grid-cols-2 gap-6 items-start">
+          <Card className="p-5">
+            <h2 className="type-display text-[19px] mb-4">Areas to improve</h2>
             {weaknessesLoading ? (
               <SkeletonCard />
             ) : missingData ? (
               <NoDataEmpty {...missingData} />
             ) : weaknessesData?.weaknesses.length === 0 ? (
               <NoDataEmpty
-                message="No weaknesses detected"
-                description={`Your averages are within the normal ${rank} range.`}
+                message="Nothing below the usual range"
+                description={`Your averages sit within the normal ${rank} range.`}
               />
             ) : (
-              <div className="space-y-3">
+              <ul className="divide-y divide-[var(--color-border)]">
                 {weaknessesData?.weaknesses.map((w) => (
-                  <div
-                    key={w.metric}
-                    className={`p-4 rounded-lg border ${SEVERITY_STYLES[w.severity]}`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium">{w.metric.toUpperCase()}</span>
-                      <span className="text-xs px-2 py-1 rounded-full bg-black/20">
-                        {w.severity}
-                      </span>
-                    </div>
-                    <div className="text-sm opacity-80">
-                      Your avg: {w.my_value.toFixed(2)} • {rank} median: {w.target_median.toFixed(2)}
-                    </div>
-                    <div className="text-xs mt-1 opacity-60">
-                      Z-score: {w.z_score.toFixed(2)} ({Math.abs(w.z_score).toFixed(1)} std devs {w.z_score < 0 ? 'below' : 'above'} average)
-                    </div>
-                  </div>
+                  <MetricRow key={w.metric} item={w} rank={rank} severity={w.severity} />
                 ))}
-              </div>
+              </ul>
             )}
-          </CardContent>
-        </Card>
+          </Card>
 
-        {/* Strengths */}
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold text-[var(--color-success)]">Your strengths</h2>
-          </CardHeader>
-          <CardContent>
+          <Card className="p-5">
+            <h2 className="type-display text-[19px] mb-4">Your strengths</h2>
             {weaknessesLoading ? (
               <SkeletonCard />
             ) : missingData ? (
               <NoDataEmpty {...missingData} />
             ) : weaknessesData?.strengths.length === 0 ? (
-              <NoDataEmpty message="Keep playing to identify strengths" />
+              <NoDataEmpty message="No strengths yet" description="Strengths show up once a stat sits clearly above the median." />
             ) : (
-              <div className="space-y-3">
+              <ul className="divide-y divide-[var(--color-border)]">
                 {weaknessesData?.strengths.map((s) => (
-                  <div
-                    key={s.metric}
-                    className={`p-4 rounded-lg border ${SEVERITY_STYLES.strength}`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium">{s.metric.toUpperCase()}</span>
-                      <span className="text-xs px-2 py-1 rounded-full bg-black/20">
-                        strength
-                      </span>
-                    </div>
-                    <div className="text-sm opacity-80">
-                      Your avg: {s.my_value.toFixed(2)} • {rank} median: {s.target_median.toFixed(2)}
-                    </div>
-                    <div className="text-xs mt-1 opacity-60">
-                      Z-score: {s.z_score.toFixed(2)} ({Math.abs(s.z_score).toFixed(1)} std devs {s.z_score < 0 ? 'below' : 'above'} average)
-                    </div>
-                  </div>
+                  <MetricRow key={s.metric} item={s} rank={rank} severity="strength" />
                 ))}
-              </div>
+              </ul>
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </Card>
+        </div>
 
-      {/* Win/Loss Patterns */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold">Win vs loss patterns</h2>
+        <Card className="p-5">
+          <h2 className="type-display text-[19px]">Wins against losses</h2>
           {patternsData && (
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Based on {patternsData.win_count} wins and {patternsData.loss_count} losses
+            <p className="text-[13px] text-[var(--color-text-muted)] mt-1">
+              From {patternsData.win_count} wins and {patternsData.loss_count} losses
             </p>
           )}
-        </CardHeader>
-        <CardContent>
-          {patternsLoading ? (
-            <SkeletonCard />
-          ) : patternsData?.patterns.length === 0 ? (
-            <NoDataEmpty
-              message="Need more games to detect patterns"
-              description={`Needs at least ${patternsData?.min_games} wins and ${patternsData?.min_games} losses in ${patternsData?.playlist}.`}
-            />
-          ) : (
-            <div className="space-y-4">
-              {patternsData?.patterns.map((p) => (
-                <div
-                  key={p.metric}
-                  className="flex items-center justify-between p-4 rounded-lg bg-[var(--color-bg-tertiary)]"
-                >
-                  <div>
-                    <div className="font-medium">{p.metric.toUpperCase()}</div>
-                    <div className="text-sm text-[var(--color-text-muted)]">
-                      Win avg: {p.win_avg.toFixed(2)} • Loss avg: {p.loss_avg.toFixed(2)}
+          <div className="mt-4">
+            {patternsLoading ? (
+              <SkeletonCard />
+            ) : patternsData?.patterns.length === 0 ? (
+              <NoDataEmpty
+                message="Not enough games yet"
+                description={`Needs at least ${patternsData?.min_games} wins and ${patternsData?.min_games} losses in ${patternsData?.playlist}.`}
+              />
+            ) : (
+              <ul className="divide-y divide-[var(--color-border)]">
+                {patternsData?.patterns.map((p) => (
+                  <li key={p.metric} className="flex items-center justify-between gap-4 py-3">
+                    <div>
+                      <div className="font-semibold">{p.metric.toUpperCase()}</div>
+                      <div className="text-[14px] text-[var(--color-text-muted)]">
+                        {p.win_avg.toFixed(2)} in wins, {p.loss_avg.toFixed(2)} in losses
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <div
-                      className={`text-lg font-bold ${
-                        p.direction === 'higher_when_winning'
-                          ? 'text-[var(--color-success)]'
-                          : 'text-[var(--color-error)]'
-                      }`}
-                    >
-                      {p.direction === 'higher_when_winning' ? '+' : ''}{p.delta.toFixed(2)}
+                    <div className="text-right">
+                      <div
+                        className={`type-score text-[26px] ${
+                          p.direction === 'higher_when_winning' ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'
+                        }`}
+                      >
+                        {p.direction === 'higher_when_winning' ? '+' : ''}
+                        {p.delta.toFixed(2)}
+                      </div>
+                      <div className="text-[13px] text-[var(--color-text-muted)]">Effect size {p.effect_size.toFixed(2)}</div>
                     </div>
-                    <div className="text-xs text-[var(--color-text-muted)]">
-                      Effect size: {p.effect_size.toFixed(2)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
+      </div>
     </div>
+  );
+}
+
+function MetricRow({
+  item,
+  rank,
+  severity,
+}: {
+  item: { metric: string; my_value: number; target_median: number; z_score: number };
+  rank: string;
+  severity: Weakness['severity'] | 'strength';
+}) {
+  const side = item.z_score < 0 ? 'below' : 'above';
+  return (
+    <li className="grid grid-cols-[4px_minmax(0,1fr)] gap-x-4 py-3">
+      <span className="rounded-full" style={{ background: SEVERITY_MARK[severity] }} aria-hidden="true" />
+      <div>
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="font-semibold">{item.metric.toUpperCase()}</span>
+          <span className="text-[13px] text-[var(--color-text-muted)]">{severity === 'strength' ? 'Strength' : `${severity[0].toUpperCase()}${severity.slice(1)}`}</span>
+        </div>
+        <div className="text-[14px] mt-0.5">
+          You {item.my_value.toFixed(2)}, {rank} median {item.target_median.toFixed(2)}
+        </div>
+        <div className="text-[13px] text-[var(--color-text-muted)] mt-0.5">
+          {Math.abs(item.z_score).toFixed(1)} standard deviations {side} the median
+        </div>
+      </div>
+    </li>
   );
 }

@@ -2,8 +2,39 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getGames } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonTable, ErrorState, NoGamesEmpty, Pagination } from '../components';
-import { buildGamesParams, parseUtc, type GameFilters, type GameResult } from './dataTransforms';
+import {
+  Card,
+  SkeletonTable,
+  ErrorState,
+  NoGamesEmpty,
+  PageHeader,
+  Pagination,
+  ResultMark,
+  SelectField,
+} from '../components';
+import { prettyMap } from './coachTransforms';
+import {
+  buildGamesParams,
+  formatDuration,
+  parseUtc,
+  prettyPlaylist,
+  type GameFilters,
+  type GameResult,
+} from './dataTransforms';
+
+const PLAYLIST_FILTERS = [
+  { value: '', label: 'All playlists' },
+  { value: 'STANDARD', label: 'Standard' },
+  { value: 'DOUBLES', label: 'Doubles' },
+  { value: 'DUEL', label: 'Duel' },
+];
+
+const RESULT_FILTERS: { value: GameResult | ''; label: string }[] = [
+  { value: '', label: 'All results' },
+  { value: 'WIN', label: 'Wins' },
+  { value: 'LOSS', label: 'Losses' },
+  { value: 'DRAW', label: 'Draws' },
+];
 
 export function Games() {
   const [filters, setFilters] = useState<GameFilters>({
@@ -18,130 +49,91 @@ export function Games() {
     queryFn: () => getGames(buildGamesParams(filters)),
   });
 
-  if (error) {
-    return <ErrorState message="Failed to load games" />;
-  }
-
   const totalPages = data ? Math.ceil(data.total / filters.limit) : 0;
   const currentPage = Math.floor(filters.offset / filters.limit) + 1;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">Games</h1>
-        <p className="text-sm text-[var(--color-text-muted)]">Browse your replay history</p>
-      </div>
+    <div>
+      <PageHeader title="Games" note={data ? `${data.total} games loaded` : 'Every replay you have loaded'}>
+        <SelectField
+          label="Playlist"
+          value={filters.playlist}
+          options={PLAYLIST_FILTERS}
+          onChange={(playlist) => setFilters({ ...filters, playlist, offset: 0 })}
+        />
+        <SelectField
+          label="Result"
+          value={filters.result}
+          options={RESULT_FILTERS}
+          onChange={(result) => setFilters({ ...filters, result, offset: 0 })}
+        />
+      </PageHeader>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="flex flex-wrap gap-4">
-          <select
-            value={filters.playlist}
-            onChange={(e) => setFilters({ ...filters, playlist: e.target.value, offset: 0 })}
-            className="bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]"
-          >
-            <option value="">All Playlists</option>
-            <option value="DOUBLES">Doubles</option>
-            <option value="STANDARD">Standard</option>
-            <option value="DUEL">Duel</option>
-          </select>
-          <select
-            value={filters.result}
-            onChange={(e) => setFilters({ ...filters, result: e.target.value as GameResult | '', offset: 0 })}
-            className="bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]"
-          >
-            <option value="">All Results</option>
-            <option value="WIN">Wins</option>
-            <option value="LOSS">Losses</option>
-            <option value="DRAW">Draws</option>
-          </select>
-        </CardContent>
-      </Card>
-
-      {/* Games List */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold">
-            {data ? `${data.total} games` : 'Loading...'}
-          </h2>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-4">
-              <SkeletonTable rows={10} />
-            </div>
-          ) : data?.items.length === 0 ? (
-            <NoGamesEmpty />
-          ) : (
-            <>
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)]">
-                    <th className="text-left p-4 text-sm font-medium text-[var(--color-text-muted)]">Date</th>
-                    <th className="text-left p-4 text-sm font-medium text-[var(--color-text-muted)]">Playlist</th>
-                    <th className="text-left p-4 text-sm font-medium text-[var(--color-text-muted)]">Result</th>
-                    <th className="text-left p-4 text-sm font-medium text-[var(--color-text-muted)]">Score</th>
-                    <th className="text-left p-4 text-sm font-medium text-[var(--color-text-muted)]">Duration</th>
-                    <th className="text-left p-4 text-sm font-medium text-[var(--color-text-muted)]">Map</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data?.items.map((game) => (
+      <Card className="overflow-x-auto">
+        {error ? (
+          <ErrorState message="Your games didn't load. Check that the server is running." />
+        ) : isLoading ? (
+          <div className="p-4">
+            <SkeletonTable rows={10} />
+          </div>
+        ) : data?.items.length === 0 ? (
+          <NoGamesEmpty />
+        ) : (
+          <>
+            <table className="w-full min-w-[40rem]">
+              <thead>
+                <tr className="border-b border-[var(--color-border)]">
+                  <th className="th text-left pl-5">Result</th>
+                  <th className="th text-left">Map</th>
+                  <th className="th text-left">Played</th>
+                  <th className="th text-left">Playlist</th>
+                  <th className="th text-right pr-5">Length</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data?.items.map((game) => {
+                  const played = parseUtc(game.played_at_utc);
+                  return (
                     <tr
                       key={game.replay_id}
-                      className="border-b border-[var(--color-border)] hover:bg-[var(--color-bg-tertiary)] transition-colors"
+                      className="border-b last:border-b-0 border-[var(--color-border)] hover:bg-[var(--color-bg-tertiary)]"
                     >
-                      <td className="p-4">
-                        <Link
-                          to={`/games/${encodeURIComponent(game.replay_id)}`}
-                          className="text-[var(--color-primary)] hover:underline"
-                        >
-                          {parseUtc(game.played_at_utc).toLocaleDateString()}
-                        </Link>
-                        <div className="text-xs text-[var(--color-text-muted)]">
-                          {parseUtc(game.played_at_utc).toLocaleTimeString()}
-                        </div>
+                      <td className="px-3 pl-5 py-3">
+                        <ResultMark result={game.result} score={`${game.my_score}–${game.opponent_score}`} />
                       </td>
-                      <td className="p-4 text-sm">{game.playlist}</td>
-                      <td className="p-4">
-                        <span
-                          className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                            game.result === 'WIN'
-                              ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]'
-                              : game.result === 'LOSS'
-                              ? 'bg-[var(--color-error)]/20 text-[var(--color-error)]'
-                              : 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]'
-                          }`}
-                        >
-                          {game.result}
+                      <td className="px-3 py-3">
+                        <Link to={`/games/${encodeURIComponent(game.replay_id)}`} className="link">
+                          {prettyMap(game.map)}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3">
+                        {played.toLocaleDateString()}
+                        <span className="ml-2 text-[13px] text-[var(--color-text-muted)]">
+                          {played.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
                         </span>
                       </td>
-                      <td className="p-4 text-sm font-medium">
-                        {game.my_score} - {game.opponent_score}
+                      <td className="px-3 py-3">{prettyPlaylist(game.playlist)}</td>
+                      <td className="px-3 pr-5 py-3 text-right text-[var(--color-text-muted)]">
+                        {formatDuration(game.duration_seconds)}
                       </td>
-                      <td className="p-4 text-sm text-[var(--color-text-muted)]">
-                        {Math.floor(game.duration_seconds / 60)}:{String(Math.floor(game.duration_seconds % 60)).padStart(2, '0')}
-                      </td>
-                      <td className="p-4 text-sm text-[var(--color-text-muted)]">{game.map}</td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  );
+                })}
+              </tbody>
+            </table>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <Pagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  previousDisabled={filters.offset === 0}
-                  nextDisabled={currentPage >= totalPages}
-                  onPrevious={() => setFilters({ ...filters, offset: filters.offset - filters.limit })}
-                  onNext={() => setFilters({ ...filters, offset: filters.offset + filters.limit })}
-                />
-              )}
-            </>
-          )}
-        </CardContent>
+            {totalPages > 1 && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                previousDisabled={filters.offset === 0}
+                nextDisabled={currentPage >= totalPages}
+                onPrevious={() => setFilters({ ...filters, offset: filters.offset - filters.limit })}
+                onNext={() => setFilters({ ...filters, offset: filters.offset + filters.limit })}
+              />
+            )}
+          </>
+        )}
       </Card>
     </div>
   );

@@ -1,87 +1,65 @@
 import { NavLink, Outlet } from 'react-router-dom';
 
 const navItems = [
-  { path: '/', label: 'Coach', icon: CoachIcon },
-  { path: '/games', label: 'Games', icon: GamesIcon },
-  { path: '/stats', label: 'Stats', icon: StatsIcon },
-  { path: '/players', label: 'Players', icon: PlayersIcon },
+  { path: '/', label: 'Coach' },
+  { path: '/games', label: 'Games' },
+  { path: '/stats', label: 'Stats' },
+  { path: '/players', label: 'Players' },
 ];
 
 export function Layout() {
   return (
-    <div className="flex w-full min-h-screen">
-      {/* Sidebar */}
-      <nav className="w-56 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border)] flex flex-col">
-        <div className="p-4 border-b border-[var(--color-border)]">
-          <h1 className="text-xl font-bold text-[var(--color-primary)]">RLCoach</h1>
-          <p className="text-xs text-[var(--color-text-muted)]">Local replay coach</p>
+    <div className="min-h-screen">
+      <header className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 flex flex-wrap items-center gap-x-8 gap-y-1 pt-3 sm:pt-0">
+          <NavLink to="/" className="flex items-center gap-2.5 py-1 sm:py-3.5 text-[var(--color-text)]">
+            <BrandMark className="h-7 w-auto" />
+            <span className="type-display text-[19px]">Soccar Doctor</span>
+          </NavLink>
+          <nav aria-label="Main" className="-mx-4 sm:mx-0 w-[calc(100%+2rem)] sm:w-auto overflow-x-auto overflow-y-hidden">
+            <ul className="flex px-2 sm:px-0">
+              {navItems.map((item) => (
+                <li key={item.path}>
+                  <NavLink
+                    to={item.path}
+                    end={item.path === '/'}
+                    className={({ isActive }) =>
+                      `block px-3 py-3 sm:py-[18px] text-[15px] whitespace-nowrap border-b-2 ${
+                        isActive
+                          ? 'border-[var(--color-text)] text-[var(--color-text)] font-semibold'
+                          : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                      }`
+                    }
+                  >
+                    {item.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
-        <div className="flex-1 py-4">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.path === '/'}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg transition-colors ${
-                  isActive
-                    ? 'bg-[var(--color-primary)] text-white'
-                    : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text)]'
-                }`
-              }
-            >
-              <item.icon className="w-5 h-5" />
-              <span className="text-sm font-medium">{item.label}</span>
-            </NavLink>
-          ))}
-        </div>
-        <div className="p-4 border-t border-[var(--color-border)]">
-          <div className="text-xs text-[var(--color-text-muted)]">
-            v0.1.0
-          </div>
-        </div>
-      </nav>
+      </header>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-auto">
-        <div className="p-6">
-          <Outlet />
-        </div>
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 sm:py-10">
+        <Outlet />
       </main>
     </div>
   );
 }
 
-// Icon components
-function GamesIcon({ className }: { className?: string }) {
+/** A heartbeat with a ball at its peak. The same mark is the favicon. */
+function BrandMark({ className }: { className?: string }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  );
-}
-
-function StatsIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-    </svg>
-  );
-}
-
-function CoachIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-    </svg>
-  );
-}
-
-function PlayersIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+    <svg className={className} viewBox="2 2 28 26" aria-hidden="true">
+      <path
+        d="M3 20h5l2-3 2 3h3l3.5-12L22 26l2-6h5"
+        fill="none"
+        stroke="var(--chart-bad)"
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={18.5} cy={6.5} r={3.6} fill="var(--color-text)" />
     </svg>
   );
 }

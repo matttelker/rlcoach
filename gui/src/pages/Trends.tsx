@@ -1,24 +1,19 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { getTrends, getBenchmarks } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonChart, ErrorState, NoDataEmpty, PlaylistSelect } from '../components';
+import { Card, SkeletonChart, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField } from '../components';
+import { PERIOD_OPTIONS } from './coachTransforms';
 import { hasBenchmarkValue, parseLocalDate } from './dataTransforms';
+import { AXIS_PROPS, TOOLTIP_PROPS } from './chartStyle';
 
 const METRIC_OPTIONS = [
-  { value: 'bcpm', label: 'Boost/Min', category: 'Boost' },
-  { value: 'avg_boost', label: 'Avg Boost', category: 'Boost' },
-  { value: 'goals', label: 'Goals', category: 'Fundamentals' },
-  { value: 'assists', label: 'Assists', category: 'Fundamentals' },
-  { value: 'saves', label: 'Saves', category: 'Fundamentals' },
-  { value: 'shots', label: 'Shots', category: 'Fundamentals' },
-];
-
-const PERIOD_OPTIONS = [
-  { value: '7d', label: 'Last 7 Days' },
-  { value: '30d', label: 'Last 30 Days' },
-  { value: '90d', label: 'Last 90 Days' },
-  { value: 'all', label: 'All Time' },
+  { value: 'bcpm', label: 'Boost used per minute' },
+  { value: 'avg_boost', label: 'Average boost' },
+  { value: 'goals', label: 'Goals' },
+  { value: 'assists', label: 'Assists' },
+  { value: 'saves', label: 'Saves' },
+  { value: 'shots', label: 'Shots' },
 ];
 
 export function Trends() {
@@ -40,134 +35,77 @@ export function Trends() {
     enabled: showBenchmark && !!activePlaylist,
   });
 
-  if (error) {
-    return <ErrorState message="Failed to load trends" />;
-  }
-
   const benchmarkValue = benchmarksData?.items?.[0]?.median_value;
   const hasBenchmark = showBenchmark && hasBenchmarkValue(benchmarkValue);
 
-  const chartData = data?.values.map((v) => ({
-    date: parseLocalDate(v.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    value: v.value,
-    benchmark: hasBenchmark ? benchmarkValue : undefined,
-  })) ?? [];
+  const chartData =
+    data?.values.map((v) => ({
+      date: parseLocalDate(v.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      value: v.value,
+    })) ?? [];
 
   const selectedMetric = METRIC_OPTIONS.find((m) => m.value === metric);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">Trends</h1>
-        <p className="text-sm text-[var(--color-text-muted)]">Track your performance over time</p>
-      </div>
+    <div>
+      <PageHeader title="Trends" note="How one stat moves from day to day">
+        <SelectField label="Stat" value={metric} options={METRIC_OPTIONS} onChange={setMetric} />
+        <SelectField label="Period" value={period} options={PERIOD_OPTIONS} onChange={setPeriod} />
+        <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
+        <label className="flex items-center gap-2 h-[38px] text-[14px]">
+          <input
+            type="checkbox"
+            checked={showBenchmark}
+            onChange={(e) => setShowBenchmark(e.target.checked)}
+            className="w-4 h-4 accent-[var(--color-primary)]"
+          />
+          Show the GC1 median
+        </label>
+      </PageHeader>
 
-      {/* Controls */}
-      <Card>
-        <CardContent className="flex flex-wrap gap-4 items-center">
-          <div>
-            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Metric</label>
-            <select
-              value={metric}
-              onChange={(e) => setMetric(e.target.value)}
-              className="bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]"
-            >
-              {METRIC_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Period</label>
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]"
-            >
-              {PERIOD_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="showBenchmark"
-              checked={showBenchmark}
-              onChange={(e) => setShowBenchmark(e.target.checked)}
-              className="rounded border-[var(--color-border)]"
-            />
-            <label htmlFor="showBenchmark" className="text-sm text-[var(--color-text-muted)]">
-              Show GC1 Benchmark
-            </label>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Chart */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold">{selectedMetric?.label} Over Time</h2>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <SkeletonChart />
-          ) : chartData.length === 0 ? (
-            <NoDataEmpty
-              message="No data for selected period"
-              description="Try a longer period or another playlist."
-            />
-          ) : (
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis
-                    dataKey="date"
+      <Card className="p-4 sm:p-6">
+        <h2 className="type-display text-[19px] mb-5">{selectedMetric?.label}, by day</h2>
+        {error ? (
+          <ErrorState message="Trends didn't load. Check that the server is running." />
+        ) : isLoading ? (
+          <SkeletonChart />
+        ) : chartData.length === 0 ? (
+          <NoDataEmpty message="No games in this period" description="Try a longer period or another playlist." />
+        ) : (
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
+                <CartesianGrid vertical={false} stroke="var(--color-border)" />
+                <XAxis dataKey="date" {...AXIS_PROPS} />
+                <YAxis {...AXIS_PROPS} />
+                <Tooltip {...TOOLTIP_PROPS} />
+                {hasBenchmark && (
+                  <ReferenceLine
+                    y={benchmarkValue}
+                    ifOverflow="extendDomain"
                     stroke="var(--color-text-muted)"
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 12 }}
-                  />
-                  <YAxis
-                    stroke="var(--color-text-muted)"
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 12 }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'var(--color-bg-secondary)',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: '8px',
+                    strokeDasharray="4 4"
+                    label={{
+                      value: 'GC1 median',
+                      position: 'insideTopRight',
+                      fill: 'var(--color-text-muted)',
+                      fontSize: 13,
                     }}
-                    labelStyle={{ color: 'var(--color-text)' }}
                   />
-                  <Line
-                    type="monotone"
-                    dataKey="value"
-                    stroke="var(--color-primary)"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    name={selectedMetric?.label}
-                  />
-                  {hasBenchmark && (
-                    <Line
-                      type="monotone"
-                      dataKey="benchmark"
-                      stroke="var(--color-success)"
-                      strokeWidth={2}
-                      strokeDasharray="5 5"
-                      dot={false}
-                      name="GC1 Benchmark"
-                    />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </CardContent>
+                )}
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke="var(--chart-ink)"
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: 'var(--chart-ink)', strokeWidth: 0 }}
+                  activeDot={{ r: 5, stroke: 'var(--color-bg-secondary)', strokeWidth: 2 }}
+                  name={selectedMetric?.label}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </Card>
     </div>
   );

@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCompareChartData,
   buildGamesParams,
+  formatDuration,
   hasBenchmarkValue,
   isOnTarget,
   parseLocalDate,
   parseUtc,
+  prettyPlaylist,
 } from '../dataTransforms';
 import type { Comparison } from '../../types/api';
 
@@ -88,5 +90,17 @@ describe('Games query params', () => {
       limit: 20,
       offset: 0,
     });
+  });
+});
+
+describe('labels', () => {
+  it('writes playlist ids as words', () => {
+    expect(prettyPlaylist('STANDARD')).toBe('Standard');
+    expect(prettyPlaylist('DUEL')).toBe('Duel');
+  });
+
+  it('writes game length as minutes and padded seconds', () => {
+    expect(formatDuration(458.4)).toBe('7:38');
+    expect(formatDuration(305)).toBe('5:05');
   });
 });

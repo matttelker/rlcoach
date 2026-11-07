@@ -1,10 +1,17 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getReplay } from '../api/client';
-import { Card, CardHeader, CardContent, SkeletonCard, ErrorState } from '../components';
-import { parseUtc } from './dataTransforms';
+import { Card, SectionTitle, SkeletonCard, ErrorState } from '../components';
+import type { PlayerStats } from '../types/api';
+import { formatDuration, parseUtc, prettyPlaylist } from './dataTransforms';
 import { GameReview } from './GameReview';
 import { prettyMap } from './coachTransforms';
+
+const RESULT_WORD: Record<string, { word: string; color: string }> = {
+  WIN: { word: 'Win', color: 'text-[var(--color-success)]' },
+  LOSS: { word: 'Loss', color: 'text-[var(--color-error)]' },
+  DRAW: { word: 'Draw', color: 'text-[var(--color-warning)]' },
+};
 
 export function GameDetail() {
   const { replayId } = useParams<{ replayId: string }>();
@@ -16,7 +23,7 @@ export function GameDetail() {
   });
 
   if (error) {
-    return <ErrorState message="Failed to load replay" />;
+    return <ErrorState message="This replay didn't load. Check that the server is running." />;
   }
 
   if (isLoading) {
@@ -29,162 +36,120 @@ export function GameDetail() {
   }
 
   if (!data) {
-    return <ErrorState message="Replay not found" />;
+    return <ErrorState message="There's no replay with this id. It may have been removed." />;
   }
 
-  const bluePlayers = data.player_stats.filter((p) => p.team === 'BLUE');
-  const orangePlayers = data.player_stats.filter((p) => p.team === 'ORANGE');
+  const result = RESULT_WORD[data.result] ?? RESULT_WORD.DRAW;
+  const played = parseUtc(data.played_at_utc);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
+    <div className="space-y-12">
+      <header>
         <Link
           to="/games"
-          className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          className="inline-flex items-center gap-1 text-[14px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
+          Games
         </Link>
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">
-            {data.my_score} - {data.opponent_score}
-            <span
-              className={`ml-3 text-lg ${
-                data.result === 'WIN'
-                  ? 'text-[var(--color-success)]'
-                  : data.result === 'LOSS'
-                  ? 'text-[var(--color-error)]'
-                  : 'text-[var(--color-warning)]'
-              }`}
-            >
-              {data.result}
-            </span>
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-2 mt-4">
+          <h1 className="type-score text-[76px] sm:text-[96px] leading-[0.85]">
+            <span className="sr-only">{result.word}, </span>
+            {data.my_score}–{data.opponent_score}
           </h1>
-          <p className="text-sm text-[var(--color-text-muted)]">
-            {parseUtc(data.played_at_utc).toLocaleString()} • {data.playlist} • {prettyMap(data.map)}
-          </p>
+          <div className="pb-1">
+            <div className={`type-display text-[26px] ${result.color}`} aria-hidden="true">
+              {result.word}
+            </div>
+            <p className="text-[var(--color-text-muted)] mt-1">
+              {prettyMap(data.map)}, {played.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}{' '}
+              at {played.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+            </p>
+          </div>
         </div>
-      </div>
+      </header>
 
       <GameReview replayId={data.replay_id} />
 
-      {/* Match Info */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold">Match info</h2>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <div className="text-sm text-[var(--color-text-muted)]">Duration</div>
-              <div className="text-lg font-medium">
-                {Math.floor(data.duration_seconds / 60)}:{String(Math.floor(data.duration_seconds % 60)).padStart(2, '0')}
-              </div>
-            </div>
-            <div>
-              <div className="text-sm text-[var(--color-text-muted)]">Playlist</div>
-              <div className="text-lg font-medium">{data.playlist}</div>
-            </div>
-            <div>
-              <div className="text-sm text-[var(--color-text-muted)]">Map</div>
-              <div className="text-lg font-medium">{prettyMap(data.map)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-[var(--color-text-muted)]">Final score</div>
-              <div className="text-lg font-medium">{data.my_score} - {data.opponent_score}</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Teams */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Blue Team */}
-        <Card>
-          <CardHeader className="bg-blue-500/10 border-b-blue-500/50">
-            <h2 className="text-lg font-semibold text-blue-400">Blue Team</h2>
-          </CardHeader>
-          <CardContent className="p-0">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[var(--color-border)]">
-                  <th className="text-left p-3 text-xs font-medium text-[var(--color-text-muted)]">Player</th>
-                  <th className="text-center p-3 text-xs font-medium text-[var(--color-text-muted)]">G</th>
-                  <th className="text-center p-3 text-xs font-medium text-[var(--color-text-muted)]">A</th>
-                  <th className="text-center p-3 text-xs font-medium text-[var(--color-text-muted)]">S</th>
-                  <th className="text-center p-3 text-xs font-medium text-[var(--color-text-muted)]">Sh</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bluePlayers.map((player) => (
-                  <tr key={player.player_id} className="border-b border-[var(--color-border)]">
-                    <td className="p-3">
-                      <div className="flex items-center gap-2">
-                        <span className={player.is_me ? 'text-[var(--color-primary)] font-medium' : ''}>
-                          {player.display_name}
-                        </span>
-                        {player.is_me && (
-                          <span className="text-xs px-1.5 py-0.5 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded">
-                            You
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="text-center p-3">{player.goals}</td>
-                    <td className="text-center p-3">{player.assists}</td>
-                    <td className="text-center p-3">{player.saves}</td>
-                    <td className="text-center p-3">{player.shots}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-
-        {/* Orange Team */}
-        <Card>
-          <CardHeader className="bg-orange-500/10 border-b-orange-500/50">
-            <h2 className="text-lg font-semibold text-orange-400">Orange Team</h2>
-          </CardHeader>
-          <CardContent className="p-0">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[var(--color-border)]">
-                  <th className="text-left p-3 text-xs font-medium text-[var(--color-text-muted)]">Player</th>
-                  <th className="text-center p-3 text-xs font-medium text-[var(--color-text-muted)]">G</th>
-                  <th className="text-center p-3 text-xs font-medium text-[var(--color-text-muted)]">A</th>
-                  <th className="text-center p-3 text-xs font-medium text-[var(--color-text-muted)]">S</th>
-                  <th className="text-center p-3 text-xs font-medium text-[var(--color-text-muted)]">Sh</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orangePlayers.map((player) => (
-                  <tr key={player.player_id} className="border-b border-[var(--color-border)]">
-                    <td className="p-3">
-                      <div className="flex items-center gap-2">
-                        <span className={player.is_me ? 'text-[var(--color-primary)] font-medium' : ''}>
-                          {player.display_name}
-                        </span>
-                        {player.is_me && (
-                          <span className="text-xs px-1.5 py-0.5 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded">
-                            You
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="text-center p-3">{player.goals}</td>
-                    <td className="text-center p-3">{player.assists}</td>
-                    <td className="text-center p-3">{player.saves}</td>
-                    <td className="text-center p-3">{player.shots}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      </div>
+      <section>
+        <SectionTitle title="Match info" />
+        <dl className="flex flex-wrap gap-x-10 gap-y-3 mb-5">
+          <Fact label="Playlist" value={prettyPlaylist(data.playlist)} />
+          <Fact label="Map" value={prettyMap(data.map)} />
+          <Fact label="Length" value={formatDuration(data.duration_seconds)} />
+          <Fact label="Final score" value={`${data.my_score}–${data.opponent_score}`} />
+        </dl>
+        <div className="grid md:grid-cols-2 gap-6">
+          <TeamTable name="Blue team" color="var(--color-team-blue)" players={data.player_stats.filter((p) => p.team === 'BLUE')} />
+          <TeamTable
+            name="Orange team"
+            color="var(--color-team-orange)"
+            players={data.player_stats.filter((p) => p.team === 'ORANGE')}
+          />
+        </div>
+      </section>
     </div>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[13px] text-[var(--color-text-muted)]">{label}</dt>
+      <dd className="font-semibold mt-0.5">{value}</dd>
+    </div>
+  );
+}
+
+const STAT_COLUMNS = [
+  { key: 'goals', short: 'G', long: 'Goals' },
+  { key: 'assists', short: 'A', long: 'Assists' },
+  { key: 'saves', short: 'Sv', long: 'Saves' },
+  { key: 'shots', short: 'Sh', long: 'Shots' },
+] as const;
+
+function TeamTable({ name, color, players }: { name: string; color: string; players: PlayerStats[] }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="h-1" style={{ background: color }} />
+      <h3 className="type-display text-[17px] px-5 pt-4 pb-2">{name}</h3>
+      <table className="w-full">
+        <thead>
+          <tr className="border-b border-[var(--color-border)]">
+            <th className="th text-left pl-5">Player</th>
+            {STAT_COLUMNS.map((col) => (
+              <th key={col.key} className="th text-right w-12 last:pr-5">
+                <abbr title={col.long} className="no-underline">
+                  {col.short}
+                </abbr>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {players.map((player) => (
+            <tr key={player.player_id} className="border-b last:border-b-0 border-[var(--color-border)]">
+              <td className="px-3 pl-5 py-3">
+                <span className="inline-flex items-center gap-2">
+                  <span className={player.is_me ? 'font-semibold' : ''}>{player.display_name}</span>
+                  {player.is_me && (
+                    <span className="text-[12px] font-semibold px-1.5 py-px rounded-sm bg-[var(--color-primary)] text-[var(--color-on-primary)]">
+                      You
+                    </span>
+                  )}
+                </span>
+              </td>
+              {STAT_COLUMNS.map((col) => (
+                <td key={col.key} className="px-3 py-3 text-right last:pr-5">
+                  {player[col.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }

@@ -16,23 +16,15 @@ export function Pagination({
   onNext,
 }: PaginationProps) {
   return (
-    <div className="flex items-center justify-between p-4 border-t border-[var(--color-border)]">
-      <div className="text-sm text-[var(--color-text-muted)]">
+    <div className="flex items-center justify-between gap-4 px-4 sm:px-5 py-3 border-t border-[var(--color-border)]">
+      <div className="text-[13px] text-[var(--color-text-muted)]">
         Page {currentPage} of {totalPages}
       </div>
       <div className="flex gap-2">
-        <button
-          onClick={onPrevious}
-          disabled={previousDisabled}
-          className="px-3 py-1 rounded text-sm bg-[var(--color-bg-tertiary)] text-[var(--color-text)] disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-border)] transition-colors"
-        >
+        <button type="button" onClick={onPrevious} disabled={previousDisabled} className="btn">
           Previous
         </button>
-        <button
-          onClick={onNext}
-          disabled={nextDisabled}
-          className="px-3 py-1 rounded text-sm bg-[var(--color-bg-tertiary)] text-[var(--color-text)] disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-border)] transition-colors"
-        >
+        <button type="button" onClick={onNext} disabled={nextDisabled} className="btn">
           Next
         </button>
       </div>

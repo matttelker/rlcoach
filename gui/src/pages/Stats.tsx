@@ -8,23 +8,26 @@ const TABS = [
 
 export function Stats() {
   return (
-    <div className="space-y-6">
-      <nav className="flex gap-1 border-b border-[var(--color-border)]" aria-label="Stats views">
-        {TABS.map((tab) => (
-          <NavLink
-            key={tab.to}
-            to={tab.to}
-            className={({ isActive }) =>
-              `px-4 py-2 text-sm font-medium -mb-px border-b-2 ${
-                isActive
-                  ? 'border-[var(--color-primary)] text-[var(--color-text)]'
-                  : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              }`
-            }
-          >
-            {tab.label}
-          </NavLink>
-        ))}
+    <div>
+      <nav aria-label="Stats views" className="mb-8">
+        <ul className="inline-flex gap-1 p-1 rounded-md bg-[var(--color-bg-tertiary)]">
+          {TABS.map((tab) => (
+            <li key={tab.to}>
+              <NavLink
+                to={tab.to}
+                className={({ isActive }) =>
+                  `block px-4 py-1.5 rounded text-[14px] ${
+                    isActive
+                      ? 'bg-[var(--color-bg-secondary)] text-[var(--color-text)] font-semibold shadow-[0_0_0_1px_var(--color-border)]'
+                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                  }`
+                }
+              >
+                {tab.label}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
       </nav>
       <Outlet />
     </div>

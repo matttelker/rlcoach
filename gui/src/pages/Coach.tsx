@@ -4,11 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import { getCoach, getGrades } from '../api/client';
 import {
   Card,
-  CardContent,
   SkeletonCard,
   ErrorState,
   NoGamesEmpty,
+  PageHeader,
   PlaylistSelect,
+  ResultMark,
+  SectionTitle,
+  SelectField,
 } from '../components';
 import type { CategorySummary, CoachResponse, CoachSession, Highlight, RuleGrades } from '../types/api';
 import {
@@ -26,9 +29,6 @@ import {
 // while the page is on screen. Coming back to the page also checks.
 const REFRESH_MS = 30_000;
 
-const SELECT_CLASS =
-  'bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]';
-
 export function Coach() {
   // Left unset, the API picks the playlist of your latest game.
   const [playlist, setPlaylist] = useState<string>();
@@ -41,35 +41,26 @@ export function Coach() {
   });
 
   return (
-    <div className="space-y-8 max-w-5xl">
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="mr-auto">
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Coach</h1>
-          <p className="text-sm text-[var(--color-text-muted)]">What to work on next, and what's going well</p>
-        </div>
-        <PlaylistSelect value={playlist ?? data?.playlist} onChange={setPlaylist} />
-        <div>
-          <label className="block text-xs text-[var(--color-text-muted)] mb-1">Period</label>
-          <select value={period} onChange={(e) => setPeriod(e.target.value)} className={SELECT_CLASS}>
-            {PERIOD_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+    <div className="space-y-14">
+      <div>
+        <PageHeader title="Coach" note="What to work on next, and what's going well">
+          <PlaylistSelect value={playlist ?? data?.playlist} onChange={setPlaylist} />
+          <SelectField label="Period" value={period} options={PERIOD_OPTIONS} onChange={setPeriod} />
+        </PageHeader>
 
-      {error ? (
-        <ErrorState message="Couldn't load your coaching summary. Is the API running the latest code?" />
-      ) : isLoading || !data ? (
-        <div className="space-y-6">
-          <SkeletonCard />
-          <SkeletonCard />
-        </div>
-      ) : (
-        <CoachBody data={data} />
-      )}
+        {error ? (
+          <Card>
+            <ErrorState message="Couldn't load your coaching summary. Is the server running the latest code?" />
+          </Card>
+        ) : isLoading || !data ? (
+          <div className="space-y-6">
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
+        ) : (
+          <CoachBody data={data} />
+        )}
+      </div>
 
       <CallGrades />
     </div>
@@ -94,14 +85,14 @@ function CallGrades() {
 
 export function GradesTable({ rules }: { rules: RuleGrades[] }) {
   return (
-    <Card>
-      <table className="w-full text-sm">
+    <Card className="overflow-x-auto">
+      <table className="w-full min-w-[30rem]">
         <thead>
-          <tr className="text-xs text-[var(--color-text-muted)] border-b border-[var(--color-border)]">
-            <th className="text-left font-medium p-3">Call</th>
-            <th className="text-right font-medium p-3 w-20">Right</th>
-            <th className="text-right font-medium p-3 w-20">Wrong</th>
-            <th className="text-right font-medium p-3 w-24">Right %</th>
+          <tr className="border-b border-[var(--color-border)]">
+            <th className="th text-left pl-5">Call</th>
+            <th className="th text-right w-20">Right</th>
+            <th className="th text-right w-20">Wrong</th>
+            <th className="th text-right w-24 pr-5">Right %</th>
           </tr>
         </thead>
         <tbody>
@@ -109,15 +100,19 @@ export function GradesTable({ rules }: { rules: RuleGrades[] }) {
             const accuracy = gradeAccuracy(rule);
             return (
               <tr key={`${rule.item}-${rule.kind}`} className="border-b last:border-b-0 border-[var(--color-border)]">
-                <td className="p-3">
+                <td className="px-3 pl-5 py-3">
                   {rule.label}
-                  <span className="ml-2 text-xs text-[var(--color-text-muted)]">
+                  <span className="ml-2 text-[13px] text-[var(--color-text-muted)]">
                     {rule.item === 'goal' ? 'goal verdict' : 'flagged moment'}
                   </span>
                 </td>
-                <td className="p-3 text-right text-[var(--color-success)]">{rule.right}</td>
-                <td className="p-3 text-right text-[var(--color-error)]">{rule.wrong}</td>
-                <td className={`p-3 text-right ${accuracy !== null && accuracy < 50 ? 'text-[var(--color-error)]' : ''}`}>
+                <td className="px-3 py-3 text-right text-[var(--color-success)]">{rule.right}</td>
+                <td className="px-3 py-3 text-right text-[var(--color-error)]">{rule.wrong}</td>
+                <td
+                  className={`px-3 pr-5 py-3 text-right font-semibold ${
+                    accuracy !== null && accuracy < 50 ? 'text-[var(--color-error)]' : ''
+                  }`}
+                >
                   {accuracy === null ? '–' : `${accuracy}%`}
                 </td>
               </tr>
@@ -139,34 +134,29 @@ export function CoachBody({ data }: { data: CoachResponse }) {
   }
 
   const unreviewed = data.game_count - data.reviewed_count;
+  const [first, ...rest] = data.targets;
 
   return (
-    <div className="space-y-8">
-      {unreviewed > 0 && (
-        <p className="text-sm text-[var(--color-warning)]">
-          {unreviewed} of {data.game_count} games have no mistake review yet. Run{' '}
-          <code className="px-1 rounded bg-[var(--color-bg-tertiary)]">uv run rlcoach reviews</code> to add them.
-        </p>
-      )}
-
-      {data.session && <SessionBlock session={data.session} />}
-
+    <div className="space-y-14">
       <section>
         <SectionTitle title="Training targets" note="Ranked by goals they cost you, then how often they happen" />
-        {data.targets.length === 0 ? (
-          <Card>
-            <CardContent className="text-sm text-[var(--color-text-muted)]">
-              No mistakes flagged in these games. Keep it up.
-            </CardContent>
-          </Card>
+        {unreviewed > 0 && (
+          <p className="mb-4 text-[14px] text-[var(--color-warning)]">
+            {unreviewed} of {data.game_count} games have no mistake review yet. Run{' '}
+            <code className="px-1 rounded bg-[var(--color-bg-tertiary)]">uv run rlcoach reviews</code> to add them.
+          </p>
+        )}
+        {!first ? (
+          <Card className="p-5 text-[var(--color-text-muted)]">No mistakes flagged in these games. Keep it up.</Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-3">
-            {data.targets.map((target, index) => (
-              <TargetCard key={target.category} target={target} rank={index + 1} />
-            ))}
-          </div>
+          <>
+            <Prescription target={first} />
+            {rest.length > 0 && <RunnersUp targets={rest} />}
+          </>
         )}
       </section>
+
+      {data.session && <SessionBlock session={data.session} />}
 
       <section>
         <SectionTitle
@@ -179,44 +169,100 @@ export function CoachBody({ data }: { data: CoachResponse }) {
       <section>
         <SectionTitle title="Strengths and highlights" />
         {data.highlights.length === 0 ? (
-          <Card>
-            <CardContent className="text-sm text-[var(--color-text-muted)]">
-              Nothing to call out yet. Highlights come from winners, clean games and habits you've fixed.
-            </CardContent>
+          <Card className="p-5 text-[var(--color-text-muted)]">
+            Nothing to call out yet. Highlights come from winners, clean games and habits you've fixed.
           </Card>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-3 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-2">
             {data.highlights.map((h, i) => (
-              <HighlightCard key={`${h.kind}-${i}`} highlight={h} />
+              <li key={`${h.kind}-${i}`}>
+                <HighlightItem highlight={h} />
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </section>
     </div>
   );
 }
 
-function SectionTitle({ title, note }: { title: string; note?: string }) {
+/** The one thing to work on, written up like a prescription. */
+function Prescription({ target }: { target: CategorySummary }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 mb-3">
-      <h2 className="text-lg font-semibold text-[var(--color-text)]">{title}</h2>
-      {note && <span className="text-xs text-[var(--color-text-muted)]">{note}</span>}
-    </div>
+    <article className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] overflow-hidden">
+      <div className={target.cue ? 'grid md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]' : ''}>
+        <div className="p-5 sm:p-7">
+          <div className="flex items-baseline gap-3">
+            <span className="type-score text-[44px] text-[var(--color-error)]">
+              <span className="sr-only">Rank </span>1
+            </span>
+            <span className="text-[17px] font-semibold">{target.label}</span>
+          </div>
+          <p className="type-display text-[28px] sm:text-[34px] mt-4">{headline(target)}</p>
+          <p className="mt-3 text-[14px]">
+            <TrendText category={target} />
+          </p>
+          <KindChips kinds={target.kinds} />
+        </div>
+        {target.cue && (
+          <div className="relative p-5 sm:p-7 border-t md:border-t-0 md:border-l border-[var(--color-border)] bg-[var(--strip-paper)]">
+            <RxMark />
+            <p className="mt-3 text-[19px] sm:text-[21px] leading-[1.55] max-w-[34em]">{target.cue}</p>
+          </div>
+        )}
+      </div>
+    </article>
   );
 }
 
-function resultPill(result: string | null, score: string) {
-  const style =
-    result === 'WIN'
-      ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
-      : result === 'LOSS'
-        ? 'bg-[var(--color-error)]/15 text-[var(--color-error)]'
-        : 'bg-[var(--color-warning)]/15 text-[var(--color-warning)]';
-  const letter = result === 'WIN' ? 'W' : result === 'LOSS' ? 'L' : 'D';
+function RxMark() {
   return (
-    <span className={`inline-block w-16 text-center text-xs font-semibold rounded px-2 py-1 ${style}`}>
-      {letter} {score}
+    <span className="type-display text-[22px] text-[var(--color-error)]" title="What to practise">
+      R<span className="text-[15px] align-[-0.15em]">x</span>
+      <span className="sr-only"> What to practise</span>
     </span>
+  );
+}
+
+function RunnersUp({ targets }: { targets: CategorySummary[] }) {
+  return (
+    <ol className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] divide-y divide-[var(--color-border)]">
+      {targets.map((target, index) => (
+        <li key={target.category} className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 p-5">
+          <span className="type-score text-[30px] text-[var(--color-text-muted)]">
+            <span className="sr-only">Rank </span>
+            {index + 2}
+          </span>
+          <div className="grid md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)] gap-x-8 gap-y-2">
+            <div>
+              <div className="font-semibold">{target.label}</div>
+              <div className="type-display text-[17px] mt-1">{headline(target)}</div>
+              <div className="text-[13px] mt-1.5">
+                <TrendText category={target} />
+              </div>
+            </div>
+            <div>
+              {target.cue && <p className="text-[var(--color-text-muted)] max-w-[60ch]">{target.cue}</p>}
+              <KindChips kinds={target.kinds} />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function KindChips({ kinds }: { kinds: Record<string, number> }) {
+  const entries = Object.entries(kinds);
+  if (entries.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap gap-1.5 mt-4">
+      {entries.map(([kind, count]) => (
+        <li key={kind} className="text-[13px] px-2 py-0.5 rounded bg-[var(--color-bg-tertiary)]">
+          {kindLabel(kind)} ×{count}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -225,43 +271,47 @@ function SessionBlock({ session }: { session: CoachSession }) {
   return (
     <section>
       <SectionTitle title={sessionTitle(session.play_date)} note={`${session.games.length} games`} />
-      <Card>
-        <div className="grid md:grid-cols-[140px_1fr]">
-          <div className="p-4 border-b md:border-b-0 md:border-r border-[var(--color-border)]">
-            <div className="text-xs text-[var(--color-text-muted)]">Record</div>
-            <div className="text-3xl font-bold">{record}</div>
-          </div>
-          <ul>
-            {session.games.map((g) => (
-              <li key={g.replay_id} className="border-b last:border-b-0 border-[var(--color-border)]">
-                <Link
-                  to={`/games/${g.replay_id}`}
-                  className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-[var(--color-bg-tertiary)]/50"
-                >
-                  {resultPill(g.result, `${g.my_score}–${g.opponent_score}`)}
-                  <span className="text-sm w-36 truncate">{prettyMap(g.map)}</span>
-                  <span className="text-sm text-[var(--color-text-muted)]">
-                    {g.goals ?? 0} G · {g.assists ?? 0} A · {g.saves ?? 0} Sv
-                  </span>
-                  <span className="ml-auto text-sm">
-                    {!g.reviewed ? (
-                      <span className="text-[var(--color-text-muted)]">Not reviewed</span>
-                    ) : g.goals_on_me ? (
-                      <span className="text-[var(--color-error)]">
-                        {g.goals_on_me} goal{g.goals_on_me === 1 ? '' : 's'} on you
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-muted)]">0 goals on you</span>
-                    )}
-                    {g.reviewed && (
-                      <span className="text-[var(--color-text-muted)]"> · {g.flags} flagged</span>
-                    )}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+      <Card className="grid md:grid-cols-[11rem_minmax(0,1fr)]">
+        <div className="px-5 py-4 md:py-5 border-b md:border-b-0 md:border-r border-[var(--color-border)] flex md:block items-baseline gap-4">
+          <div className="text-[13px] text-[var(--color-text-muted)]">Record</div>
+          <div className="type-score text-[48px] md:text-[64px] md:mt-2">{record}</div>
         </div>
+        <ul>
+          {session.games.map((g) => (
+            <li key={g.replay_id} className="border-b last:border-b-0 border-[var(--color-border)]">
+              <Link
+                to={`/games/${g.replay_id}`}
+                className="grid grid-cols-[5.5rem_minmax(0,1fr)] sm:grid-cols-[5.5rem_minmax(0,10rem)_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-3 hover:bg-[var(--color-bg-tertiary)]"
+              >
+                <ResultMark result={g.result} score={`${g.my_score}–${g.opponent_score}`} />
+                <span className="font-semibold truncate">{prettyMap(g.map)}</span>
+                <span className="col-start-2 sm:col-start-auto flex gap-3 text-[14px] text-[var(--color-text-muted)]">
+                  <span title="Goals">
+                    <span className="text-[var(--color-text)]">{g.goals ?? 0}</span> G
+                  </span>
+                  <span title="Assists">
+                    <span className="text-[var(--color-text)]">{g.assists ?? 0}</span> A
+                  </span>
+                  <span title="Saves">
+                    <span className="text-[var(--color-text)]">{g.saves ?? 0}</span> Sv
+                  </span>
+                </span>
+                <span className="col-start-2 sm:col-start-auto flex gap-3 text-[14px] sm:justify-end">
+                  {!g.reviewed ? (
+                    <span className="text-[var(--color-text-muted)]">Not reviewed</span>
+                  ) : (
+                    <>
+                      <span className={g.goals_on_me ? 'text-[var(--color-error)] font-semibold' : 'text-[var(--color-text-muted)]'}>
+                        {g.goals_on_me ?? 0} goal{g.goals_on_me === 1 ? '' : 's'} on you
+                      </span>
+                      <span className="text-[var(--color-text-muted)]">{g.flags} flagged</span>
+                    </>
+                  )}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </Card>
     </section>
   );
@@ -270,7 +320,7 @@ function SessionBlock({ session }: { session: CoachSession }) {
 function TrendText({ category }: { category: CategorySummary }) {
   const trend = categoryTrend(category);
   if (trend === 'new') {
-    return <span>{formatRate(category.per_game)} a game</span>;
+    return <span className="text-[var(--color-text-muted)]">{formatRate(category.per_game)} a game</span>;
   }
   const color =
     trend === 'worse'
@@ -278,72 +328,49 @@ function TrendText({ category }: { category: CategorySummary }) {
       : trend === 'better'
         ? 'text-[var(--color-success)]'
         : 'text-[var(--color-text-muted)]';
-  const arrow = trend === 'worse' ? '↑' : trend === 'better' ? '↓' : '→';
+  const word = trend === 'worse' ? 'up' : trend === 'better' ? 'down' : 'steady';
   return (
     <span className={color}>
-      {formatRate(category.before_per_game)} → {formatRate(category.latest_per_game)} a game {arrow}
+      {formatRate(category.before_per_game)} → {formatRate(category.latest_per_game)} a game, {word}
     </span>
-  );
-}
-
-function TargetCard({ target, rank }: { target: CategorySummary; rank: number }) {
-  const first = rank === 1;
-  return (
-    <Card className={first ? 'border-2 border-[var(--color-primary)]' : ''}>
-      <CardContent className="space-y-2">
-        <div className={`text-xs font-semibold ${first ? 'text-[var(--color-primary)]' : 'text-[var(--color-text-muted)]'}`}>
-          {rank} · {target.label}
-        </div>
-        <div className="text-base font-semibold">{headline(target)}</div>
-        <div className="text-xs">
-          <TrendText category={target} />
-        </div>
-        {target.cue && <p className="text-sm leading-relaxed pt-1">{target.cue}</p>}
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {Object.entries(target.kinds).map(([kind, count]) => (
-            <span
-              key={kind}
-              className="text-xs px-2 py-0.5 rounded bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]"
-            >
-              {kindLabel(kind)} ×{count}
-            </span>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
 function CategoryTable({ categories }: { categories: CategorySummary[] }) {
   const most = Math.max(1, ...categories.map((c) => c.flags));
   return (
-    <Card>
-      <table className="w-full text-sm">
+    <Card className="overflow-x-auto">
+      <table className="w-full min-w-[38rem]">
         <thead>
-          <tr className="text-xs text-[var(--color-text-muted)] border-b border-[var(--color-border)]">
-            <th className="text-left font-medium p-3 w-32">Category</th>
-            <th className="text-left font-medium p-3">Flagged</th>
-            <th className="text-right font-medium p-3 w-24">Goals cost</th>
-            <th className="text-right font-medium p-3 w-52">Before → latest session</th>
+          <tr className="border-b border-[var(--color-border)]">
+            <th className="th text-left pl-5 w-36">Category</th>
+            <th className="th text-left">Flagged</th>
+            <th className="th text-right w-28">Goals cost</th>
+            <th className="th text-right w-60 pr-5">Before → latest session</th>
           </tr>
         </thead>
         <tbody>
           {categories.map((c) => (
             <tr key={c.category} className="border-b last:border-b-0 border-[var(--color-border)]">
-              <td className="p-3">{c.label}</td>
-              <td className="p-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 max-w-64 h-2 rounded bg-[var(--color-bg-tertiary)]">
+              <td className="px-3 pl-5 py-3 font-semibold">{c.label}</td>
+              <td className="px-3 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 max-w-64">
                     <div
-                      className={`h-2 rounded ${c.goals_cost ? 'bg-[var(--color-error)]' : 'bg-[var(--color-text-muted)]'}`}
-                      style={{ width: `${(c.flags / most) * 100}%` }}
+                      className="h-2 rounded-r"
+                      style={{
+                        width: `${(c.flags / most) * 100}%`,
+                        background: c.goals_cost ? 'var(--chart-bad)' : 'var(--color-text-muted)',
+                      }}
                     />
                   </div>
                   <span className="w-6 text-right">{c.flags}</span>
                 </div>
               </td>
-              <td className="p-3 text-right">{c.goals_cost || '–'}</td>
-              <td className="p-3 text-right">
+              <td className={`px-3 py-3 text-right ${c.goals_cost ? 'text-[var(--color-error)] font-semibold' : ''}`}>
+                {c.goals_cost || '–'}
+              </td>
+              <td className="px-3 pr-5 py-3 text-right text-[14px]">
                 <TrendText category={c} />
               </td>
             </tr>
@@ -354,15 +381,20 @@ function CategoryTable({ categories }: { categories: CategorySummary[] }) {
   );
 }
 
-function HighlightCard({ highlight }: { highlight: Highlight }) {
+function HighlightItem({ highlight }: { highlight: Highlight }) {
   const body = (
-    <div className="h-full rounded-lg border border-[var(--color-success)]/40 bg-[var(--color-success)]/10 px-4 py-3">
-      <div className="text-sm font-semibold text-[var(--color-success)]">{highlight.title}</div>
-      <div className="text-sm text-[var(--color-text)] mt-1">{highlight.detail}</div>
+    <div className="flex gap-3 rounded p-3 h-full">
+      <svg viewBox="0 0 12 12" className="w-3 h-3 mt-1.5 shrink-0" aria-hidden="true">
+        <path d="M6 1v10M1 6h10" stroke="var(--chart-good)" strokeWidth={2.5} strokeLinecap="round" />
+      </svg>
+      <div>
+        <div className="font-semibold">{highlight.title}</div>
+        <div className="text-[14px] text-[var(--color-text-muted)] mt-0.5">{highlight.detail}</div>
+      </div>
     </div>
   );
   return highlight.replay_id ? (
-    <Link to={`/games/${highlight.replay_id}`} className="block hover:opacity-90">
+    <Link to={`/games/${highlight.replay_id}`} className="block rounded hover:bg-[var(--color-bg-tertiary)]">
       {body}
     </Link>
   ) : (

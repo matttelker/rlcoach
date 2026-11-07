@@ -54,3 +54,13 @@ export function buildGamesParams(filters: GameFilters): GamesParams {
     offset: filters.offset,
   };
 }
+
+// Playlists arrive as ids like "STANDARD"
+export function prettyPlaylist(playlist: string): string {
+  return playlist.charAt(0) + playlist.slice(1).toLowerCase();
+}
+
+// Game length as m:ss
+export function formatDuration(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+}
