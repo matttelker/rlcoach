@@ -80,7 +80,7 @@ After a change to the mistake detector, review every game again with `--redo`.
 On startup the server loads the bundled benchmarks for any playlist that has none. Doubles and
 Standard each have their own file, with C2, C3 and GC1 rows measured by ballchasing.com across all
 seasons. Ballchasing groups every Grand Champion tier together, so the GC1 rows combine GC1 through
-SSL. Add other ranks or playlists with `uv run rlcoach benchmarks import <file>`.
+SSL.
 
 ## Checks
 
