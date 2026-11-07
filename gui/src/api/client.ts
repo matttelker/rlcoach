@@ -9,7 +9,6 @@ import type {
   PatternsResponse,
   WeaknessesResponse,
   Player,
-  PlayerDetail,
   PaginatedResponse,
   TagRequest,
   GameResult,
@@ -130,8 +129,8 @@ export async function getPlayers(params: PlayersParams = {}): Promise<PaginatedR
   return data;
 }
 
-export async function getPlayer(playerId: string): Promise<PlayerDetail> {
-  const { data } = await api.get<PlayerDetail>(`/players/${encodeURIComponent(playerId)}`);
+export async function getPlayer(playerId: string): Promise<Player> {
+  const { data } = await api.get<Player>(`/players/${encodeURIComponent(playerId)}`);
   return data;
 }
 

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer } from 'recharts';
 import { getPlayer, tagPlayer } from '../api/client';
 import { Card, CardHeader, CardContent, SkeletonCard, ErrorState } from '../components';
 import { parseUtc } from './dataTransforms';
@@ -44,17 +43,6 @@ export function PlayerDetail() {
   if (!data) {
     return <ErrorState message="Player not found" />;
   }
-
-  const tendencyData = data.tendency_profile
-    ? [
-        { trait: 'Aggression', value: data.tendency_profile.aggression_score },
-        { trait: 'Challenges', value: data.tendency_profile.challenge_rate },
-        { trait: 'First Man', value: data.tendency_profile.first_man_tendency },
-        { trait: 'Boost Priority', value: data.tendency_profile.boost_priority },
-        { trait: 'Mechanics', value: data.tendency_profile.mechanical_index },
-        { trait: 'Defense', value: data.tendency_profile.defensive_index },
-      ]
-    : [];
 
   return (
     <div className="space-y-6">
@@ -173,44 +161,6 @@ export function PlayerDetail() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Tendency Profile */}
-      {tendencyData.length > 0 && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold">Play Style Tendencies</h2>
-          </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={tendencyData}>
-                  <PolarGrid stroke="var(--color-border)" />
-                  <PolarAngleAxis
-                    dataKey="trait"
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 12 }}
-                  />
-                  <Radar
-                    name="Tendencies"
-                    dataKey="value"
-                    stroke="var(--color-primary)"
-                    fill="var(--color-primary)"
-                    fillOpacity={0.3}
-                    strokeWidth={2}
-                  />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
-              {tendencyData.map((t) => (
-                <div key={t.trait} className="flex justify-between">
-                  <span className="text-sm text-[var(--color-text-muted)]">{t.trait}</span>
-                  <span className="text-sm font-medium">{t.value.toFixed(1)}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

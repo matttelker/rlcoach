@@ -50,7 +50,6 @@ def db_with_players(mock_config):
             player_id="steam:me123",
             display_name="TestPlayer",
             is_me=True,
-            games_with_me=0,
         )
     )
     session.add(
@@ -60,7 +59,6 @@ def db_with_players(mock_config):
             is_me=False,
             is_tagged_teammate=True,
             teammate_notes="Good rotation",
-            games_with_me=5,
         )
     )
     session.add(
@@ -68,7 +66,6 @@ def db_with_players(mock_config):
             player_id="steam:teammate2",
             display_name="Teammate2",
             is_me=False,
-            games_with_me=3,
         )
     )
     session.add(
@@ -76,7 +73,14 @@ def db_with_players(mock_config):
             player_id="epic:opponent1",
             display_name="Opponent1",
             is_me=False,
-            games_with_me=2,
+        )
+    )
+    # Seen once, but the game didn't load, so it isn't a game with me
+    session.add(
+        Player(
+            player_id="epic:failed_ingest",
+            display_name="FailedIngest",
+            is_me=False,
         )
     )
 
@@ -120,6 +124,21 @@ def db_with_players(mock_config):
                 time_last_defender_s=60.0,
             )
         )
+        # Teammate2 played the first 3 games, Opponent1 the first 2
+        for player_id, team, games in (
+            ("steam:teammate2", "BLUE", 3),
+            ("epic:opponent1", "ORANGE", 2),
+        ):
+            if i < games:
+                session.add(
+                    PlayerGameStats(
+                        replay_id=f"replay_{i}",
+                        player_id=player_id,
+                        team=team,
+                        is_me=False,
+                        is_teammate=team == "BLUE",
+                    )
+                )
 
     session.commit()
     session.close()
@@ -167,8 +186,22 @@ class TestPlayersListEndpoint:
         assert response.status_code == 200
         data = response.json()
 
-        for player in data["items"]:
-            assert player["games_with_me"] >= 3
+        assert [p["display_name"] for p in data["items"]] == ["Teammate1", "Teammate2"]
+
+    def test_players_count_the_games_stored_with_them(self, client):
+        """Most games first, counted from stored games, not ingest attempts."""
+        data = client.get("/players").json()
+        counts = [(p["display_name"], p["games_with_me"]) for p in data["items"]]
+        assert counts == [
+            ("Teammate1", 5),
+            ("Teammate2", 3),
+            ("Opponent1", 2),
+            ("FailedIngest", 0),
+        ]
+
+    def test_players_sort_by_fewest_games(self, client):
+        data = client.get("/players?sort=games_with_me").json()
+        assert [p["games_with_me"] for p in data["items"]] == [0, 2, 3, 5]
 
     def test_players_excludes_me(self, client):
         """Should exclude the 'me' player by default."""
@@ -190,19 +223,12 @@ class TestPlayerDetailEndpoint:
 
         assert data["player_id"] == "steam:teammate1"
         assert data["display_name"] == "Teammate1"
+        assert data["games_with_me"] == 5
 
     def test_player_not_found(self, client):
         """Should return 404 for nonexistent player."""
         response = client.get("/players/nonexistent")
         assert response.status_code == 404
-
-    def test_player_includes_tendency_profile(self, client):
-        """Should include tendency profile if data available."""
-        response = client.get("/players/steam:teammate1")
-        data = response.json()
-
-        # Should have tendency profile since we have stats
-        assert "tendency_profile" in data
 
 
 class TestPlayerTagEndpoint:

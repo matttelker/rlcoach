@@ -143,19 +143,6 @@ export interface Player {
   last_seen_utc: string | null;
 }
 
-export interface TendencyProfile {
-  aggression_score: number;
-  challenge_rate: number;
-  first_man_tendency: number;
-  boost_priority: number;
-  mechanical_index: number;
-  defensive_index: number;
-}
-
-export interface PlayerDetail extends Player {
-  tendency_profile?: TendencyProfile;
-}
-
 export interface TagRequest {
   tagged?: boolean;
   notes?: string | null;

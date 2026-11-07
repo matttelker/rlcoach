@@ -78,8 +78,6 @@ def upsert_players(
                 # Update
                 existing.display_name = display_name
                 _record_sighting(existing, seen_at)
-                if not is_me:
-                    existing.games_with_me = (existing.games_with_me or 0) + 1
             else:
                 # Create
                 player = Player(
@@ -89,7 +87,6 @@ def upsert_players(
                     is_me=is_me,
                     first_seen_utc=seen_at,
                     last_seen_utc=seen_at,
-                    games_with_me=0 if is_me else 1,
                 )
                 session.add(player)
 

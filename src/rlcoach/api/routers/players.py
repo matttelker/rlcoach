@@ -6,8 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import distinct, func
 
-from ...analysis.tendencies import compute_tendencies
 from ...db.models import Player, PlayerGameStats
 from ...db.session import create_session
 from ._sorting import apply_sort
@@ -32,6 +32,40 @@ class TagRequest(BaseModel):
     notes: str | None = None
 
 
+def _games_per_player(session):
+    """Count the stored games each player appears in, as a subquery.
+
+    Counting stored games, rather than keeping a running total at ingest, stays
+    right when an ingest fails partway or a replay is loaded again.
+    """
+    return (
+        session.query(
+            PlayerGameStats.player_id.label("player_id"),
+            func.count(distinct(PlayerGameStats.replay_id)).label("games"),
+        )
+        .group_by(PlayerGameStats.player_id)
+        .subquery()
+    )
+
+
+def _player_dict(player: Player, games: int) -> dict[str, Any]:
+    return {
+        "player_id": player.player_id,
+        "display_name": player.display_name,
+        "platform": player.platform,
+        "is_me": player.is_me,
+        "is_tagged_teammate": player.is_tagged_teammate,
+        "teammate_notes": player.teammate_notes,
+        "games_with_me": 0 if player.is_me else games,
+        "first_seen_utc": (
+            player.first_seen_utc.isoformat() if player.first_seen_utc else None
+        ),
+        "last_seen_utc": (
+            player.last_seen_utc.isoformat() if player.last_seen_utc else None
+        ),
+    }
+
+
 @router.get("/players")
 async def list_players(
     tagged: bool | None = None,
@@ -51,41 +85,33 @@ async def list_players(
     """
     session = create_session()
     try:
-        query = session.query(Player).filter(Player.is_me.is_(False))
+        counts = _games_per_player(session)
+        games = func.coalesce(counts.c.games, 0)
+        query = (
+            session.query(Player, games)
+            .outerjoin(counts, counts.c.player_id == Player.player_id)
+            .filter(Player.is_me.is_(False))
+        )
 
         if tagged is not None:
             query = query.filter(Player.is_tagged_teammate == tagged)
         if min_games > 0:
-            query = query.filter(Player.games_with_me >= min_games)
+            query = query.filter(games >= min_games)
 
         total = query.count()
 
-        query = apply_sort(query, Player, sort, ALLOWED_SORT_FIELDS)
+        query = apply_sort(
+            query,
+            Player,
+            sort,
+            ALLOWED_SORT_FIELDS,
+            computed={"games_with_me": games},
+        )
 
-        players = query.offset(offset).limit(limit).all()
-
-        items = []
-        for p in players:
-            items.append(
-                {
-                    "player_id": p.player_id,
-                    "display_name": p.display_name,
-                    "platform": p.platform,
-                    "is_me": p.is_me,
-                    "is_tagged_teammate": p.is_tagged_teammate,
-                    "teammate_notes": p.teammate_notes,
-                    "games_with_me": p.games_with_me,
-                    "first_seen_utc": (
-                        p.first_seen_utc.isoformat() if p.first_seen_utc else None
-                    ),
-                    "last_seen_utc": (
-                        p.last_seen_utc.isoformat() if p.last_seen_utc else None
-                    ),
-                }
-            )
+        rows = query.offset(offset).limit(limit).all()
 
         return {
-            "items": items,
+            "items": [_player_dict(player, count) for player, count in rows],
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -108,63 +134,12 @@ async def get_player(player_id: str) -> dict[str, Any]:
         if not player:
             raise HTTPException(status_code=404, detail="Player not found")
 
-        result = {
-            "player_id": player.player_id,
-            "display_name": player.display_name,
-            "platform": player.platform,
-            "is_me": player.is_me,
-            "is_tagged_teammate": player.is_tagged_teammate,
-            "teammate_notes": player.teammate_notes,
-            "games_with_me": player.games_with_me,
-            "first_seen_utc": (
-                player.first_seen_utc.isoformat() if player.first_seen_utc else None
-            ),
-            "last_seen_utc": (
-                player.last_seen_utc.isoformat() if player.last_seen_utc else None
-            ),
-        }
-
-        stats = (
-            session.query(PlayerGameStats)
+        games = (
+            session.query(func.count(distinct(PlayerGameStats.replay_id)))
             .filter(PlayerGameStats.player_id == player_id)
-            .all()
+            .scalar()
         )
-
-        if stats:
-            stat_dicts = []
-            for s in stats:
-                stat_dicts.append(
-                    {
-                        "goals": s.goals or 0,
-                        "saves": s.saves or 0,
-                        "shots": s.shots or 0,
-                        "assists": s.assists or 0,
-                        "challenge_wins": 0,  # Not all stats have this
-                        "challenge_losses": 0,
-                        "first_man_pct": s.first_man_pct or 33.0,
-                        "second_man_pct": s.second_man_pct or 33.0,
-                        "third_man_pct": s.third_man_pct or 33.0,
-                        "bcpm": s.bcpm or 0,
-                        "avg_boost": s.avg_boost or 0,
-                        "aerial_count": 0,
-                        "wavedash_count": 0,
-                        "time_last_defender_s": s.time_last_defender_s or 0,
-                        "behind_ball_pct": s.behind_ball_pct or 50.0,
-                    }
-                )
-
-            profile = compute_tendencies(stat_dicts)
-            if profile:
-                result["tendency_profile"] = {
-                    "aggression_score": round(profile.aggression_score, 1),
-                    "challenge_rate": round(profile.challenge_rate, 1),
-                    "first_man_tendency": round(profile.first_man_tendency, 1),
-                    "boost_priority": round(profile.boost_priority, 1),
-                    "mechanical_index": round(profile.mechanical_index, 1),
-                    "defensive_index": round(profile.defensive_index, 1),
-                }
-
-        return result
+        return _player_dict(player, games or 0)
 
     finally:
         session.close()

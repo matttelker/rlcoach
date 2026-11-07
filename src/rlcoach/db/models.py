@@ -83,7 +83,7 @@ class Player(Base):
     teammate_notes = Column(Text)
     first_seen_utc = Column(DateTime(timezone=True), default=_utc_now)
     last_seen_utc = Column(DateTime(timezone=True), default=_utc_now)
-    games_with_me = Column(Integer, default=0)
+    # Games played with you are counted from PlayerGameStats when asked for
 
 
 class PlayerGameStats(Base):

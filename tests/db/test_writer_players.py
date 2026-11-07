@@ -35,12 +35,10 @@ def test_upsert_players_creates_new(tmp_path):
         me = session.get(Player, "steam:me123")
         assert me is not None
         assert me.is_me is True
-        assert me.games_with_me == 0  # I don't count as game with myself
 
         other = session.get(Player, "steam:other456")
         assert other is not None
         assert other.is_me is False
-        assert other.games_with_me == 1  # This player was in a game with me
     finally:
         session.close()
 
@@ -71,7 +69,6 @@ def test_upsert_players_updates_existing(tmp_path):
     try:
         player = session.get(Player, "steam:other456")
         assert player.display_name == "NewName"
-        assert player.games_with_me == 2  # Appeared in 2 games
     finally:
         session.close()
 
@@ -108,7 +105,6 @@ def test_upsert_players_keeps_seen_range_for_out_of_order_ingest(tmp_path):
     player = session.get(Player, "steam:123")
     assert player.first_seen_utc.replace(tzinfo=UTC) == oldest
     assert player.last_seen_utc.replace(tzinfo=UTC) == newest
-    assert player.games_with_me == 2
     session.close()
 
 
