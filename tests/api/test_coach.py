@@ -237,6 +237,67 @@ def test_coach_rejects_a_bad_period(client):
     assert client.get("/coach", params={"period": "soon"}).status_code == 400
 
 
+def _add_newer_game(replay_id, playlist, day=1):
+    """A game played after every game in the fixture, on February ``day``."""
+    from rlcoach.db.models import Replay
+    from rlcoach.db.session import create_session
+
+    session = create_session()
+    session.add(
+        Replay(
+            replay_id=replay_id,
+            source_file=f"/replays/{replay_id}.replay",
+            file_hash=replay_id,
+            played_at_utc=datetime(2026, 2, day, tzinfo=UTC),
+            play_date=date.today(),
+            map="Stadium_P",
+            playlist=playlist,
+            team_size=2,
+            duration_seconds=300.0,
+            my_player_id="epic:me",
+            my_team="BLUE",
+            my_score=3,
+            opponent_score=1,
+            result="WIN",
+        )
+    )
+    session.commit()
+    session.close()
+
+
+def test_coach_follows_the_playlist_of_your_latest_game(client):
+    _add_newer_game("doubles", "DOUBLES")
+    data = client.get("/coach").json()
+    assert data["playlist"] == "DOUBLES"
+    assert [g["replay_id"] for g in data["session"]["games"]] == ["doubles"]
+
+
+def test_coach_keeps_the_playlist_you_ask_for(client):
+    _add_newer_game("doubles", "DOUBLES")
+    data = client.get("/coach", params={"playlist": "STANDARD"}).json()
+    assert data["playlist"] == "STANDARD"
+
+
+def test_coach_skips_a_latest_game_the_dashboard_has_no_view_for(client):
+    _add_newer_game("doubles", "DOUBLES", day=1)
+    _add_newer_game("hoops", "EXTRA_MODE", day=2)
+    assert client.get("/coach").json()["playlist"] == "DOUBLES"
+
+
+def test_coach_falls_back_to_the_configured_playlist_with_no_games(config):
+    from rlcoach.db.session import init_db, reset_engine
+
+    config.preferences.primary_playlist = "DUEL"
+    init_db(config.db_path)
+    with patch("rlcoach.api.app.get_config", return_value=config):
+        from rlcoach.api.app import create_app
+
+        data = TestClient(create_app()).get("/coach").json()
+    reset_engine()
+    assert data["playlist"] == "DUEL"
+    assert data["game_count"] == 0
+
+
 def test_replay_review_returns_flags_and_goals_on_the_clock(client):
     data = client.get("/replays/old/review").json()
     assert data["status"] == "ok"

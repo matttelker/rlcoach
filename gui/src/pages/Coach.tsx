@@ -21,16 +21,22 @@ import {
   sessionTitle,
 } from './coachTransforms';
 
+// A replay lands about 30 seconds after a match ends, so check that often
+// while the page is on screen. Coming back to the page also checks.
+const REFRESH_MS = 30_000;
+
 const SELECT_CLASS =
   'bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text)]';
 
 export function Coach() {
+  // Left unset, the API picks the playlist of your latest game.
   const [playlist, setPlaylist] = useState<string>();
   const [period, setPeriod] = useState('30d');
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['coach', playlist, period],
     queryFn: () => getCoach({ playlist, period }),
+    refetchInterval: REFRESH_MS,
   });
 
   return (

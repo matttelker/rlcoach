@@ -26,7 +26,8 @@ data_dir = "~/.rlcoach/data"
 reports_dir = "~/.rlcoach/reports"
 
 [preferences]
-# Primary playlist for comparisons (DOUBLES, STANDARD, DUEL)
+# Playlist the Stats pages open on (DOUBLES, STANDARD, DUEL)
+# The Coach page opens on the playlist of your latest game instead
 primary_playlist = "DOUBLES"
 # Target rank for benchmark comparisons (C2, C3, GC1, GC2, GC3, SSL)
 target_rank = "GC1"

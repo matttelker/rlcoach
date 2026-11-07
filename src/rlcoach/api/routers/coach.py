@@ -22,6 +22,7 @@ from ...coaching import (
 )
 from ...db.models import Benchmark, GameReview, PlayerGameStats, Replay
 from ...db.session import create_session
+from ...metrics import VALID_PLAYLISTS
 from .analysis import _metric_direction, _resolve_playlist
 
 router = APIRouter(tags=["coach"])
@@ -49,6 +50,17 @@ def _target_rank() -> str:
         return get_config().preferences.target_rank
     except RuntimeError:
         return "GC1"
+
+
+def _latest_playlist(session) -> str | None:
+    """The playlist of your most recent game, skipping ones like Hoops."""
+    latest = (
+        session.query(Replay.playlist)
+        .filter(Replay.playlist.in_(VALID_PLAYLISTS))
+        .order_by(Replay.played_at_utc.desc())
+        .first()
+    )
+    return latest.playlist if latest else None
 
 
 def _benchmark_strengths(session, stats: list[PlayerGameStats], playlist: str, rank):
@@ -92,13 +104,17 @@ async def get_coach(
     playlist: str | None = None,
     period: str = Query(default="30d", description="7d, 30d, 90d or all"),
 ) -> dict[str, Any]:
-    """Training targets, mistakes by category, the latest session and highlights."""
-    playlist = _resolve_playlist(playlist)
+    """Training targets, mistakes by category, the latest session and highlights.
+
+    Without a playlist it shows the one you played last, so a new session shows
+    up whichever playlist it's in.
+    """
     date_from = _date_from(period)
     rank = _target_rank()
 
     session = create_session()
     try:
+        playlist = _resolve_playlist(playlist or _latest_playlist(session))
         query = (
             session.query(Replay, PlayerGameStats)
             .outerjoin(

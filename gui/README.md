@@ -6,7 +6,7 @@ A React dashboard for your own replays. It reads the local API, which reads your
 
 Run these from the repository root. Create a config, then set your `display_names` or
 `platform_ids`, your `watch_folder` (the folder Rocket League saves replays to), and your
-`primary_playlist`, which the dashboard opens on:
+`primary_playlist`, which the Stats pages open on:
 
 ```bash
 uv run rlcoach config --init
@@ -45,7 +45,9 @@ npm --prefix gui run dev
 - **Coach** is the home page. It shows your latest session, up to three training targets, your
   mistakes in five categories (last back, rotation, clearing, goalkeeping and boost), and
   highlights such as game winners, games with no goals on you, and habits you've stopped.
-  Targets rank categories by the goals they cost you, then by how often they come up.
+  Targets rank categories by the goals they cost you, then by how often they come up. It opens
+  on the playlist of your latest game. It checks for new games when you come back to it, then
+  every 30 seconds while it's on screen, so it keeps up while you play.
 - **Games** lists every game. A game's page puts your flagged moments and every goal on a
   timeline of the game clock, groups the moments by category, and explains each goal against.
 - **Stats** holds the trends, the rank comparison and the benchmarks.
