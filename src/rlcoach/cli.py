@@ -9,150 +9,31 @@ from . import __version__
 from .config import ConfigError, get_default_config_path, load_config
 from .config_templates import CONFIG_TEMPLATE
 from .errors import RLCoachError
-from .ingest import ingest_replay
 
 
-def handle_ingest_watch(args) -> int:
-    """Handle ingest --watch mode."""
-    import signal
-
-    from .service import ingest_watcher
+def handle_ingest_command(args) -> int:
+    """Store each replay and its review, the way the watcher does."""
+    from .pipeline import IngestionStatus
+    from .service import load_replay
 
     config_path = get_default_config_path()
     try:
         config = load_config(config_path)
         config.validate()
-    except ConfigError as e:
-        print(f"Configuration error: {e}")
-        return 1
-    except FileNotFoundError:
-        print(f"Config file not found: {config_path}")
-        print("Run 'rlcoach config --init' to create one.")
+    except (ConfigError, FileNotFoundError) as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
         return 1
 
-    watch_dir = config.paths.watch_folder
-    if not watch_dir.exists():
-        print(f"Watch folder does not exist: {watch_dir}")
-        return 1
-
-    stats: dict[str, int] = {}
-
-    print(f"Watching {watch_dir} for new replays...")
-    print("Press Ctrl+C to stop")
-    print()
-
-    watcher = ingest_watcher(
-        config, process_existing=args.process_existing, stats=stats
+    fine = (
+        IngestionStatus.SUCCESS,
+        IngestionStatus.DUPLICATE,
+        IngestionStatus.EXCLUDED,
     )
-
-    stop_requested = False
-
-    def signal_handler(sig, frame):
-        nonlocal stop_requested
-        if stop_requested:
-            sys.exit(1)
-        stop_requested = True
-        print("\nStopping watcher...")
-        watcher.stop()
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    watcher.start()
-
-    try:
-        while not stop_requested:
-            import time
-
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        pass
-
-    watcher.stop()
-
-    print()
-    fine = ("success", "duplicate", "excluded")
-    errors = sum(n for status, n in stats.items() if status not in fine)
-    print(
-        "Processed: "
-        f"{stats.get('success', 0)} new, {stats.get('duplicate', 0)} duplicate, "
-        f"{errors} errors"
-    )
-    return 0
-
-
-def handle_ingest_command(args) -> int:
-    """Handle the ingest subcommand.
-
-    Args:
-        args: Parsed command line arguments
-
-    Returns:
-        Exit code (0 for success, 1 for error)
-    """
-    if args.watch:
-        return handle_ingest_watch(args)
-
-    if not args.replay_file:
-        print("Error: replay_file is required when not using --watch")
-        return 1
-
-    replay_path = Path(args.replay_file)
-
-    try:
-        result = ingest_replay(replay_path)
-
-        if args.json:
-            print(json.dumps(result, indent=2))
-        else:
-            print(f"Ingestion Results for: {result['file_path']}")
-            print(f"SHA256: {result['sha256']}")
-            print(f"Size: {result['size_human']} ({result['size_bytes']:,} bytes)")
-            print(f"Bounds Check: {result['bounds_check']['message']}")
-            print(f"Format Check: {result['format_check']['message']}")
-            print(f"CRC Check: {result['crc_check']['message']}")
-
-            if result["warnings"]:
-                print("\nWarnings:")
-                for warning in result["warnings"]:
-                    print(f"  - {warning}")
-
-            print(f"\nStatus: {result['status'].upper()}")
-
-        return 0
-
-    except RLCoachError as e:
-        if args.json:
-            error_result = {
-                "error": {
-                    "type": type(e).__name__,
-                    "message": str(e),
-                    "details": getattr(e, "details", {}),
-                },
-                "status": "error",
-            }
-            print(json.dumps(error_result, indent=2))
-        else:
-            print(f"Error: {e}", file=sys.stderr)
-            if hasattr(e, "details") and "suggested_action" in e.details:
-                print(f"Suggestion: {e.details['suggested_action']}", file=sys.stderr)
-
-        return 1
-
-    except Exception as e:
-        if args.json:
-            error_result = {
-                "error": {
-                    "type": "UnexpectedError",
-                    "message": f"Unexpected error: {str(e)}",
-                    "details": {},
-                },
-                "status": "error",
-            }
-            print(json.dumps(error_result, indent=2))
-        else:
-            print(f"Unexpected error: {e}", file=sys.stderr)
-
-        return 1
+    failed = 0
+    for name in args.replay_files:
+        if load_replay(Path(name), config) not in fine:
+            failed += 1
+    return 1 if failed else 0
 
 
 def handle_config_command(args) -> int:
@@ -223,26 +104,10 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     ingest_parser = subparsers.add_parser(
-        "ingest", help="Ingest and validate a Rocket League replay file"
+        "ingest", help="Load replays from anywhere, and review them"
     )
     ingest_parser.add_argument(
-        "replay_file", type=str, nargs="?", help="Path to the .replay file to ingest"
-    )
-    ingest_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output results in machine-readable JSON format",
-    )
-    ingest_parser.add_argument(
-        "--watch",
-        action="store_true",
-        help="Watch configured folder for new replay files",
-    )
-    ingest_parser.add_argument(
-        "--process-existing",
-        action="store_true",
-        dest="process_existing",
-        help="Process existing files when starting watch mode",
+        "replay_files", nargs="+", help="The .replay files to load"
     )
 
     mistakes_parser = subparsers.add_parser(

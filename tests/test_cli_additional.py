@@ -8,7 +8,6 @@ from rlcoach.cli import (
     handle_ingest_command,
     handle_serve_command,
 )
-from rlcoach.errors import RLCoachError
 
 
 class _DummyConfig:
@@ -19,50 +18,45 @@ class _DummyConfig:
         return None
 
 
-def test_handle_ingest_watch_delegates(monkeypatch):
-    args = SimpleNamespace(watch=True, process_existing=False)
-    monkeypatch.setattr(
-        "rlcoach.cli.handle_ingest_watch", lambda a: 9 if a is args else 1
-    )
-    assert handle_ingest_command(args) == 9
+def test_ingest_loads_every_file_and_fails_if_one_does(monkeypatch):
+    from rlcoach.pipeline import IngestionStatus
 
+    seen = []
+    statuses = {"a.replay": IngestionStatus.SUCCESS, "b.replay": IngestionStatus.ERROR}
 
-def test_handle_ingest_requires_file_when_not_watching(capsys):
-    args = SimpleNamespace(watch=False, replay_file=None, json=False)
+    def load(path, config):
+        seen.append(path.name)
+        return statuses[path.name]
+
+    monkeypatch.setattr("rlcoach.cli.get_default_config_path", lambda: "ok.toml")
+    monkeypatch.setattr("rlcoach.cli.load_config", lambda _: _DummyConfig([]))
+    monkeypatch.setattr("rlcoach.service.load_replay", load)
+
+    args = SimpleNamespace(replay_files=["a.replay", "b.replay"])
     assert handle_ingest_command(args) == 1
-    assert "replay_file is required" in capsys.readouterr().out
+    assert seen == ["a.replay", "b.replay"]
 
 
-def test_handle_ingest_json_success(monkeypatch, capsys):
-    args = SimpleNamespace(watch=False, replay_file="x.replay", json=True)
+def test_ingest_counts_duplicates_as_fine(monkeypatch):
+    from rlcoach.pipeline import IngestionStatus
+
+    monkeypatch.setattr("rlcoach.cli.get_default_config_path", lambda: "ok.toml")
+    monkeypatch.setattr("rlcoach.cli.load_config", lambda _: _DummyConfig([]))
     monkeypatch.setattr(
-        "rlcoach.cli.ingest_replay",
-        lambda _p: {
-            "file_path": "x.replay",
-            "sha256": "abc",
-            "size_human": "1 KB",
-            "size_bytes": 1000,
-            "bounds_check": {"message": "ok"},
-            "format_check": {"message": "ok"},
-            "crc_check": {"message": "ok"},
-            "warnings": [],
-            "status": "ok",
-        },
+        "rlcoach.service.load_replay", lambda *_: IngestionStatus.DUPLICATE
     )
-    assert handle_ingest_command(args) == 0
-    assert '"sha256": "abc"' in capsys.readouterr().out
+
+    assert handle_ingest_command(SimpleNamespace(replay_files=["a.replay"])) == 0
 
 
-def test_handle_ingest_json_rlcoach_error(monkeypatch, capsys):
-    args = SimpleNamespace(watch=False, replay_file="x.replay", json=True)
+def test_ingest_without_a_config_says_so(monkeypatch, capsys):
+    monkeypatch.setattr("rlcoach.cli.get_default_config_path", lambda: "missing.toml")
     monkeypatch.setattr(
-        "rlcoach.cli.ingest_replay",
-        lambda _p: (_ for _ in ()).throw(
-            RLCoachError("boom", {"suggested_action": "try again"})
-        ),
+        "rlcoach.cli.load_config", lambda _: (_ for _ in ()).throw(FileNotFoundError)
     )
-    assert handle_ingest_command(args) == 1
-    assert '"status": "error"' in capsys.readouterr().out
+
+    assert handle_ingest_command(SimpleNamespace(replay_files=["a.replay"])) == 1
+    assert "Configuration error" in capsys.readouterr().err
 
 
 def test_handle_serve_command_missing_config(monkeypatch, capsys):

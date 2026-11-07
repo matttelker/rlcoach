@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from starlette.types import Scope
 
     from .config import RLCoachConfig
+    from .pipeline import IngestionStatus
     from .watcher import ReplayWatcher
 
 GUI_DIST = Path(__file__).resolve().parents[2] / "gui" / "dist"
@@ -119,6 +120,26 @@ def create_site(
     return site
 
 
+def load_replay(
+    path: Path, config: RLCoachConfig, counts: dict[str, int] | None = None
+) -> IngestionStatus:
+    """Store one replay and its review, and print one line saying how it went."""
+    from .pipeline import IngestionStatus, process_replay_file
+
+    result = process_replay_file(path, config)
+    stamp = datetime.now().strftime("%H:%M:%S")
+    status = result.status
+    if counts is not None:
+        counts[status.value] = counts.get(status.value, 0) + 1
+    if status == IngestionStatus.SUCCESS:
+        print(f"{stamp} ✓ {path.name} -> {result.replay_id}", flush=True)
+    elif status in (IngestionStatus.DUPLICATE, IngestionStatus.EXCLUDED):
+        print(f"{stamp} ⊘ {path.name} ({status.value})", flush=True)
+    else:
+        print(f"{stamp} ✗ {path.name}: {result.error}", flush=True)
+    return status
+
+
 def ingest_watcher(
     config: RLCoachConfig,
     *,
@@ -126,26 +147,13 @@ def ingest_watcher(
     stats: dict[str, int] | None = None,
 ) -> ReplayWatcher:
     """Watch the replay folder and load each new game, printing one line each."""
-    from .pipeline import IngestionStatus, process_replay_file
     from .watcher import ReplayWatcher
 
     counts = stats if stats is not None else {}
 
-    def process(path: Path) -> None:
-        result = process_replay_file(path, config)
-        stamp = datetime.now().strftime("%H:%M:%S")
-        status = result.status
-        counts[status.value] = counts.get(status.value, 0) + 1
-        if status == IngestionStatus.SUCCESS:
-            print(f"{stamp} ✓ {path.name} -> {result.replay_id}", flush=True)
-        elif status in (IngestionStatus.DUPLICATE, IngestionStatus.EXCLUDED):
-            print(f"{stamp} ⊘ {path.name} ({status.value})", flush=True)
-        else:
-            print(f"{stamp} ✗ {path.name}: {result.error}", flush=True)
-
     return ReplayWatcher(
         watch_dir=config.paths.watch_folder,
-        callback=process,
+        callback=lambda path: load_replay(path, config, counts),
         poll_interval=2.0,
         stability_seconds=2.0,
         process_existing=process_existing,
