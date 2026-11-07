@@ -1,76 +1,45 @@
-"""Run the per-player and per-team analyzers whose numbers the database stores."""
+"""Each player's stats for one game: the numbers the database stores.
+
+Every stat is one of the `player_game_stats` columns, under the same name.
+"""
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
-from ..parser.types import Frame, Header
-from .boost import analyze_boost
-from .fundamentals import analyze_fundamentals
-from .movement import analyze_movement
-from .positioning import analyze_positioning
+from .boost import boost_stats
+from .fundamentals import fundamentals
+from .movement import movement_stats
+from .positioning import positioning_stats
+from .tracks import player_tracks
+
+if TYPE_CHECKING:
+    from ..game import Game
 
 
-def aggregate_analysis(
-    frames: list[Frame], events: dict[str, list[Any]], header: Header | None = None
-) -> dict[str, Any]:
-    """Analyze every player and both teams.
+def player_stats(game: Game, player_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    """Each player's stats, keyed by player id and then column.
 
-    Returns:
-        {
-            "per_team": {"blue": {...}, "orange": {...}},
-            "per_player": [{"player_id": "...", "fundamentals": {...}, ...}],
-            "warnings": [...],
-        }
+    A player the frames never show gets nothing, since there's nothing to measure.
     """
-    warnings = []
-
-    if not frames:
-        warnings.append("no_frame_data_available")
-    if not events:
-        warnings.append("no_events_detected")
-
-    per_team = {
-        "blue": _analyze(frames, events, header, team="BLUE"),
-        "orange": _analyze(frames, events, header, team="ORANGE"),
+    wanted = set(player_ids)
+    tracks = {
+        player_id: track
+        for player_id, track in player_tracks(game.frames).items()
+        if player_id in wanted
     }
-
-    per_player = [
-        {
-            "player_id": player_id,
-            **_analyze(frames, events, header, player_id=player_id),
-        }
-        for player_id in _extract_players_from_frames(frames)
-    ]
-
-    if not frames and events:
-        warnings.append("header_only_mode_limited_metrics")
-
-    return {"per_team": per_team, "per_player": per_player, "warnings": warnings}
-
-
-def _analyze(
-    frames: list[Frame],
-    events: dict[str, list[Any]],
-    header: Header | None,
-    **who: str,
-) -> dict[str, Any]:
-    """Run each analyzer for one team (team=...) or one player (player_id=...)."""
+    sections = (
+        fundamentals(game.header, game.demos, tracks),
+        boost_stats(game.frames, game.boost_pickups, tracks),
+        movement_stats(game.frames, tracks),
+        positioning_stats(game.frames, tracks),
+    )
     return {
-        "fundamentals": analyze_fundamentals(frames, events, header=header, **who),
-        "boost": analyze_boost(frames, events, header=header, **who),
-        "movement": analyze_movement(frames, events, header=header, **who),
-        "positioning": analyze_positioning(frames, events, header=header, **who),
+        player_id: {
+            column: value
+            for section in sections
+            for column, value in section[player_id].items()
+        }
+        for player_id in tracks
     }
-
-
-def _extract_players_from_frames(frames: list[Frame]) -> dict[str, str]:
-    """Map each player id to its team name ("BLUE" or "ORANGE")."""
-    players = {}
-
-    for frame in frames:
-        for player in frame.players:
-            if player.player_id not in players:
-                players[player.player_id] = "BLUE" if player.team == 0 else "ORANGE"
-
-    return players

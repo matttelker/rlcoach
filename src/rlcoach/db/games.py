@@ -16,29 +16,29 @@ from ..identity import Me
 from .models import Player, PlayerGameStats, Replay
 from .session import create_session
 
-# Stats columns, and where each comes from in a report's per-player analysis
-STAT_SOURCES = {
-    "goals": ("fundamentals", "goals"),
-    "assists": ("fundamentals", "assists"),
-    "saves": ("fundamentals", "saves"),
-    "shots": ("fundamentals", "shots"),
-    "shooting_pct": ("fundamentals", "shooting_percentage"),
-    "score": ("fundamentals", "score"),
-    "demos_inflicted": ("fundamentals", "demos_inflicted"),
-    "demos_taken": ("fundamentals", "demos_taken"),
-    "bcpm": ("boost", "bpm"),
-    "avg_boost": ("boost", "avg_boost"),
-    "time_zero_boost_s": ("boost", "time_zero_boost_s"),
-    "time_full_boost_s": ("boost", "time_full_boost_s"),
-    "boost_collected": ("boost", "boost_collected"),
-    "boost_stolen": ("boost", "boost_stolen"),
-    "avg_speed_kph": ("movement", "avg_speed_kph"),
-    "time_supersonic_s": ("movement", "time_supersonic_s"),
-    "behind_ball_pct": ("positioning", "behind_ball_pct"),
-    "first_man_pct": ("positioning", "first_man_pct"),
-    "second_man_pct": ("positioning", "second_man_pct"),
-    "third_man_pct": ("positioning", "third_man_pct"),
-}
+# The stat columns, which a report's stats use as their names
+STAT_COLUMNS = (
+    "goals",
+    "assists",
+    "saves",
+    "shots",
+    "shooting_pct",
+    "score",
+    "demos_inflicted",
+    "demos_taken",
+    "bcpm",
+    "avg_boost",
+    "time_zero_boost_s",
+    "time_full_boost_s",
+    "boost_collected",
+    "boost_stolen",
+    "avg_speed_kph",
+    "time_supersonic_s",
+    "behind_ball_pct",
+    "first_man_pct",
+    "second_man_pct",
+    "third_man_pct",
+)
 
 
 class ReplayExistsError(Exception):
@@ -111,11 +111,10 @@ def store_game(
     """
     replay_id = report["replay_id"]
     metadata, players = report["metadata"], report["players"]
-    analysis = report["analysis"]["per_player"]
+    stats = report["stats"]
     my_team = next(p["team"] for p in players if p["player_id"] == my_player_id)
-    scores = {"BLUE": report["teams"]["blue"], "ORANGE": report["teams"]["orange"]}
-    mine = scores[my_team]["score"]
-    theirs = scores["ORANGE" if my_team == "BLUE" else "BLUE"]["score"]
+    mine = report["score"][my_team]
+    theirs = report["score"]["ORANGE" if my_team == "BLUE" else "BLUE"]
     seen_at = played_at(report)
     me = Me(config.identity)
 
@@ -146,17 +145,14 @@ def store_game(
         # Players must exist before stats that point at them
         session.flush()
         for player in players:
-            numbers = analysis.get(player["player_id"], {})
+            numbers = stats.get(player["player_id"], {})
             session.add(
                 PlayerGameStats(
                     replay_id=replay_id,
                     player_id=player["player_id"],
                     team=player["team"],
                     is_me=player["player_id"] == my_player_id,
-                    **{
-                        column: numbers.get(section, {}).get(key)
-                        for column, (section, key) in STAT_SOURCES.items()
-                    },
+                    **{column: numbers.get(column) for column in STAT_COLUMNS},
                 )
             )
     return replay_id

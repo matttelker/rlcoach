@@ -1,308 +1,123 @@
-"""Targeted boost analysis tests for boost economy logic."""
+"""Tests for the boost stats."""
 
 from __future__ import annotations
 
-from rlcoach.analysis.boost import analyze_boost
-from rlcoach.events import BoostPickupEvent, detect_boost_pickups
-from rlcoach.events.boost import _merge_pickup_events
-from rlcoach.field_constants import FIELD, Vec3
-from rlcoach.parser.types import BallFrame, Frame, PlayerFrame
+import pytest
+
+from rlcoach.analysis.boost import active_play_seconds, boost_stats, is_held_for_kickoff
+from rlcoach.analysis.tracks import player_tracks
+from rlcoach.events.types import BoostPickupEvent
+from rlcoach.field_constants import Vec3
+from tests.fixtures.builders import (
+    create_test_ball,
+    create_test_frame,
+    create_test_player,
+)
+
+MOVING = Vec3(1000.0, 0.0, 0.0)
+OFF_SPOT = create_test_ball(position=Vec3(0.0, 2000.0, 93.15))
 
 
-def create_frame(timestamp: float, players: list[PlayerFrame]) -> Frame:
-    """Utility to build a minimal frame with static ball state."""
-    ball = BallFrame(
-        position=Vec3(0.0, 0.0, 93.15),
-        velocity=Vec3(0.0, 0.0, 0.0),
-        angular_velocity=Vec3(0.0, 0.0, 0.0),
-    )
-    return Frame(timestamp=timestamp, ball=ball, players=players)
+def _frames(boosts, *, step=0.5, demolished=(), still=(), gap_after=None):
+    """One car whose boost reads `boosts`, a frame every `step` seconds."""
+    frames = []
+    t = 0.0
+    for index, boost in enumerate(boosts):
+        held = index in still
+        car = create_test_player(
+            "me",
+            0,
+            velocity=Vec3(0.0, 0.0, 0.0) if held else MOVING,
+            boost=boost,
+            is_demolished=index in demolished,
+        )
+        frames.append(
+            create_test_frame(t, [car], ball=create_test_ball() if held else OFF_SPOT)
+        )
+        t += 10.0 if index == gap_after else step
+    return frames
 
 
-def create_player(
-    player_id: str,
-    team: int,
-    position: Vec3,
-    boost: float,
-    velocity: Vec3 | None = None,
-) -> PlayerFrame:
-    """Utility to build a player snapshot."""
-    if velocity is None:
-        velocity = Vec3(0.0, 0.0, 0.0)
-    return PlayerFrame(
-        player_id=player_id,
-        team=team,
-        position=position,
-        velocity=velocity,
-        rotation=Vec3(0.0, 0.0, 0.0),
-        boost_amount=int(boost),
-        is_supersonic=False,
-        is_on_ground=True,
-        is_demolished=False,
-    )
+def _stats(frames, pickups=()):
+    return boost_stats(frames, list(pickups), player_tracks(frames))["me"]
 
 
-def test_detects_big_and_small_pad_pickups():
-    """Boost detector maps frame deltas to canonical big/small pad ids."""
-    from rlcoach.field_constants import find_big_pad_blue_corner, find_small_pad_neutral
-
-    big_pad = find_big_pad_blue_corner()  # Any blue corner big pad
-    small_pad = find_small_pad_neutral()  # Any neutral midfield small pad
-
-    frames = [
-        create_frame(
-            0.0,
-            [
-                create_player(
-                    "p1", 0, Vec3(big_pad.position.x, big_pad.position.y, 17.0), 0
-                ),
-            ],
-        ),
-        create_frame(
-            0.1,
-            [
-                create_player(
-                    "p1", 0, Vec3(big_pad.position.x, big_pad.position.y, 17.0), 100
-                ),
-            ],
-        ),
-        create_frame(
-            4.5,
-            [
-                create_player(
-                    "p1", 0, Vec3(small_pad.position.x, small_pad.position.y, 17.0), 60
-                ),
-            ],
-        ),
-        create_frame(
-            4.6,
-            [
-                create_player(
-                    "p1", 0, Vec3(small_pad.position.x, small_pad.position.y, 17.0), 72
-                ),
-            ],
-        ),
-    ]
-
-    pickups = detect_boost_pickups(frames)
-    assert len(pickups) == 2
-    pad_types = {pickup.pad_type for pickup in pickups}
-    pad_ids = {pickup.pad_id for pickup in pickups}
-    assert pad_types == {"BIG", "SMALL"}
-    assert pad_ids == {big_pad.pad_id, small_pad.pad_id}
+def test_average_boost_is_the_mean_of_updates_not_of_time():
+    # 0 for one frame, then 100 for nine: a time average would be 90
+    frames = _frames([0, *[100] * 9])
+    assert _stats(frames)["avg_boost"] == 50.0
 
 
-def test_detects_stolen_boost_flags():
-    """Boost detector tags pickups on opponent half as stolen."""
-    from rlcoach.field_constants import (
-        find_big_pad_orange_corner,
-        find_small_pad_blue_side,
-        find_small_pad_orange_side,
+def test_time_at_zero_counts_once_the_next_update_ends_it():
+    frames = _frames([50, 0, 0, 0, 0, 20])
+    assert _stats(frames)["time_zero_boost_s"] == 2.0
+
+
+def test_time_at_zero_cut_short_by_a_demo_counts_for_nothing():
+    frames = _frames([50, 0, 0, 0, 0, 33], demolished={3})
+    assert _stats(frames)["time_zero_boost_s"] == 0.0
+
+
+def test_time_at_zero_cut_short_by_a_goal_replay_counts_for_nothing():
+    frames = _frames([50, 0, 0, 0, 0, 33], gap_after=2)
+    assert _stats(frames)["time_zero_boost_s"] == 0.0
+
+
+def test_time_at_full_ending_in_a_kickoff_countdown_counts_for_nothing():
+    frames = _frames([50, 100, 100, 100, 33], still={4})
+    assert _stats(frames)["time_full_boost_s"] == 0.0
+    frames = _frames([50, 100, 100, 100, 33])
+    assert _stats(frames)["time_full_boost_s"] == 1.5
+
+
+def test_a_stretch_still_open_at_the_end_counts_for_nothing():
+    frames = _frames([50, 0, 0, 0])
+    assert _stats(frames)["time_zero_boost_s"] == 0.0
+
+
+def _pickup(player_id, gain, stolen=False):
+    return BoostPickupEvent(
+        t=1.0, player_id=player_id, pad_type="SMALL", stolen=stolen, boost_gain=gain
     )
 
-    orange_big_pad = find_big_pad_orange_corner()  # Blue steals orange corner
-    blue_small_pad = find_small_pad_blue_side()  # Orange steals blue small pad
-    mid_orange_small_pad = find_small_pad_orange_side()  # Orange-side small pad
 
-    frames = [
-        create_frame(
-            1.0,
-            [
-                create_player(
-                    "blue_p",
-                    0,
-                    Vec3(orange_big_pad.position.x, orange_big_pad.position.y, 17.0),
-                    20,
-                ),
-                create_player(
-                    "orange_p",
-                    1,
-                    Vec3(blue_small_pad.position.x, blue_small_pad.position.y, 17.0),
-                    30,
-                ),
-                create_player(
-                    "blue_mid",
-                    0,
-                    Vec3(
-                        mid_orange_small_pad.position.x,
-                        mid_orange_small_pad.position.y,
-                        17.0,
-                    ),
-                    10,
-                ),
-            ],
-        ),
-        create_frame(
-            1.1,
-            [
-                create_player(
-                    "blue_p",
-                    0,
-                    Vec3(orange_big_pad.position.x, orange_big_pad.position.y, 17.0),
-                    120,
-                ),
-                create_player(
-                    "orange_p",
-                    1,
-                    Vec3(blue_small_pad.position.x, blue_small_pad.position.y, 17.0),
-                    42,
-                ),
-                create_player(
-                    "blue_mid",
-                    0,
-                    Vec3(
-                        mid_orange_small_pad.position.x,
-                        mid_orange_small_pad.position.y,
-                        17.0,
-                    ),
-                    22,
-                ),
-            ],
-        ),
-    ]
-
-    pickups = detect_boost_pickups(frames)
-    assert len(pickups) == 3
-
-    stolen_lookup = {pickup.player_id: pickup.stolen for pickup in pickups}
-    assert stolen_lookup["blue_p"] is True
-    assert stolen_lookup["orange_p"] is True
-    assert stolen_lookup["blue_mid"] is True
-
-
-def test_overfill_and_waste_metrics():
-    """Analyzer combines overfill and waste calculations with updated thresholds."""
-    frames = [
-        create_frame(
-            0.0,
-            [
-                create_player(
-                    "p1", 0, Vec3(0.0, 0.0, 17.0), 90, Vec3(2400.0, 0.0, 0.0)
-                ),
-            ],
-        ),
-        create_frame(
-            5.0,
-            [
-                create_player(
-                    "p1", 0, Vec3(0.0, 0.0, 17.0), 70, Vec3(2400.0, 0.0, 0.0)
-                ),
-            ],
-        ),
-        create_frame(
-            6.0,
-            [
-                create_player(
-                    "p1", 0, Vec3(0.0, -4240.0, 17.0), 70, Vec3(0.0, 0.0, 0.0)
-                ),
-            ],
-        ),
-        create_frame(
-            6.1,
-            [
-                create_player(
-                    "p1", 0, Vec3(0.0, -4240.0, 17.0), 82, Vec3(0.0, 0.0, 0.0)
-                ),
-            ],
-        ),
-        create_frame(
-            12.0,
-            [
-                create_player(
-                    "p1", 0, Vec3(3072.0, -4096.0, 17.0), 95, Vec3(0.0, 0.0, 0.0)
-                ),
-            ],
-        ),
-        create_frame(
-            12.1,
-            [
-                create_player(
-                    "p1", 0, Vec3(3072.0, -4096.0, 17.0), 100, Vec3(0.0, 0.0, 0.0)
-                ),
-            ],
-        ),
-    ]
-
-    small_pad = FIELD.BOOST_PADS[6]  # (-3584, -2484)
-    big_pad = FIELD.BOOST_PADS[0]
+def test_collected_and_stolen_add_up_each_players_pickups():
+    frames = _frames([33] * 3)
     pickups = [
-        BoostPickupEvent(
-            t=6.1,
-            player_id="p1",
-            pad_type="SMALL",
-            stolen=False,
-            pad_id=small_pad.pad_id,
-            location=small_pad.position,
-            frame=3,
-            boost_before=70.0,
-            boost_after=82.0,
-            boost_gain=12.0,
-        ),
-        BoostPickupEvent(
-            t=12.1,
-            player_id="p1",
-            pad_type="BIG",
-            stolen=False,
-            pad_id=big_pad.pad_id,
-            location=big_pad.position,
-            frame=5,
-            boost_before=95.0,
-            boost_after=100.0,
-            boost_gain=5.0,
-        ),
+        _pickup("me", 12.0),
+        _pickup("me", 67.0, stolen=True),
+        _pickup("them", 100.0),
     ]
-
-    events = {"boost_pickups": pickups}
-    result = analyze_boost(frames, events, player_id="p1")
-
-    assert result["overfill"] == 95.0  # 95 in the tank; the small pad doesn't count
-    assert result["waste"] > 0.0  # Supersonic consumption detected between 0-5 seconds
+    stats = _stats(frames, pickups)
+    assert (stats["boost_collected"], stats["boost_stolen"]) == (79.0, 67.0)
 
 
-def test_merge_window_keeps_same_pad():
-    """Merge window should consolidate multi-frame refills into a single pad event."""
-    pad = FIELD.BOOST_PADS[0]
-    # Use the merge helper directly to ensure duplicates on the same pad collapse.
-    pickups = [
-        BoostPickupEvent(
-            t=0.1,
-            player_id="p1",
-            pad_type="BIG",
-            stolen=False,
-            pad_id=pad.pad_id,
-            location=pad.position,
-            frame=1,
-            boost_before=0.0,
-            boost_after=40.0,
-            boost_gain=40.0,
-        ),
-        BoostPickupEvent(
-            t=0.3,
-            player_id="p1",
-            pad_type="BIG",
-            stolen=False,
-            pad_id=pad.pad_id,
-            location=pad.position,
-            frame=2,
-            boost_before=40.0,
-            boost_after=80.0,
-            boost_gain=40.0,
-        ),
-        BoostPickupEvent(
-            t=0.5,
-            player_id="p1",
-            pad_type="BIG",
-            stolen=False,
-            pad_id=pad.pad_id,
-            location=pad.position,
-            frame=3,
-            boost_before=80.0,
-            boost_after=100.0,
-            boost_gain=20.0,
-        ),
-    ]
-    merged = _merge_pickup_events(pickups)
-    assert len(merged) == 1
-    pickup = merged[0]
-    assert pickup.pad_id == pad.pad_id
-    assert pickup.boost_gain == 100.0
+def test_collected_per_minute_divides_by_active_play():
+    # Three minutes of play, a goal replay's 10 s pause, then a 3 s countdown
+    frames = _frames([33] * 361, gap_after=200, still=set(range(300, 308)))
+    assert active_play_seconds(
+        frames, [is_held_for_kickoff(f) for f in frames]
+    ) == pytest.approx(frames[-1].timestamp - 10.0 - 3.0)
+    stats = _stats(frames, [_pickup("me", 100.0), _pickup("me", 74.0)])
+    assert stats["bcpm"] == round(174.0 / ((frames[-1].timestamp - 13.0) / 60), 2)
+
+
+def test_a_short_game_divides_by_one_minute_at_least():
+    frames = _frames([33] * 21)
+    assert _stats(frames, [_pickup("me", 50.0)])["bcpm"] == 50.0
+
+
+def test_a_short_stop_on_the_spot_is_not_a_countdown():
+    frames = _frames([33] * 20, still={5, 6, 7})
+    held = [is_held_for_kickoff(f) for f in frames]
+    assert sum(held) == 3
+    assert active_play_seconds(frames, held) == frames[-1].timestamp
+
+
+def test_a_ball_off_the_spot_or_a_moving_car_is_not_held():
+    car = create_test_player("me", 0)
+    assert is_held_for_kickoff(create_test_frame(0.0, [car]))
+    assert not is_held_for_kickoff(create_test_frame(0.0, [car], ball=OFF_SPOT))
+    moving = create_test_player("me", 0, velocity=MOVING)
+    assert not is_held_for_kickoff(create_test_frame(0.0, [car, moving]))
+    assert not is_held_for_kickoff(create_test_frame(0.0, []))

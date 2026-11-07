@@ -38,7 +38,7 @@ def make_report(
     blue=3,
     orange=1,
     rival_name="Rival",
-    analysis=None,
+    stats=None,
 ):
     players = [
         {"player_id": "steam:1", "display_name": "Me", "team": "BLUE"},
@@ -56,9 +56,9 @@ def make_report(
             "started_at_utc": started,
             "duration_seconds": 345.5,
         },
-        "teams": {"blue": {"score": blue}, "orange": {"score": orange}},
+        "score": {"BLUE": blue, "ORANGE": orange},
         "players": players,
-        "analysis": {"per_player": analysis or {}},
+        "stats": stats or {},
     }
 
 
@@ -102,14 +102,15 @@ def test_the_result_is_yours(blue, orange, me_on, result):
 
 
 def test_each_player_gets_their_stats_with_missing_counts_zero_and_others_empty():
-    analysis = {
+    stats = {
         "steam:1": {
-            "fundamentals": {"goals": 2, "shooting_percentage": 50.0},
-            "boost": {"bpm": 410.0},
-            "positioning": {"first_man_pct": 33.3},
+            "goals": 2,
+            "shooting_pct": 50.0,
+            "bcpm": 410.0,
+            "first_man_pct": 33.3,
         }
     }
-    store_game(make_report(analysis=analysis), "h", "steam:1", CONFIG)
+    store_game(make_report(stats=stats), "h", "steam:1", CONFIG)
     mine = _stats("r1", "steam:1")
     assert (mine.goals, mine.shooting_pct, mine.bcpm, mine.first_man_pct) == (
         2,

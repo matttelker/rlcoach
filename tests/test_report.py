@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rlcoach.config import IdentityConfig
+from rlcoach.db.games import STAT_COLUMNS
 from rlcoach.events import KickoffEvent
 from rlcoach.game import game_from_frames
 from rlcoach.identity import build_player_identities
@@ -15,8 +15,8 @@ from rlcoach.report import _went_to_overtime, report_for
 from tests.fixtures.builders import create_simple_replay_frames
 
 PLAYERS = [
-    PlayerInfo(name="Me", platform_id="Epic|me", team=0),
-    PlayerInfo(name="Them", platform_id="Steam|1", team=1),
+    PlayerInfo(name="Me", platform_id="Epic|me", team=0, stats={"Goals": 3}),
+    PlayerInfo(name="Them", platform_id="Steam|1", team=1, stats={"Goals": 1}),
     PlayerInfo(name="Ghost", platform_id="Steam|2", team=1),
 ]
 
@@ -54,43 +54,23 @@ def test_a_report_says_what_the_game_was():
         False,
     )
     assert metadata["started_at_utc"] == "2026-03-01T03:00:00Z"
-    assert metadata["total_frames"] == 90
     # Frames start at 0, so the last one's time is the length
     assert metadata["duration_seconds"] == pytest.approx(89 / 30)
-    assert round(metadata["recorded_frame_hz"]) == 30
+    assert report["score"] == {"BLUE": 3, "ORANGE": 1}
 
 
-def test_a_report_lists_teams_players_and_their_stats():
-    report = report_for(_game(), "abc", identity_config=IdentityConfig(["epic:me"]))
-    assert report["teams"] == {
-        "blue": {"score": 3, "players": ["epic:me"]},
-        "orange": {"score": 1, "players": ["steam:1", "steam:2"]},
-    }
+def test_a_report_lists_the_players_and_the_stats_of_those_the_frames_show():
+    report = report_for(_game(), "abc")
     assert report["players"] == [
-        {"player_id": "epic:me", "display_name": "Me", "team": "BLUE", "is_me": True},
-        {
-            "player_id": "steam:1",
-            "display_name": "Them",
-            "team": "ORANGE",
-            "is_me": False,
-        },
-        {
-            "player_id": "steam:2",
-            "display_name": "Ghost",
-            "team": "ORANGE",
-            "is_me": False,
-        },
+        {"player_id": "epic:me", "display_name": "Me", "team": "BLUE"},
+        {"player_id": "steam:1", "display_name": "Them", "team": "ORANGE"},
+        {"player_id": "steam:2", "display_name": "Ghost", "team": "ORANGE"},
     ]
-    per_player = report["analysis"]["per_player"]
-    assert set(per_player) == {"epic:me", "steam:1"}
-    assert {"fundamentals", "boost", "movement", "positioning"} <= set(
-        per_player["epic:me"]
-    )
-    assert set(report["analysis"]["per_team"]) == {"blue", "orange"}
-
-
-def test_without_your_identity_players_have_no_is_me():
-    assert all("is_me" not in p for p in report_for(_game(), "abc")["players"])
+    stats = report["stats"]
+    assert set(stats) == {"epic:me", "steam:1"}
+    # Every stat is named for the column that stores it
+    assert set(stats["epic:me"]) == set(STAT_COLUMNS)
+    assert (stats["epic:me"]["goals"], stats["steam:1"]["goals"]) == (3, 1)
 
 
 def test_missing_header_fields_fall_back():
@@ -111,4 +91,4 @@ def test_an_overtime_kickoff_means_overtime():
 
 def test_an_old_header_flag_still_counts():
     assert _went_to_overtime(Header(overtime=True), [])
-    assert not _went_to_overtime(None, [])
+    assert not _went_to_overtime(Header(), [])

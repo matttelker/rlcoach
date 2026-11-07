@@ -1,645 +1,132 @@
-"""Boost economy analysis for Rocket League replay data.
+"""Boost: how much each player picked up and stole, and how full they kept it.
 
-This module computes boost usage and collection metrics:
-- BPM (Boost Per Minute) and BCPM (Boost Collected Per Minute)
-- Time spent at 0 and 100 boost
-- Overfill and waste calculations
-- Boost pad collection tracking
-- Stolen boost analysis
-
-All calculations use frame-by-frame analysis with event correlation
-for comprehensive boost economy assessment.
+These follow Ballchasing's definitions, which the parity test checks:
+- Collected per minute divides by active play, which leaves out goal replays and
+  3 s for each kickoff countdown.
+- Average boost is the mean of the replicated updates, not a time average.
+- A stretch at 0 or 100 counts once the next update ends it. One cut short by a
+  goal replay, a demo or the end of the game counts for nothing, nor does one
+  that ends during a kickoff countdown.
 """
 
 from __future__ import annotations
 
 import math
-from bisect import bisect_right
-from collections.abc import Sequence
+from collections.abc import Mapping
 from itertools import groupby, pairwise
 from typing import Any
 
-from ..events import PAD_NEUTRAL_TOLERANCE, BoostPickupEvent
-from ..events.constants import (
-    BALL_STATIONARY_THRESHOLD,
-    KICKOFF_CENTER_POSITION,
-    KICKOFF_POSITION_TOLERANCE,
-    PAUSE_GAP_SECONDS,
-)
-from ..events.utils import vector_magnitude
-from ..field_constants import FIELD, Vec3
-from ..parser.types import Frame, Header
-from ..physics_constants import BOOST_CONSUMPTION_PER_SECOND, CAR_MAX_SPEED_UU_S
+from ..events.types import BoostPickupEvent
+from ..parser.types import Frame, Vec3
+from .tracks import PAUSE_GAP_S, Track
 
-# Boost analysis thresholds (zero and full match Ballchasing's benchmarks)
-ZERO_BOOST_THRESHOLD = 0.0
-FULL_BOOST_THRESHOLD = 100.0
-SPEED_CAP_WASTE_THRESHOLD = CAR_MAX_SPEED_UU_S - 0.1  # Capped cars read under 2300
-WASTE_DETECTION_MIN_BOOST = 10.0  # Minimum boost to consider for waste detection
-MIN_BOOST_SPEED_GAIN = 100.0  # Gaining less than this across a burst counts as waste
-RESET_TELEPORT_DISTANCE = 500.0  # Further than a car moves between frames
-BIG_GAIN_THRESHOLD = 70.0
-SMALL_PAD_UNIT = 12.0
-RESPAWN_GAIN = 33.0
-PAD_EVENT_MATCH_WINDOW = 1.1
-PAD_GAIN_MISMATCH_TOLERANCE = 24.0
-FALLBACK_BIG_GAIN_THRESHOLD = 45.0
-PAD_POSITION_TRUST_RADIUS_SQ = 600.0 * 600.0
-KICKOFF_COUNTDOWN_SECONDS = 3.0
-# Real holds last 3.1s or more, other still moments under 1s (11 real replays)
-KICKOFF_HOLD_MIN_SECONDS = 2.0
-KICKOFF_CAR_STILL_SPEED = 50.0
-BALL_REST_HEIGHT_TOLERANCE = 60.0
+COUNTDOWN_S = 3.0  # Of each kickoff countdown, what Ballchasing leaves out
+COUNTDOWN_MIN_S = 2.0  # Real countdowns hold for 3.1 s or more, other stops under 1
+STILL_UU_S = 50.0  # Ball and cars move slower than this while held
+SPOT_REACH = 120.0  # Ball this close to the centre spot across the field
+SPOT_HEIGHT = 93.15
+SPOT_HEIGHT_REACH = 60.0  # The ball drops onto the spot after a reset
 
 
-def analyze_boost(
-    frames: list[Frame],
-    events: dict[str, list[Any]],
-    player_id: str | None = None,
-    team: str | None = None,
-    header: Header | None = None,
-) -> dict[str, Any]:
-    """Analyze boost economy metrics for a player or team.
+def is_held_for_kickoff(frame: Frame) -> bool:
+    """The ball waits on the centre spot and every car is held still."""
+    ball = frame.ball
+    return (
+        abs(ball.position.x) <= SPOT_REACH
+        and abs(ball.position.y) <= SPOT_REACH
+        and abs(ball.position.z - SPOT_HEIGHT) <= SPOT_HEIGHT_REACH
+        and _speed(ball.velocity) < STILL_UU_S
+        and bool(frame.players)
+        and all(_speed(car.velocity) < STILL_UU_S for car in frame.players)
+    )
 
-    Args:
-        frames: Normalized frame data for boost state tracking
-        events: Dictionary containing detected events by type
-        player_id: If provided, analyze specific player; otherwise team analysis
-        team: Team filter ("BLUE" or "ORANGE"), required if player_id not provided
-        header: Optional header for match context
 
-    Returns:
-        Dictionary matching schema boost definition:
-        {
-            "bpm": float,
-            "bcpm": float,
-            "avg_boost": float,
-            "time_zero_boost_s": float,
-            "time_full_boost_s": float,
-            "boost_collected": float,
-            "boost_stolen": float,
-            "big_pads": int,
-            "small_pads": int,
-            "stolen_big_pads": int,
-            "stolen_small_pads": int,
-            "overfill": float,
-            "waste": float
-        }
+def _speed(velocity: Vec3) -> float:
+    return math.sqrt(
+        velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z
+    )
+
+
+def active_play_seconds(frames: list[Frame], held: list[bool]) -> float:
+    """The seconds Ballchasing's per-minute rates divide by.
+
+    The recording's length, less every goal replay's pause and 3 s for each
+    kickoff countdown. A countdown is a run of held frames lasting 2 s or more.
     """
-    boost_pickups = events.get("boost_pickups", [])
-
-    play_seconds = _active_play_seconds(frames)
-    frame_timestamps = [frame.timestamp for frame in frames]
-
-    if player_id:
-        return _analyze_player_boost(
-            frames, frame_timestamps, boost_pickups, player_id, play_seconds
-        )
-    elif team:
-        return _analyze_team_boost(
-            frames, frame_timestamps, boost_pickups, team, play_seconds
-        )
-    else:
-        return _empty_boost()
-
-
-def _active_play_seconds(frames: list[Frame]) -> float:
-    """Return the seconds per-minute rates divide by, as ballchasing counts them.
-
-    Goal replays and kickoff countdowns come out of the recording, so rates compare
-    directly with ballchasing's published figures. Kickoffs are counted from frames
-    because detect_kickoffs reports several events per kickoff, and the clock
-    alignment can cut the kickoffs that follow late goals.
-    """
-    if not frames:
-        return 0.0
-
     span = frames[-1].timestamp - frames[0].timestamp
-    gaps = (later.timestamp - earlier.timestamp for earlier, later in pairwise(frames))
-    pauses = sum(gap for gap in gaps if gap > PAUSE_GAP_SECONDS)
-
-    kickoffs = 0
-    for is_hold, stretch in groupby(frames, key=_is_kickoff_hold):
-        run = list(stretch)
-        if is_hold and run[-1].timestamp - run[0].timestamp >= KICKOFF_HOLD_MIN_SECONDS:
-            kickoffs += 1
-
-    active = span - pauses - kickoffs * KICKOFF_COUNTDOWN_SECONDS
+    pauses = sum(
+        gap
+        for gap in (b.timestamp - a.timestamp for a, b in pairwise(frames))
+        if gap > PAUSE_GAP_S
+    )
+    countdowns = 0
+    for is_held, run in groupby(zip(frames, held, strict=True), key=lambda x: x[1]):
+        stretch = [frame for frame, _ in run]
+        if is_held and stretch[-1].timestamp - stretch[0].timestamp >= COUNTDOWN_MIN_S:
+            countdowns += 1
+    active = span - pauses - countdowns * COUNTDOWN_S
     return active if active > 0 else span
 
 
-def _is_kickoff_hold(frame: Frame) -> bool:
-    """Return True while the ball waits on the spot and every car is held still."""
-    ball = frame.ball
-    ball_is_set = (
-        abs(ball.position.x - KICKOFF_CENTER_POSITION.x) <= KICKOFF_POSITION_TOLERANCE
-        and abs(ball.position.y - KICKOFF_CENTER_POSITION.y)
-        <= KICKOFF_POSITION_TOLERANCE
-        and abs(ball.position.z - KICKOFF_CENTER_POSITION.z)
-        <= BALL_REST_HEIGHT_TOLERANCE
-        and vector_magnitude(ball.velocity) < BALL_STATIONARY_THRESHOLD
-    )
-    return (
-        ball_is_set
-        and bool(frame.players)
-        and all(
-            vector_magnitude(player.velocity) < KICKOFF_CAR_STILL_SPEED
-            for player in frame.players
-        )
-    )
+def _tank(frames: list[Frame], track: Track, held: list[bool]) -> dict[str, float]:
+    """Average boost, and time spent at 0 and at 100."""
+    total = 0.0
+    updates = 0
+    at_zero = at_full = 0.0
+    stretch = 0.0
+    cut_short = False
+    previous: float | None = None
+    previous_time: float | None = None
+    for index, car in track:
+        boost = car.boost_amount
+        time = frames[index].timestamp
+        cut_short = cut_short or car.is_demolished
+        if previous_time is not None:
+            gap = time - previous_time
+            if gap > PAUSE_GAP_S:
+                gap = 0.0
+                cut_short = True
+            stretch += gap
+        if boost != previous:
+            total += boost
+            updates += 1
+            if previous is not None and not cut_short and not held[index]:
+                if previous <= 0.0:
+                    at_zero += stretch
+                if previous >= 100.0:
+                    at_full += stretch
+            stretch = 0.0
+            cut_short = car.is_demolished
+        previous = boost
+        previous_time = time
+    return {
+        "avg_boost": round(total / updates, 2) if updates else 0.0,
+        "time_zero_boost_s": round(at_zero, 2),
+        "time_full_boost_s": round(at_full, 2),
+    }
 
 
-def _analyze_player_boost(
+def boost_stats(
     frames: list[Frame],
-    frame_timestamps: Sequence[float],
     pickups: list[BoostPickupEvent],
-    player_id: str,
-    play_seconds: float,
-) -> dict[str, Any]:
-    """Analyze boost metrics for a specific player."""
-
-    time_zero_boost = 0.0
-    time_hundred_boost = 0.0
-    update_sum = 0.0
-    update_count = 0
-    waste = 0.0
-    stretch_seconds = 0.0
-    stretch_cut_short = False
-
-    prev_boost = None
-    prev_position = None
-    prev_timestamp = None
-    speed_times: list[float] = []
-    speeds: list[float] = []
-
-    for frame in frames:
-        player_frame = frame.get_player_by_id(player_id)
-        if not player_frame:
-            continue
-
-        boost_amount = player_frame.boost_amount
-        stretch_cut_short = stretch_cut_short or player_frame.is_demolished
-        speed_times.append(frame.timestamp)
-        speeds.append(_calculate_speed(player_frame.velocity))
-
-        if prev_timestamp is not None:
-            time_delta = frame.timestamp - prev_timestamp
-            if time_delta > PAUSE_GAP_SECONDS:
-                time_delta = 0.0
-                stretch_cut_short = True
-            stretch_seconds += time_delta
-
-            # Waste detection - boost spent at the speed cap or with minimal benefit
-            boost_consumed = prev_boost - boost_amount
-            # A kickoff or demo reset moves the car and takes boost without spending it
-            was_reset = (
-                math.dist(prev_position, player_frame.position)
-                > RESET_TELEPORT_DISTANCE
-            )
-            if boost_consumed > WASTE_DETECTION_MIN_BOOST and not was_reset:
-                burst_speeds = _speeds_across_burst(speed_times, speeds, boost_consumed)
-                spent_at_cap = boost_consumed * _share_at_speed_cap(burst_speeds)
-
-                # Waste for boost spent at the speed cap, where it adds nothing
-                waste += spent_at_cap * 0.7  # Heuristic factor
-
-                # The rest is waste if the burst gained little speed
-                if burst_speeds[-1] - burst_speeds[0] < MIN_BOOST_SPEED_GAIN:
-                    waste += (boost_consumed - spent_at_cap) * 0.3  # Partial waste
-
-        # Ballchasing averages over updates, not time, and only counts a stretch
-        # at empty or full that the next update closed. One cut short by a goal,
-        # a demo or the end of the game counts for nothing.
-        if boost_amount != prev_boost:
-            update_sum += boost_amount
-            update_count += 1
-            if not stretch_cut_short and not _is_kickoff_hold(frame):
-                if prev_boost is not None and prev_boost <= ZERO_BOOST_THRESHOLD:
-                    time_zero_boost += stretch_seconds
-                if prev_boost is not None and prev_boost >= FULL_BOOST_THRESHOLD:
-                    time_hundred_boost += stretch_seconds
-            stretch_seconds = 0.0
-            stretch_cut_short = player_frame.is_demolished
-
-        prev_boost = boost_amount
-        prev_position = player_frame.position
-        prev_timestamp = frame.timestamp
-
-    amount_collected = 0.0
-    amount_stolen = 0.0
-    big_pads = 0
-    small_pads = 0
-    stolen_big_pads = 0
-    stolen_small_pads = 0
-    overfill = 0.0
-    player_team = _infer_player_team(frames, player_id)
-
-    player_pickups = [p for p in pickups if p.player_id == player_id]
-    delta_events = _collect_boost_delta_events(frames, player_id)
-
-    if player_pickups:
-        for pickup in player_pickups:
-            gain = _resolve_pickup_gain(pickup)
-            amount_collected += gain
-            if pickup.stolen:
-                amount_stolen += gain
-
-            if pickup.pad_type == "BIG":
-                big_pads += 1
-                if pickup.stolen:
-                    stolen_big_pads += 1
-            else:
-                small_pads += 1
-                if pickup.stolen:
-                    stolen_small_pads += 1
-
-            overfill += _compute_overfill(
-                pickup.pad_type,
-                _to_float(pickup.boost_before),
-            )
-
-    elif delta_events:
-        used_pickups: set[int] = set()
-        for event in delta_events:
-            gain = event["gain"]
-            if gain <= 0.5:
+    tracks: Mapping[str, Track],
+) -> dict[str, dict[str, Any]]:
+    """Each player's boost numbers."""
+    held = [is_held_for_kickoff(frame) for frame in frames]
+    minutes = max(active_play_seconds(frames, held) / 60.0, 1.0)
+    result = {}
+    for player_id, track in tracks.items():
+        collected = stolen = 0.0
+        for pickup in pickups:
+            if pickup.player_id != player_id:
                 continue
-
-            match_result = _match_pickup_for_delta(
-                event["timestamp"],
-                player_pickups,
-                used_pickups,
-                window=PAD_EVENT_MATCH_WINDOW,
-            )
-
-            pickup_match: BoostPickupEvent | None = None
-            match_before = None
-            event_pos = event.get("position")
-            pos_y: float | None = event_pos.y if event_pos is not None else None
-
-            if match_result is not None:
-                match_idx, candidate = match_result
-                raw_candidate_gain = _to_float(candidate.boost_gain)
-                candidate_gain = (
-                    raw_candidate_gain
-                    if raw_candidate_gain is not None
-                    else _resolve_pickup_gain(candidate)
-                )
-                if abs(candidate_gain - gain) > PAD_GAIN_MISMATCH_TOLERANCE:
-                    pickup_match = None
-                else:
-                    used_pickups.add(match_idx)
-                    pickup_match = candidate
-                    match_before = candidate.boost_before
-
-            if pickup_match is not None:
-                pad_type = pickup_match.pad_type
-                pad_meta = None
-                try:
-                    pad_idx = int(getattr(pickup_match, "pad_id", -1))
-                    if 0 <= pad_idx < len(FIELD.BOOST_PADS):
-                        pad_meta = FIELD.BOOST_PADS[pad_idx]
-                except TypeError, ValueError:
-                    pad_meta = None
-                if pad_meta is not None:
-                    if pos_y is None:
-                        pos_y = pad_meta.position.y
-            else:
-                if abs(gain - RESPAWN_GAIN) <= 1.5 and event["before"] <= 1.0:
-                    continue
-                inferred_pad, pad_dist_sq = _infer_pad_from_position(event_pos)
-                pad_trusted = (
-                    inferred_pad is not None
-                    and pad_dist_sq <= PAD_POSITION_TRUST_RADIUS_SQ
-                )
-                if pad_trusted and inferred_pad is not None:
-                    pad_is_big = inferred_pad.is_big
-                    override_big = False
-                    if not pad_is_big and gain >= FALLBACK_BIG_GAIN_THRESHOLD:
-                        pad_is_big = True
-                        override_big = True
-                    pad_type = "BIG" if pad_is_big else "SMALL"
-                    if pos_y is None:
-                        if override_big:
-                            pos_y = event_pos.y if event_pos is not None else None
-                        else:
-                            pos_y = inferred_pad.position.y
-                else:
-                    pad_type = "BIG" if gain >= FALLBACK_BIG_GAIN_THRESHOLD else "SMALL"
-                    if pos_y is None and event_pos is not None:
-                        pos_y = event_pos.y
-                if pos_y is None:
-                    pos_y = 0.0
-                match_before = event["before"]
-
-            if pos_y is None:
-                pos_y = 0.0
-            stolen = _position_is_stolen(pos_y, player_team)
-
-            amount_collected += gain
-            if stolen:
-                amount_stolen += gain
-
-            if pad_type == "BIG":
-                big_pads += 1
-                if stolen:
-                    stolen_big_pads += 1
-            else:
-                small_count = (
-                    max(1, int(round(gain / SMALL_PAD_UNIT))) if gain >= 6.0 else 1
-                )
-                small_pads += small_count
-                if stolen:
-                    stolen_small_pads += small_count
-
-            before_val = _to_float(match_before)
-            if before_val is None:
-                before_val = event["before"]
-            overfill += _compute_overfill(pad_type, before_val)
-
-    minutes = max(play_seconds / 60.0, 1.0)  # Avoid division by zero
-    bpm = amount_collected / minutes
-    bcpm = (big_pads + small_pads) / minutes
-
-    avg_boost = update_sum / update_count if update_count > 0 else 0.0
-
-    return {
-        "bpm": round(bpm, 2),
-        "bcpm": round(bcpm, 2),
-        "avg_boost": round(avg_boost, 2),
-        "time_zero_boost_s": round(time_zero_boost, 2),
-        "time_full_boost_s": round(time_hundred_boost, 2),
-        "boost_collected": round(amount_collected, 1),
-        "boost_stolen": round(amount_stolen, 1),
-        "big_pads": big_pads,
-        "small_pads": small_pads,
-        "stolen_big_pads": stolen_big_pads,
-        "stolen_small_pads": stolen_small_pads,
-        "overfill": round(overfill, 2),
-        "waste": round(waste, 2),
-    }
-
-
-def _resolve_pickup_gain(pickup: BoostPickupEvent) -> float:
-    """Determine boost gain for a pickup event with fallbacks for partial data."""
-    pad_capacity = 100.0 if pickup.pad_type == "BIG" else SMALL_PAD_UNIT
-    gain = _to_float(pickup.boost_gain)
-    if gain is None:
-        gain = 0.0
-
-    before = _to_float(pickup.boost_before)
-    after = _to_float(pickup.boost_after)
-
-    if gain >= 0.5:
-        return float(gain)
-
-    if before is not None and after is not None:
-        diff = after - before
-        if diff > 0.5:
-            return float(diff)
-        available = max(0.0, 100.0 - before)
-        if available > 0.5:
-            return float(min(pad_capacity, available))
-        return 0.0
-
-    if before is not None:
-        available = max(0.0, 100.0 - before)
-        if available > 0.5:
-            return float(min(pad_capacity, available))
-        return 0.0
-
-    if after is not None:
-        estimated_before = max(0.0, after - pad_capacity)
-        diff = after - estimated_before
-        if diff > 0.5:
-            return float(diff)
-        available = max(0.0, 100.0 - estimated_before)
-        if available > 0.5:
-            return float(min(pad_capacity, available))
-        return 0.0
-
-    return float(pad_capacity)
-
-
-# Boost pickup helpers --------------------------------------------------------
-
-
-def _compute_overfill(pad_type: str, boost_before: float | None) -> float:
-    """Boost a big pad had no room for, which is all the tank held before it.
-
-    Small pads are left out, as Ballchasing's overfill mostly leaves them out too.
-    """
-    if pad_type != "BIG" or boost_before is None:
-        return 0.0
-    return boost_before
-
-
-def _infer_pad_from_position(position: Vec3 | None) -> tuple[Any | None, float]:
-    """Return the nearest boost pad metadata and squared distance for a position."""
-    if position is None:
-        return None, float("inf")
-
-    best_pad = None
-    best_dist_sq = float("inf")
-    for pad in FIELD.BOOST_PADS:
-        dx = position.x - pad.position.x
-        dy = position.y - pad.position.y
-        dz = position.z - pad.position.z
-        dist_sq = dx * dx + dy * dy + dz * dz
-        if dist_sq < best_dist_sq:
-            best_dist_sq = dist_sq
-            best_pad = pad
-    return best_pad, best_dist_sq
-
-
-def _collect_boost_delta_events(
-    frames: list[Frame], player_id: str
-) -> list[dict[str, Any]]:
-    """Collect positive boost deltas for a player across frames."""
-    events: list[dict[str, Any]] = []
-    prev_boost: float | None = None
-    prev_timestamp: float | None = None
-
-    for frame in frames:
-        player_frame = frame.get_player_by_id(player_id)
-        if player_frame is None:
-            continue
-        current_boost = float(player_frame.boost_amount)
-        if prev_boost is not None and prev_timestamp is not None:
-            gain = current_boost - prev_boost
-            if gain > 0.5:
-                events.append(
-                    {
-                        "timestamp": frame.timestamp,
-                        "gain": gain,
-                        "before": prev_boost,
-                        "after": current_boost,
-                        "position": player_frame.position,
-                        "team": player_frame.team,
-                    }
-                )
-        prev_boost = current_boost
-        prev_timestamp = frame.timestamp
-    return events
-
-
-def _match_pickup_for_delta(
-    timestamp: float,
-    pickups: list[BoostPickupEvent],
-    used: set[int],
-    window: float = 0.15,
-) -> tuple[int, BoostPickupEvent] | None:
-    """Match a delta event to the nearest detected pickup."""
-    best_idx: int | None = None
-    best_diff = float("inf")
-    for idx, pickup in enumerate(pickups):
-        if idx in used:
-            continue
-        diff = abs(pickup.t - timestamp)
-        if diff <= window and diff < best_diff:
-            best_idx = idx
-            best_diff = diff
-    if best_idx is not None:
-        return best_idx, pickups[best_idx]
-    return None
-
-
-def _position_is_stolen(y_value: float, player_team: int | None) -> bool:
-    """Determine stolen classification based on position."""
-    if player_team not in (0, 1):
-        return False
-    if abs(y_value) <= PAD_NEUTRAL_TOLERANCE:
-        return False
-    if player_team == 0:
-        return y_value > PAD_NEUTRAL_TOLERANCE
-    return y_value < -PAD_NEUTRAL_TOLERANCE
-
-
-def _to_float(value: Any) -> float | None:
-    """Convert value to float if possible; otherwise None."""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except TypeError, ValueError:
-        return None
-
-
-def _infer_player_team(frames: list[Frame], player_id: str) -> int | None:
-    """Infer player's team from frame data."""
-    for frame in frames:
-        player_frame = frame.get_player_by_id(player_id)
-        if player_frame is not None:
-            return player_frame.team
-    return None
-
-
-def _analyze_team_boost(
-    frames: list[Frame],
-    frame_timestamps: Sequence[float],
-    pickups: list[BoostPickupEvent],
-    team: str,
-    play_seconds: float,
-) -> dict[str, Any]:
-    """Analyze aggregated boost metrics for a team."""
-
-    team_players = set()
-    team_num = 0 if team == "BLUE" else 1
-
-    for frame in frames:
-        team_players.update(
-            player.player_id for player in frame.get_players_by_team(team_num)
-        )
-
-    if not team_players:
-        return _empty_boost()
-
-    team_metrics = _empty_boost()
-
-    # Sorted because float totals depend on the order they are added in
-    for player_id in sorted(team_players):
-        player_metrics = _analyze_player_boost(
-            frames, frame_timestamps, pickups, player_id, play_seconds
-        )
-
-        # Sum most metrics
-        team_metrics["boost_collected"] += player_metrics["boost_collected"]
-        team_metrics["boost_stolen"] += player_metrics["boost_stolen"]
-        team_metrics["big_pads"] += player_metrics["big_pads"]
-        team_metrics["small_pads"] += player_metrics["small_pads"]
-        team_metrics["stolen_big_pads"] += player_metrics["stolen_big_pads"]
-        team_metrics["stolen_small_pads"] += player_metrics["stolen_small_pads"]
-        team_metrics["overfill"] += player_metrics["overfill"]
-        team_metrics["waste"] += player_metrics["waste"]
-        team_metrics["time_zero_boost_s"] += player_metrics["time_zero_boost_s"]
-        team_metrics["time_full_boost_s"] += player_metrics["time_full_boost_s"]
-
-        # Average these metrics
-        team_metrics["avg_boost"] += player_metrics["avg_boost"]
-
-    minutes = max(play_seconds / 60.0, 1.0)
-    team_metrics["bpm"] = round(team_metrics["boost_collected"] / minutes, 2)
-    team_metrics["bcpm"] = round(
-        (team_metrics["big_pads"] + team_metrics["small_pads"]) / minutes, 2
-    )
-    # Team avg_boost is the SUM of player averages (internal convention)
-    team_metrics["avg_boost"] = round(team_metrics["avg_boost"], 2)
-
-    # Round accumulated values
-    for key in [
-        "boost_collected",
-        "boost_stolen",
-        "overfill",
-        "waste",
-        "time_zero_boost_s",
-        "time_full_boost_s",
-    ]:
-        team_metrics[key] = round(team_metrics[key], 2)
-
-    return team_metrics
-
-
-def _empty_boost() -> dict[str, Any]:
-    """Return empty boost dict for degraded scenarios."""
-    return {
-        "bpm": 0.0,
-        "bcpm": 0.0,
-        "avg_boost": 0.0,
-        "time_zero_boost_s": 0.0,
-        "time_full_boost_s": 0.0,
-        "boost_collected": 0.0,
-        "boost_stolen": 0.0,
-        "big_pads": 0,
-        "small_pads": 0,
-        "stolen_big_pads": 0,
-        "stolen_small_pads": 0,
-        "overfill": 0.0,
-        "waste": 0.0,
-    }
-
-
-def _calculate_speed(velocity: Vec3) -> float:
-    """Calculate speed magnitude from velocity vector."""
-    if not velocity:
-        return 0.0
-    return math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-
-
-def _speeds_across_burst(
-    speed_times: list[float], speeds: list[float], boost_consumed: float
-) -> list[float]:
-    """Return speed samples for the boost burst ending at the latest sample.
-
-    Replicated boost updates as a burst ends, so the amount spent gives its length.
-    The first sample returned is the last one from before the burst began.
-    """
-    burst_start = speed_times[-1] - boost_consumed / BOOST_CONSUMPTION_PER_SECOND
-    start_index = max(bisect_right(speed_times, burst_start) - 1, 0)
-    return speeds[start_index:]
-
-
-def _share_at_speed_cap(burst_speeds: list[float]) -> float:
-    """Return the share of a burst spent at the speed cap."""
-    during_burst = burst_speeds[1:]
-    at_cap = sum(speed >= SPEED_CAP_WASTE_THRESHOLD for speed in during_burst)
-    return at_cap / len(during_burst)
+            collected += pickup.boost_gain
+            if pickup.stolen:
+                stolen += pickup.boost_gain
+        result[player_id] = {
+            "bcpm": round(collected / minutes, 2),
+            "boost_collected": round(collected, 1),
+            "boost_stolen": round(stolen, 1),
+            **_tank(frames, track, held),
+        }
+    return result

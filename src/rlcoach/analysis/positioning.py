@@ -1,384 +1,62 @@
-"""Positioning and rotation analysis for Rocket League replay data.
+"""Positioning: time behind the ball, and time as first, second or third man.
 
-This module computes positioning and rotational metrics from frame data:
-- Field occupancy: time spent in halves, thirds, and zones
-- Ball relationship: behind/ahead percentages and distances
-- Role detection: first/second/third man classification
-- Rotation compliance scoring with flag detection
-- Team positioning analysis and coordination metrics
-
-All calculations use deterministic thresholds and frame-by-frame
-analysis for consistent results.
+Each is a share of the frames the player is in, out of 100. Behind the ball
+means more than 50 uu nearer your own goal than the ball. The first man is
+the nearest to the ball on the team, the second has one teammate nearer, and
+so on. A team of fewer than three has no third man.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any
 
-from ..events.constants import PAUSE_GAP_SECONDS
-from ..field_constants import FieldConstants, Vec3
-from ..parser.types import Frame, Header
+from ..parser.types import Frame, Vec3
+from .tracks import Track
 
-# Role detection thresholds (distance-based)
-FIRST_MAN_DISTANCE_THRESHOLD = 800.0  # Distance to ball for first man
-TEAMMATE_DISTANCE_THRESHOLD = 1500.0  # Max distance to consider teammate proximity
-
-# Rotation compliance thresholds
-DOUBLE_COMMIT_DISTANCE = 500.0  # Both players within this distance of ball
-OVERCOMMIT_BOOST_THRESHOLD = 20.0  # Low boost threshold for overcommit detection
-ROTATION_VIOLATION_MIN_TIME = 1.0  # Minimum seconds for violation counting
-
-# Ball relationship thresholds
-BALL_AHEAD_THRESHOLD = 50.0  # Y-axis difference threshold
+BEHIND_BALL_UU = 50.0
 
 
-def analyze_positioning(
-    frames: list[Frame],
-    events: dict[str, list[Any]],
-    player_id: str | None = None,
-    team: str | None = None,
-    header: Header | None = None,
-) -> dict[str, Any]:
-    """Analyze positioning and rotation metrics for a player or team.
+def _distance(a: Vec3, b: Vec3) -> float:
+    return math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2)
 
-    Args:
-        frames: Normalized frame data for positioning analysis
-        events: Dictionary containing detected events (not heavily used for positioning)
-        player_id: If provided, analyze specific player; otherwise team analysis
-        team: Team filter ("BLUE" or "ORANGE"), required if player_id not provided
-        header: Optional header for match context
 
-    Returns:
-        Dictionary matching schema positioning definition:
-        {
-            "time_offensive_half_s": float,
-            "time_defensive_half_s": float,
-            "time_offensive_third_s": float,
-            "time_middle_third_s": float,
-            "time_defensive_third_s": float,
-            "behind_ball_pct": float,
-            "ahead_ball_pct": float,
-            "avg_distance_to_ball_m": float,
-            "avg_distance_to_teammate_m": float,
-            "first_man_pct": float,
-            "second_man_pct": float,
-            "third_man_pct": float
+def positioning_stats(
+    frames: list[Frame], tracks: Mapping[str, Track]
+) -> dict[str, dict[str, Any]]:
+    """Each player's shares of time behind the ball and in each role."""
+    result = {}
+    for player_id, track in tracks.items():
+        first_index, first_car = track[0]
+        team = first_car.team
+        # The team's size as the player first appears, bots included
+        team_size = sum(1 for car in frames[first_index].players if car.team == team)
+        behind = 0
+        roles = [0, 0, 0]
+        for index, car in track:
+            frame = frames[index]
+            ball = frame.ball.position
+            if team == 0:
+                behind += car.position.y < ball.y - BEHIND_BALL_UU
+            else:
+                behind += car.position.y > ball.y + BEHIND_BALL_UU
+            mine = _distance(car.position, ball)
+            nearer = sum(
+                1
+                for other in frame.players
+                if other.team == team
+                and other.player_id != player_id
+                and _distance(other.position, ball) < mine
+            )
+            roles[min(nearer, 2)] += 1
+        frames_in = len(track)
+        result[player_id] = {
+            "behind_ball_pct": round(behind / frames_in * 100.0, 2),
+            "first_man_pct": round(roles[0] / frames_in * 100.0, 2),
+            "second_man_pct": round(roles[1] / frames_in * 100.0, 2),
+            "third_man_pct": (
+                round(roles[2] / frames_in * 100.0, 2) if team_size >= 3 else None
+            ),
         }
-    """
-    if not frames:
-        return _empty_positioning()
-
-    if player_id:
-        return _analyze_player_positioning(frames, player_id)
-    elif team:
-        return _analyze_team_positioning(frames, team)
-    else:
-        return _empty_positioning()
-
-
-def _analyze_player_positioning(frames: list[Frame], player_id: str) -> dict[str, Any]:
-    """Analyze positioning metrics for a specific player."""
-
-    total_frames = 0
-    total_distance_to_ball = 0.0
-    total_distance_to_teammates = 0.0
-    teammate_distance_count = 0
-
-    # Field occupancy counters
-    time_offensive_half = 0.0
-    time_defensive_half = 0.0
-    time_offensive_third = 0.0
-    time_middle_third = 0.0
-    time_defensive_third = 0.0
-
-    # Ball relationship counters
-    behind_ball_frames = 0
-    ahead_ball_frames = 0
-
-    # Role counters
-    first_man_frames = 0
-    second_man_frames = 0
-    third_man_frames = 0
-
-    player_team = None
-    team_size = 0
-    for frame in frames:
-        player_frame = frame.get_player_by_id(player_id)
-        if player_frame:
-            player_team = player_frame.team
-            team_size = sum(1 for p in frame.players if p.team == player_team)
-            break
-
-    if player_team is None:
-        return _empty_positioning()
-
-    prev_timestamp: float | None = None
-
-    for idx, frame in enumerate(frames):
-        player_frame = frame.get_player_by_id(player_id)
-        if not player_frame:
-            continue
-
-        total_frames += 1
-
-        # Calculate frame duration for this frame without repeated list scans
-        frame_dt = _frame_duration(frames, idx, prev_timestamp)
-
-        # Field occupancy analysis
-        player_pos = player_frame.position
-
-        if player_team == 0:  # Blue team defends negative Y
-            is_offensive_half = player_pos.y > 0
-        else:  # Orange team defends positive Y
-            is_offensive_half = player_pos.y < 0
-
-        if is_offensive_half:
-            time_offensive_half += frame_dt
-        else:
-            time_defensive_half += frame_dt
-
-        # Field thirds analysis
-        field_third = FieldConstants.get_field_third(player_pos)
-        if player_team == 0:  # Blue team perspective
-            if field_third == "defensive":
-                time_defensive_third += frame_dt
-            elif field_third == "offensive":
-                time_offensive_third += frame_dt
-            else:
-                time_middle_third += frame_dt
-        else:  # Orange team perspective (flip thirds)
-            if field_third == "defensive":
-                time_offensive_third += frame_dt
-            elif field_third == "offensive":
-                time_defensive_third += frame_dt
-            else:
-                time_middle_third += frame_dt
-
-        # Ball relationship analysis
-        ball_pos = frame.ball.position
-        distance_to_ball = _calculate_distance(player_pos, ball_pos)
-        total_distance_to_ball += distance_to_ball
-
-        # Behind/ahead ball calculation (Y-axis based)
-        if player_team == 0:  # Blue team
-            if player_pos.y < ball_pos.y - BALL_AHEAD_THRESHOLD:
-                behind_ball_frames += 1
-            elif player_pos.y > ball_pos.y + BALL_AHEAD_THRESHOLD:
-                ahead_ball_frames += 1
-        else:  # Orange team
-            if player_pos.y > ball_pos.y + BALL_AHEAD_THRESHOLD:
-                behind_ball_frames += 1
-            elif player_pos.y < ball_pos.y - BALL_AHEAD_THRESHOLD:
-                ahead_ball_frames += 1
-
-        # Role detection (relative to teammates)
-        teammates = [
-            p
-            for p in frame.players
-            if p.team == player_team and p.player_id != player_id
-        ]
-
-        if teammates:
-            teammate_distances = []
-            for teammate in teammates:
-                teammate_dist = _calculate_distance(player_pos, teammate.position)
-                teammate_distances.append(teammate_dist)
-                total_distance_to_teammates += teammate_dist
-                teammate_distance_count += 1
-
-            teammate_ball_distances = [
-                _calculate_distance(t.position, ball_pos) for t in teammates
-            ]
-            player_ball_distance = distance_to_ball
-
-            closer_teammates = sum(
-                1 for dist in teammate_ball_distances if dist < player_ball_distance
-            )
-
-            if closer_teammates == 0:
-                first_man_frames += 1
-            elif closer_teammates == 1:
-                second_man_frames += 1
-            else:
-                third_man_frames += 1
-        else:
-            # No teammates - player is always first man
-            first_man_frames += 1
-
-        prev_timestamp = frame.timestamp
-
-    if total_frames == 0:
-        return _empty_positioning()
-
-    behind_ball_pct = (behind_ball_frames / total_frames) * 100.0
-    ahead_ball_pct = (ahead_ball_frames / total_frames) * 100.0
-    avg_distance_to_ball_m = (
-        total_distance_to_ball / total_frames
-    ) / 100.0  # Convert UU to meters
-
-    avg_distance_to_teammate_m = 0.0
-    if teammate_distance_count > 0:
-        avg_distance_to_teammate_m = (
-            total_distance_to_teammates / teammate_distance_count
-        ) / 100.0
-
-    first_man_pct = (first_man_frames / total_frames) * 100.0
-    second_man_pct = (second_man_frames / total_frames) * 100.0
-    # Third man is only meaningful in 3v3 (team_size >= 3)
-    third_man_pct = (
-        (third_man_frames / total_frames) * 100.0 if team_size >= 3 else None
-    )
-
-    return {
-        "time_offensive_half_s": round(time_offensive_half, 2),
-        "time_defensive_half_s": round(time_defensive_half, 2),
-        "time_offensive_third_s": round(time_offensive_third, 2),
-        "time_middle_third_s": round(time_middle_third, 2),
-        "time_defensive_third_s": round(time_defensive_third, 2),
-        "behind_ball_pct": round(behind_ball_pct, 2),
-        "ahead_ball_pct": round(ahead_ball_pct, 2),
-        "avg_distance_to_ball_m": round(avg_distance_to_ball_m, 2),
-        "avg_distance_to_teammate_m": round(avg_distance_to_teammate_m, 2),
-        "first_man_pct": round(first_man_pct, 2),
-        "second_man_pct": round(second_man_pct, 2),
-        "third_man_pct": round(third_man_pct, 2) if third_man_pct is not None else None,
-    }
-
-
-def _analyze_team_positioning(frames: list[Frame], team: str) -> dict[str, Any]:
-    """Analyze positioning metrics for a team (aggregate all players)."""
-
-    team_players = set()
-    team_id = 0 if team == "BLUE" else 1
-
-    for frame in frames:
-        team_players.update(
-            player.player_id for player in frame.get_players_by_team(team_id)
-        )
-
-    team_size = len(team_players)
-    if team_size == 0:
-        return _empty_positioning(team_size=0)
-
-    # third_man_pct is only meaningful for 3v3 (team_size >= 3)
-    team_metrics = {
-        "time_offensive_half_s": 0.0,
-        "time_defensive_half_s": 0.0,
-        "time_offensive_third_s": 0.0,
-        "time_middle_third_s": 0.0,
-        "time_defensive_third_s": 0.0,
-        "behind_ball_pct": 0.0,
-        "ahead_ball_pct": 0.0,
-        "avg_distance_to_ball_m": 0.0,
-        "avg_distance_to_teammate_m": 0.0,
-        "first_man_pct": 0.0,
-        "second_man_pct": 0.0,
-        "third_man_pct": 0.0 if team_size >= 3 else None,
-    }
-
-    # Sorted because float totals depend on the order they are added in
-    for player_id in sorted(team_players):
-        player_metrics = _analyze_player_positioning(frames, player_id)
-
-        # Sum time-based metrics
-        team_metrics["time_offensive_half_s"] += player_metrics["time_offensive_half_s"]
-        team_metrics["time_defensive_half_s"] += player_metrics["time_defensive_half_s"]
-        team_metrics["time_offensive_third_s"] += player_metrics[
-            "time_offensive_third_s"
-        ]
-        team_metrics["time_middle_third_s"] += player_metrics["time_middle_third_s"]
-        team_metrics["time_defensive_third_s"] += player_metrics[
-            "time_defensive_third_s"
-        ]
-
-        # Average percentage and distance metrics
-        team_metrics["behind_ball_pct"] += player_metrics["behind_ball_pct"]
-        team_metrics["ahead_ball_pct"] += player_metrics["ahead_ball_pct"]
-        team_metrics["avg_distance_to_ball_m"] += player_metrics[
-            "avg_distance_to_ball_m"
-        ]
-        team_metrics["avg_distance_to_teammate_m"] += player_metrics[
-            "avg_distance_to_teammate_m"
-        ]
-        team_metrics["first_man_pct"] += player_metrics["first_man_pct"]
-        team_metrics["second_man_pct"] += player_metrics["second_man_pct"]
-        # Only aggregate third_man_pct if it's meaningful (3v3)
-        if team_size >= 3 and player_metrics["third_man_pct"] is not None:
-            team_metrics["third_man_pct"] += player_metrics["third_man_pct"]
-
-    if team_size > 0:
-        team_metrics["behind_ball_pct"] = round(
-            team_metrics["behind_ball_pct"] / team_size, 2
-        )
-        team_metrics["ahead_ball_pct"] = round(
-            team_metrics["ahead_ball_pct"] / team_size, 2
-        )
-        team_metrics["avg_distance_to_ball_m"] = round(
-            team_metrics["avg_distance_to_ball_m"] / team_size, 2
-        )
-        team_metrics["avg_distance_to_teammate_m"] = round(
-            team_metrics["avg_distance_to_teammate_m"] / team_size, 2
-        )
-        team_metrics["first_man_pct"] = round(
-            team_metrics["first_man_pct"] / team_size, 2
-        )
-        team_metrics["second_man_pct"] = round(
-            team_metrics["second_man_pct"] / team_size, 2
-        )
-        if team_size >= 3:
-            team_metrics["third_man_pct"] = round(
-                team_metrics["third_man_pct"] / team_size, 2
-            )
-
-    return team_metrics
-
-
-def _calculate_distance(pos1: Vec3, pos2: Vec3) -> float:
-    """Calculate 3D distance between two positions."""
-    dx = pos1.x - pos2.x
-    dy = pos1.y - pos2.y
-    dz = pos1.z - pos2.z
-    return math.sqrt(dx**2 + dy**2 + dz**2)
-
-
-def _empty_positioning(team_size: int = 0) -> dict[str, Any]:
-    """Return empty positioning dict for degraded scenarios.
-
-    Args:
-        team_size: Number of players on the team. If < 3, third_man_pct is None.
-    """
-    return {
-        "time_offensive_half_s": 0.0,
-        "time_defensive_half_s": 0.0,
-        "time_offensive_third_s": 0.0,
-        "time_middle_third_s": 0.0,
-        "time_defensive_third_s": 0.0,
-        "behind_ball_pct": 0.0,
-        "ahead_ball_pct": 0.0,
-        "avg_distance_to_ball_m": 0.0,
-        "avg_distance_to_teammate_m": 0.0,
-        "first_man_pct": 0.0,
-        "second_man_pct": 0.0,
-        "third_man_pct": 0.0 if team_size >= 3 else None,
-    }
-
-
-def _frame_duration(
-    frames: list[Frame],
-    index: int,
-    prev_timestamp: float | None,
-) -> float:
-    """Compute the duration represented by a frame for positioning analysis."""
-
-    if index < len(frames) - 1:
-        next_dt = frames[index + 1].timestamp - frames[index].timestamp
-        if 0 < next_dt <= PAUSE_GAP_SECONDS:
-            return next_dt
-
-    if prev_timestamp is not None:
-        prev_dt = frames[index].timestamp - prev_timestamp
-        if 0 < prev_dt <= PAUSE_GAP_SECONDS:
-            return prev_dt
-
-    return 0.033
+    return result
