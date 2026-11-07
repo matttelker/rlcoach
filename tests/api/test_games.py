@@ -186,19 +186,6 @@ class TestReplayEndpoint:
         assert len(data["player_stats"]) > 0
 
 
-class TestReplayFullEndpoint:
-    """Tests for GET /replays/{id}/full."""
-
-    def test_replay_full_returns_complete_data(self, client):
-        """Should return complete replay data."""
-        response = client.get("/replays/replay_0/full")
-        assert response.status_code == 200
-        data = response.json()
-
-        assert "replay" in data
-        assert "player_stats" in data
-
-
 class TestReplayPlayerNames:
     """Game detail needs a name to show for each player."""
 

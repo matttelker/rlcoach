@@ -43,20 +43,6 @@ export interface ReplayDetail extends ReplaySummary {
   player_stats: PlayerStats[];
 }
 
-export interface ReplayFull extends ReplayDetail {
-  events: GameEvent[];
-  json_report: Record<string, unknown>;
-}
-
-export interface GameEvent {
-  type: string;
-  time_seconds: number;
-  player_id?: string;
-  player_name?: string;
-  team?: 'BLUE' | 'ORANGE';
-  details?: Record<string, unknown>;
-}
-
 // Analysis types
 export interface TrendValue {
   date: string;

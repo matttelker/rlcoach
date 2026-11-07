@@ -1,32 +1,24 @@
+from rlcoach.db.models import PlayerGameStats
 from rlcoach.metrics import (
-    METRIC_CATALOG,
+    DIRECTIONS,
     MetricDirection,
-    get_metric,
-    get_metrics_by_category,
     is_valid_metric,
+    metric_direction,
 )
 
 
-def test_metric_catalog_has_bcpm():
-    """Catalog should contain boost metrics."""
-    assert "bcpm" in METRIC_CATALOG
-    metric = METRIC_CATALOG["bcpm"]
-    assert metric.display_name == "Boost/Min"
-    assert metric.direction == MetricDirection.HIGHER_BETTER
+def test_every_metric_is_a_stats_column():
+    columns = set(PlayerGameStats.__table__.columns.keys())
+    assert set(DIRECTIONS) <= columns
 
 
-def test_get_metric_returns_none_for_invalid():
-    assert get_metric("invalid_metric_xyz") is None
+def test_directions_say_which_way_is_better():
+    assert metric_direction("bcpm") is MetricDirection.HIGHER_BETTER
+    assert metric_direction("demos_taken") is MetricDirection.LOWER_BETTER
+    assert metric_direction("first_man_pct") is MetricDirection.CONTEXT_DEPENDENT
 
 
-def test_is_valid_metric():
-    assert is_valid_metric("bcpm") is True
-    assert is_valid_metric("goals") is True
-    assert is_valid_metric("fake_metric") is False
-
-
-def test_get_metrics_by_category():
-    boost_metrics = get_metrics_by_category("boost")
-    assert "bcpm" in boost_metrics
-    assert "avg_boost" in boost_metrics
-    assert "goals" not in boost_metrics
+def test_unknown_metrics_are_not_valid():
+    assert metric_direction("wavedash_count") is None
+    assert not is_valid_metric("wavedash_count")
+    assert is_valid_metric("goals")

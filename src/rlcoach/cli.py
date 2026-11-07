@@ -204,81 +204,6 @@ def handle_config_command(args) -> int:
     return 1
 
 
-def handle_benchmarks_command(args) -> int:
-    """Handle the benchmarks subcommand."""
-    from .benchmarks import BenchmarkValidationError, import_benchmarks
-    from .db.models import Benchmark
-    from .db.session import create_session, init_db
-
-    config_path = get_default_config_path()
-    try:
-        config = load_config(config_path)
-    except ConfigError as e:
-        print(f"Configuration error: {e}")
-        return 1
-    except FileNotFoundError:
-        print(f"Config file not found: {config_path}")
-        print("Run 'rlcoach config --init' to create one.")
-        return 1
-
-    init_db(config.db_path)
-
-    if args.benchmarks_command == "import":
-        file_path = Path(args.file)
-        if not file_path.exists():
-            print(f"Benchmark file not found: {file_path}")
-            return 1
-
-        try:
-            count = import_benchmarks(file_path, replace=args.replace)
-            print(f"Imported {count} benchmarks from {file_path}")
-            return 0
-        except BenchmarkValidationError as e:
-            print(f"Validation error: {e}")
-            return 1
-        except Exception as e:
-            print(f"Error importing benchmarks: {e}")
-            return 1
-
-    elif args.benchmarks_command == "list":
-        session = create_session()
-        try:
-            query = session.query(Benchmark)
-            if args.metric:
-                query = query.filter(Benchmark.metric == args.metric)
-            if args.playlist:
-                query = query.filter(Benchmark.playlist == args.playlist)
-            if args.rank:
-                query = query.filter(Benchmark.rank_tier == args.rank)
-
-            benchmarks = query.order_by(Benchmark.metric, Benchmark.rank_tier).all()
-
-            if not benchmarks:
-                print(
-                    "No benchmarks found. Use 'rlcoach benchmarks import <file>' "
-                    "to add some."
-                )
-                return 0
-
-            print(
-                f"{'Metric':<20} {'Playlist':<10} {'Rank':<6} "
-                f"{'Median':>10} {'Source':<20}"
-            )
-            print("-" * 70)
-            for b in benchmarks:
-                print(
-                    f"{b.metric:<20} {b.playlist:<10} {b.rank_tier:<6} "
-                    f"{b.median_value:>10.1f} {b.source:<20}"
-                )
-            print(f"\nTotal: {len(benchmarks)} benchmarks")
-            return 0
-        finally:
-            session.close()
-
-    print("Use 'benchmarks import <file>' or 'benchmarks list'")
-    return 1
-
-
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point.
 
@@ -362,26 +287,6 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true", help="Force overwrite existing config"
     )
 
-    benchmarks_parser = subparsers.add_parser(
-        "benchmarks", help="Manage benchmark data"
-    )
-    benchmarks_subparsers = benchmarks_parser.add_subparsers(
-        dest="benchmarks_command", help="Benchmark commands"
-    )
-
-    benchmarks_import = benchmarks_subparsers.add_parser(
-        "import", help="Import benchmarks from JSON file"
-    )
-    benchmarks_import.add_argument("file", type=str, help="Path to benchmark JSON file")
-    benchmarks_import.add_argument(
-        "--replace", action="store_true", help="Replace all existing benchmarks"
-    )
-
-    benchmarks_list = benchmarks_subparsers.add_parser("list", help="List benchmarks")
-    benchmarks_list.add_argument("--metric", type=str, help="Filter by metric name")
-    benchmarks_list.add_argument("--playlist", type=str, help="Filter by playlist")
-    benchmarks_list.add_argument("--rank", type=str, help="Filter by rank tier")
-
     serve_parser = subparsers.add_parser(
         "serve",
         help="Serve the dashboard and API on one port, and load new replays",
@@ -434,8 +339,6 @@ def main(argv: list[str] | None = None) -> int:
         return handle_reviews_command(args)
     elif args.command == "config":
         return handle_config_command(args)
-    elif args.command == "benchmarks":
-        return handle_benchmarks_command(args)
     elif args.command == "serve":
         return handle_serve_command(args)
     elif args.command == "start":

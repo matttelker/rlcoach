@@ -12,7 +12,7 @@ from ...analysis.patterns import compute_pattern_analysis
 from ...analysis.weaknesses import detect_weaknesses
 from ...db import create_session, get_session
 from ...db.models import Benchmark, PlayerGameStats, Replay
-from ...metrics import MetricDirection, get_metric
+from ...metrics import MetricDirection, metric_direction
 
 router = APIRouter(tags=["analysis"])
 
@@ -48,8 +48,7 @@ def _resolve_playlist(playlist: str | None) -> str:
 
 def _metric_direction(metric: str) -> str:
     """Return "lower" for metrics where less is better, otherwise "higher"."""
-    definition = get_metric(metric)
-    if definition and definition.direction == MetricDirection.LOWER_BETTER:
+    if metric_direction(metric) is MetricDirection.LOWER_BETTER:
         return MetricDirection.LOWER_BETTER.value
     return MetricDirection.HIGHER_BETTER.value
 

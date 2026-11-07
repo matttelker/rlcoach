@@ -2,7 +2,6 @@ import axios from 'axios';
 import type {
   Game,
   ReplayDetail,
-  ReplayFull,
   TrendsResponse,
   Benchmark,
   CompareResponse,
@@ -44,11 +43,6 @@ export async function getGames(params: GamesParams = {}): Promise<PaginatedRespo
 
 export async function getReplay(replayId: string): Promise<ReplayDetail> {
   const { data } = await api.get<ReplayDetail>(`/replays/${encodeURIComponent(replayId)}`);
-  return data;
-}
-
-export async function getReplayFull(replayId: string): Promise<ReplayFull> {
-  const { data } = await api.get<ReplayFull>(`/replays/${encodeURIComponent(replayId)}/full`);
   return data;
 }
 
