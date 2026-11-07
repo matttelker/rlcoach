@@ -185,10 +185,6 @@ def insert_replay(
 
         play_date = compute_play_date(played_at_utc, config.preferences.timezone)
 
-        json_report_path = str(
-            config.paths.reports_dir / play_date.isoformat() / f"{replay_id}.json"
-        )
-
         replay = Replay(
             replay_id=replay_id,
             source_file=report.get("source_file", ""),
@@ -205,7 +201,6 @@ def insert_replay(
             my_score=my_score,
             opponent_score=opp_score,
             result=result,
-            json_report_path=json_report_path,
         )
         session.add(replay)
         session.commit()

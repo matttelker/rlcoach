@@ -53,7 +53,6 @@ def test_insert_replay_with_utc_datetime(tmp_path):
             my_score=3,
             opponent_score=1,
             result="WIN",
-            json_report_path="/path/to/report.json",
         )
         session.add(replay)
         session.commit()

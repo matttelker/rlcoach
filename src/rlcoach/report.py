@@ -1,19 +1,13 @@
-"""Report generator orchestrating the full analysis pipeline.
+"""Analyze one replay end to end.
 
-Builds a schema-conformant JSON report from a replay file using:
-ingest → parser adapter → normalization → events → analyzers.
-
-Provides header-only fallback via the null adapter and returns
-deterministic success or error payloads. Includes helpers for
-atomic file writes and schema validation.
+Runs ingest, the parser, normalization, events and analyzers, and returns the
+result as a dict that the database writer stores. Nothing is written to disk.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 import enum
-import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -35,9 +29,7 @@ from .normalize import build_timeline as build_normalized_frames
 from .normalize import measure_frame_rate
 from .parser import get_adapter
 from .parser.types import NetworkFrames as NFType
-from .schema import validate_report
 from .utils.identity import build_player_identities
-from .version import get_schema_version
 
 _ALLOWED_PLAYLISTS = {
     "DUEL",
@@ -343,7 +335,6 @@ def generate_report(
         analysis_out = aggregate_analysis(normalized_frames, events_dict, header)
 
         replay_id = ingest_info.get("sha256", "unknown")
-        schema_version = get_schema_version()
 
         recorded_hz = measure_frame_rate(normalized_frames)
         playlist_value, playlist_warnings = _normalize_playlist_id(
@@ -573,7 +564,6 @@ def generate_report(
         report = {
             "replay_id": replay_id,
             "source_file": str(replay_path),
-            "schema_version": schema_version,
             "generated_at_utc": _utc_now_iso(),
             "metadata": metadata,
             "quality": quality,
@@ -583,28 +573,7 @@ def generate_report(
             "analysis": analysis_block,
         }
 
-        validate_report(report)
         return report
 
     except Exception as e:  # Catch any failure and map to error contract
         return {"error": "unreadable_replay_file", "details": str(e)}
-
-
-def write_report_atomically(
-    report: dict[str, Any], out_path: Path, pretty: bool = False
-) -> None:
-    """Write JSON file atomically to avoid partial writes."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-    try:
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2 if pretty else None)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temp_path, out_path)
-    finally:
-        if temp_path.exists():
-            try:
-                temp_path.unlink()
-            except OSError:
-                pass

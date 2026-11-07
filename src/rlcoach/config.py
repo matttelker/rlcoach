@@ -34,7 +34,6 @@ class IdentityConfig:
 class PathsConfig:
     watch_folder: Path
     data_dir: Path
-    reports_dir: Path
 
 
 @dataclass
@@ -155,9 +154,6 @@ def load_config(config_path: Path) -> RLCoachConfig:
     paths = PathsConfig(
         watch_folder=Path(paths_data.get("watch_folder", "~/Replays")).expanduser(),
         data_dir=Path(paths_data.get("data_dir", "~/.rlcoach/data")).expanduser(),
-        reports_dir=Path(
-            paths_data.get("reports_dir", "~/.rlcoach/reports")
-        ).expanduser(),
     )
 
     prefs_data = data.get("preferences", {})

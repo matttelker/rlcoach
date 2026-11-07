@@ -24,7 +24,6 @@ display_names = ["TestPlayer"]
 [paths]
 watch_folder = "~/Replays"
 data_dir = "~/.rlcoach/data"
-reports_dir = "~/.rlcoach/reports"
 
 [preferences]
 primary_playlist = "DOUBLES"
@@ -66,7 +65,6 @@ def test_validate_timezone_invalid():
         paths=PathsConfig(
             watch_folder=Path("~/Replays"),
             data_dir=Path("~/.rlcoach/data"),
-            reports_dir=Path("~/.rlcoach/reports"),
         ),
         preferences=PreferencesConfig(timezone="Invalid/Timezone"),
     )
@@ -82,7 +80,6 @@ def test_validate_platform_id_format():
         paths=PathsConfig(
             watch_folder=Path("~/Replays"),
             data_dir=Path("~/.rlcoach/data"),
-            reports_dir=Path("~/.rlcoach/reports"),
         ),
         preferences=PreferencesConfig(),
     )
@@ -104,7 +101,6 @@ def test_validate_excluded_names_overlap():
         paths=PathsConfig(
             watch_folder=Path("~/Replays"),
             data_dir=Path("~/.rlcoach/data"),
-            reports_dir=Path("~/.rlcoach/reports"),
         ),
         preferences=PreferencesConfig(),
     )
@@ -123,7 +119,6 @@ def test_validate_excluded_names_no_overlap():
         paths=PathsConfig(
             watch_folder=Path("~/Replays"),
             data_dir=Path("~/.rlcoach/data"),
-            reports_dir=Path("~/.rlcoach/reports"),
         ),
         preferences=PreferencesConfig(),
     )
@@ -144,7 +139,6 @@ excluded_names = ["CasualAccount", "FamilyAccount"]
 [paths]
 watch_folder = "~/Replays"
 data_dir = "~/.rlcoach/data"
-reports_dir = "~/.rlcoach/reports"
 
 [preferences]
 primary_playlist = "DOUBLES"
@@ -166,7 +160,6 @@ display_names = ["MainAccount"]
 [paths]
 watch_folder = "~/Replays"
 data_dir = "~/.rlcoach/data"
-reports_dir = "~/.rlcoach/reports"
 
 [preferences]
 primary_playlist = "DOUBLES"

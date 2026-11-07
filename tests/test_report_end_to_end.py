@@ -4,13 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from rlcoach.cli import main as cli_main
 from rlcoach.events import detect_touches
 from rlcoach.normalize import build_timeline
 from rlcoach.parser import get_adapter
 from rlcoach.parser.types import Header, NetworkDiagnostics, NetworkFrames, PlayerInfo
 from rlcoach.report import generate_report
-from rlcoach.schema import validate_report, validate_report_file
 
 REPO_ROOT = Path(__file__).parent.parent
 SAMPLE_REPLAY = REPO_ROOT / "Replay_files" / "0925.replay"
@@ -70,38 +68,6 @@ class _FakeNetworkAdapterWithoutHeaderPlayers(_FakeNetworkAdapter):
         )
 
 
-def test_cli_analyze_header_only_success(tmp_path: Path, monkeypatch):
-    replay = tmp_path / "sample.replay"
-    _make_dummy_replay(replay)
-
-    # Output directory
-    out_dir = tmp_path / "out"
-
-    # Run CLI: rlcoach analyze <file> --header-only --out <dir>
-    import sys
-
-    orig_argv = sys.argv
-    try:
-        sys.argv = [
-            "rlcoach",
-            "analyze",
-            str(replay),
-            "--header-only",
-            "--out",
-            str(out_dir),
-        ]
-        exit_code = cli_main()
-        assert exit_code in (0, 1)  # Allow non-zero if error, we validate below
-    finally:
-        sys.argv = orig_argv
-
-    # Locate output JSON
-    out_file = out_dir / "sample.json"
-    assert out_file.exists(), "Report file should be written"
-
-    validate_report_file(str(out_file))
-
-
 def test_generate_report_error_contract(tmp_path: Path):
     # Non-existent replay path triggers error
     bad_path = tmp_path / "missing.replay"
@@ -109,7 +75,6 @@ def test_generate_report_error_contract(tmp_path: Path):
     assert report.get("error") == "unreadable_replay_file"
     assert isinstance(report.get("details"), str)
     # Error report must validate as well
-    validate_report(report)
 
 
 def test_report_includes_network_diagnostics_when_degraded(tmp_path: Path, monkeypatch):
@@ -151,7 +116,6 @@ def test_report_includes_network_diagnostics_when_degraded(tmp_path: Path, monke
         "attempted_backends",
     }
     assert diagnostics["attempted_backends"] == []
-    validate_report(report)
 
 
 def test_report_includes_network_diagnostics_when_unavailable(
@@ -184,7 +148,6 @@ def test_report_includes_network_diagnostics_when_unavailable(
         "attempted_backends",
     }
     assert diagnostics["attempted_backends"] == []
-    validate_report(report)
 
 
 def test_report_includes_parser_scorecard(tmp_path: Path, monkeypatch):
@@ -255,7 +218,6 @@ def test_report_includes_parser_scorecard(tmp_path: Path, monkeypatch):
     assert scorecard["players_with_identity"] == 2
     assert scorecard["expected_players"] == 2
     assert diagnostics["attempted_backends"] == ["boxcars"]
-    validate_report(report)
 
 
 def test_report_surfaces_parser_event_provenance_without_duplicates(
@@ -385,7 +347,6 @@ def test_report_surfaces_parser_event_provenance_without_duplicates(
         "KICKOFF": "parser",
     }
     assert repeated["events"] == report["events"]
-    validate_report(report)
 
 
 def test_report_marks_unusable_network_parse_when_player_coverage_is_empty(
@@ -494,7 +455,6 @@ def test_report_marks_missing_expected_players_as_zero_identity_coverage(
     assert scorecard["player_identity_coverage"] == 0.0
     assert scorecard["players_with_identity"] == 0
     assert scorecard["expected_players"] == 0
-    validate_report(report)
 
 
 @pytest.mark.skipif(not SAMPLE_REPLAY.exists(), reason="Sample replay not found")
@@ -524,8 +484,6 @@ def test_generate_report_with_identity_config():
         # None of these players should match our fake identity
         assert player["is_me"] is False, "No players should match fake identity"
 
-    validate_report(report)
-
 
 @pytest.mark.skipif(not SAMPLE_REPLAY.exists(), reason="Sample replay not found")
 def test_generate_report_without_identity_config():
@@ -539,8 +497,6 @@ def test_generate_report_without_identity_config():
         assert (
             "is_me" not in player
         ), "is_me field should NOT be present without identity_config"
-
-    validate_report(report)
 
 
 @pytest.mark.parametrize(
@@ -562,7 +518,6 @@ def test_report_says_whether_the_match_went_to_overtime(replay, overtime):
     report = generate_report(path, adapter_name="rust")
 
     assert report["metadata"]["overtime"] is overtime
-    validate_report(report)
 
 
 @pytest.mark.skipif(not TIED_TOUCH_REPLAY.exists(), reason="Sample replay not found")
@@ -664,7 +619,6 @@ def test_header_only_no_network_no_goal_leakage(tmp_path: Path, monkeypatch):
     assert report["quality"]["parser"]["network_diagnostics"]["frames_emitted"] == 0
     assert report["events"]["goals"] == []
     assert report["events"]["timeline"] == []
-    validate_report(report)
 
     # Case 2: header_only=False but adapter returns no frames
     report2 = generate_report(replay, header_only=False, adapter_name="rust")
@@ -672,4 +626,3 @@ def test_header_only_no_network_no_goal_leakage(tmp_path: Path, monkeypatch):
     assert report2["quality"]["parser"]["network_diagnostics"]["frames_emitted"] == 0
     assert report2["events"]["goals"] == []
     assert report2["events"]["timeline"] == []
-    validate_report(report2)

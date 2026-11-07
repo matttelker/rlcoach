@@ -22,7 +22,6 @@ platform_ids = ["steam:123"]
 [paths]
 watch_folder = "~/Replays"
 data_dir = "{(tmp_path / "data").as_posix()}"
-reports_dir = "{(tmp_path / "reports").as_posix()}"
 """)
 
     benchmark_file = tmp_path / "benchmarks.json"
@@ -59,7 +58,6 @@ platform_ids = ["steam:123"]
 [paths]
 watch_folder = "~/Replays"
 data_dir = "{(tmp_path / "data").as_posix()}"
-reports_dir = "{(tmp_path / "reports").as_posix()}"
 """)
 
     benchmark_file = tmp_path / "benchmarks.json"

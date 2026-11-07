@@ -22,7 +22,6 @@ def config():
         paths=PathsConfig(
             watch_folder=Path("~/Replays"),
             data_dir=Path("~/.rlcoach/data"),
-            reports_dir=Path("~/.rlcoach/reports"),
         ),
         preferences=PreferencesConfig(timezone="America/Los_Angeles"),
     )
@@ -91,7 +90,6 @@ def test_insert_player_stats_creates_records(tmp_path, sample_report, config):
             my_score=3,
             opponent_score=1,
             result="WIN",
-            json_report_path="/path/to/report.json",
         )
     )
     session.commit()
@@ -138,7 +136,6 @@ def test_insert_player_stats_handles_missing_metrics(tmp_path, config):
             my_score=1,
             opponent_score=0,
             result="WIN",
-            json_report_path="/path/to/report.json",
         )
     )
     session.commit()

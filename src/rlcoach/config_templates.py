@@ -22,8 +22,6 @@ excluded_names = []
 watch_folder = "~/Dropbox/RocketLeague/Replays"
 # Where to store processed data (SQLite database)
 data_dir = "~/.rlcoach/data"
-# Where to store JSON reports
-reports_dir = "~/.rlcoach/reports"
 
 [preferences]
 # Playlist the Stats pages open on (DOUBLES, STANDARD, DUEL)

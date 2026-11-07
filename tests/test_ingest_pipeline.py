@@ -35,7 +35,6 @@ def mock_config(tmp_path):
         paths=PathsConfig(
             watch_folder=tmp_path / "replays",
             data_dir=tmp_path / "data",
-            reports_dir=tmp_path / "reports",
         ),
         preferences=PreferencesConfig(
             primary_playlist="DOUBLES",
@@ -164,7 +163,6 @@ class TestProcessReplayFile:
             paths=PathsConfig(
                 watch_folder=tmp_path / "replays",
                 data_dir=tmp_path / "data",
-                reports_dir=tmp_path / "reports",
             ),
             preferences=PreferencesConfig(),
         )
@@ -213,7 +211,6 @@ class TestProcessReplayFile:
             paths=PathsConfig(
                 watch_folder=tmp_path / "replays",
                 data_dir=tmp_path / "data",
-                reports_dir=tmp_path / "reports",
             ),
             preferences=PreferencesConfig(),
         )
@@ -329,7 +326,6 @@ def test_a_stored_replay_is_skipped_before_it_is_checked_or_parsed(
     with (
         patch("rlcoach.pipeline.ingest_replay") as validate,
         patch("rlcoach.pipeline.generate_report") as parse,
-        patch("rlcoach.pipeline.write_report_atomically") as write_json,
         patch("rlcoach.pipeline.write_report") as write_db,
     ):
         second = process_replay_file(REPLAY, mock_config)
@@ -338,5 +334,4 @@ def test_a_stored_replay_is_skipped_before_it_is_checked_or_parsed(
     assert "already exists" in second.error
     validate.assert_not_called()  # the CRC check takes seconds per replay
     parse.assert_not_called()
-    write_json.assert_not_called()
     write_db.assert_not_called()

@@ -6,54 +6,10 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .config import ConfigError, IdentityConfig, get_default_config_path, load_config
+from .config import ConfigError, get_default_config_path, load_config
 from .config_templates import CONFIG_TEMPLATE
 from .errors import RLCoachError
-from .identity import PlayerIdentityResolver
 from .ingest import ingest_replay
-from .report import generate_report, write_report_atomically
-from .report_markdown import write_markdown
-
-
-def check_exclusion(report: dict) -> str | None:
-    """Check if a report should be excluded based on config.
-
-    Returns the excluded player's display name if excluded, None otherwise.
-    """
-    config_path = get_default_config_path()
-    try:
-        config = load_config(config_path)
-        config.validate()
-    except ConfigError, FileNotFoundError:
-        # No config = no exclusion rules
-        return None
-
-    if not config.identity.excluded_names:
-        return None
-
-    resolver = PlayerIdentityResolver(config.identity)
-    players = report.get("players", [])
-
-    me = resolver.find_me(players)
-    if me is not None:
-        return None
-
-    for player in players:
-        display_name = player.get("display_name", "")
-        if resolver.should_exclude(display_name):
-            return display_name
-
-    return None
-
-
-def _load_identity_config() -> IdentityConfig | None:
-    config_path = get_default_config_path()
-    try:
-        config = load_config(config_path)
-        config.validate()
-    except ConfigError, FileNotFoundError:
-        return None
-    return config.identity
 
 
 def handle_ingest_watch(args) -> int:
@@ -364,79 +320,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Process existing files when starting watch mode",
     )
 
-    analyze_parser = subparsers.add_parser(
-        "analyze", help="Analyze a Rocket League replay and write JSON report"
-    )
-    analyze_parser.add_argument(
-        "replay_file", type=str, help="Path to the .replay file"
-    )
-    analyze_parser.add_argument(
-        "--header-only",
-        action="store_true",
-        help="Use header-only mode (no network parsing)",
-    )
-    analyze_parser.add_argument(
-        "--adapter",
-        type=str,
-        choices=["rust", "null"],
-        default="rust",
-        help="Parser adapter to use (default: rust)",
-    )
-    analyze_parser.add_argument(
-        "--out",
-        type=str,
-        default="out",
-        help="Directory to write report into (default: out)",
-    )
-    analyze_parser.add_argument(
-        "--pretty",
-        action="store_true",
-        help="Pretty-print JSON output",
-    )
-    analyze_parser.add_argument(
-        "--ignore-exclusion",
-        action="store_true",
-        dest="ignore_exclusion",
-        help="Process replay even if playing on an excluded account",
-    )
-
-    report_md_parser = subparsers.add_parser(
-        "report-md",
-        help="Analyze a replay and emit both JSON and Markdown dossiers",
-    )
-    report_md_parser.add_argument(
-        "replay_file", type=str, help="Path to the .replay file"
-    )
-    report_md_parser.add_argument(
-        "--header-only",
-        action="store_true",
-        help="Use header-only mode (no network parsing)",
-    )
-    report_md_parser.add_argument(
-        "--adapter",
-        type=str,
-        choices=["rust", "null"],
-        default="rust",
-        help="Parser adapter to use (default: rust)",
-    )
-    report_md_parser.add_argument(
-        "--out",
-        type=str,
-        default="out",
-        help="Directory where JSON and Markdown reports will be written (default: out)",
-    )
-    report_md_parser.add_argument(
-        "--pretty",
-        action="store_true",
-        help="Pretty-print JSON output",
-    )
-    report_md_parser.add_argument(
-        "--ignore-exclusion",
-        action="store_true",
-        dest="ignore_exclusion",
-        help="Process replay even if playing on an excluded account",
-    )
-
     mistakes_parser = subparsers.add_parser(
         "mistakes",
         help="List one player's mistakes in a replay and what to do instead",
@@ -545,81 +428,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "ingest":
         return handle_ingest_command(args)
-    elif args.command == "analyze":
-        replay_path = Path(args.replay_file)
-        identity_config = _load_identity_config()
-        report = generate_report(
-            replay_path,
-            header_only=args.header_only,
-            adapter_name=args.adapter,
-            identity_config=identity_config,
-        )
-
-        if not args.ignore_exclusion and "error" not in report:
-            excluded_name = check_exclusion(report)
-            if excluded_name:
-                print(f"⊘ Skipped (excluded account: {excluded_name})")
-                print("Use --ignore-exclusion to process anyway")
-                return 0
-
-        out_dir = Path(args.out)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = out_dir / (replay_path.stem + ".json")
-
-        is_error = "error" in report
-
-        if not is_error:
-            try:
-                from .schema import validate_report
-
-                validate_report(report)
-            except Exception as e:
-                print(f"Validation failed: {e}", file=sys.stderr)
-                return 1
-
-        write_report_atomically(report, out_file, pretty=args.pretty)
-
-        print(str(out_file))
-        return 0 if not is_error else 1
-    elif args.command == "report-md":
-        replay_path = Path(args.replay_file)
-        identity_config = _load_identity_config()
-        report = generate_report(
-            replay_path,
-            header_only=args.header_only,
-            adapter_name=args.adapter,
-            identity_config=identity_config,
-        )
-
-        if not args.ignore_exclusion and "error" not in report:
-            excluded_name = check_exclusion(report)
-            if excluded_name:
-                print(f"⊘ Skipped (excluded account: {excluded_name})")
-                print("Use --ignore-exclusion to process anyway")
-                return 0
-
-        out_dir = Path(args.out)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        json_path = out_dir / (replay_path.stem + ".json")
-        markdown_path = out_dir / (replay_path.stem + ".md")
-
-        is_error = "error" in report
-
-        if not is_error:
-            try:
-                from .schema import validate_report
-
-                validate_report(report)
-            except Exception as e:
-                print(f"Validation failed: {e}", file=sys.stderr)
-                return 1
-
-        write_report_atomically(report, json_path, pretty=args.pretty)
-        write_markdown(report, markdown_path)
-
-        print(f"JSON: {json_path}")
-        print(f"Markdown: {markdown_path}")
-        return 0 if not is_error else 1
     elif args.command == "mistakes":
         return handle_mistakes_command(args)
     elif args.command == "reviews":

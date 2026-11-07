@@ -53,7 +53,6 @@ class Replay(Base):
     my_score = Column(Integer, nullable=True)
     opponent_score = Column(Integer, nullable=True)
     result = Column(String, nullable=True)
-    json_report_path = Column(String, nullable=True)
 
     player_stats = relationship(
         "PlayerGameStats", back_populates="replay", cascade="all, delete-orphan"

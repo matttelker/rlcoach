@@ -25,7 +25,6 @@ def mock_config(tmp_path):
         paths=PathsConfig(
             watch_folder=tmp_path / "replays",
             data_dir=tmp_path / "data",
-            reports_dir=tmp_path / "reports",
         ),
         preferences=PreferencesConfig(
             primary_playlist="DOUBLES",
@@ -66,7 +65,6 @@ def db_with_analysis_data(mock_config):
                 my_score=2 if result == "WIN" else 1,
                 opponent_score=1 if result == "WIN" else 2,
                 result=result,
-                json_report_path=f"/path/replay_{i}.json",
             )
         )
         session.add(

@@ -25,7 +25,6 @@ def config(tmp_path):
         paths=PathsConfig(
             watch_folder=tmp_path / "replays",
             data_dir=tmp_path / "data",
-            reports_dir=tmp_path / "reports",
         ),
         preferences=PreferencesConfig(primary_playlist="STANDARD", target_rank="GC1"),
     )

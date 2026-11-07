@@ -27,7 +27,6 @@ platform_ids = ["steam:76561198012345678"]
 [paths]
 watch_folder = "~/Replays"
 data_dir = "~/.rlcoach/data"
-reports_dir = "~/.rlcoach/reports"
 
 [preferences]
 target_rank = "GC1"
@@ -51,7 +50,6 @@ def test_config_validate_invalid_shows_error(tmp_path, capsys):
 [paths]
 watch_folder = "~/Replays"
 data_dir = "~/.rlcoach/data"
-reports_dir = "~/.rlcoach/reports"
 """)
 
     with patch("rlcoach.cli.get_default_config_path", return_value=config_path):

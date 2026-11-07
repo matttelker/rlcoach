@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
-from .config import RLCoachConfig, compute_play_date
+from .config import RLCoachConfig
 from .db.reviews import review_game
 from .db.session import init_db
 from .db.writer import (
@@ -25,7 +24,7 @@ from .db.writer import (
 )
 from .identity import PlayerIdentityResolver
 from .ingest import file_sha256, ingest_replay
-from .report import generate_report, write_report_atomically
+from .report import generate_report
 
 logger = logging.getLogger(__name__)
 
@@ -130,22 +129,6 @@ def process_replay_file(
                     )
 
         report["source_file"] = str(path)
-
-        # Compute json_report_path matching what insert_replay stores
-        metadata = report.get("metadata", {})
-        played_at_str = metadata.get("started_at_utc", "")
-        if played_at_str:
-            played_at_str = played_at_str.replace("Z", "+00:00")
-            played_at_utc = datetime.fromisoformat(played_at_str)
-        else:
-            played_at_utc = datetime.now(UTC)
-        play_date = compute_play_date(played_at_utc, config.preferences.timezone)
-
-        replay_id = report.get("replay_id", file_hash[:16])
-        json_report_path = (
-            config.paths.reports_dir / play_date.isoformat() / f"{replay_id}.json"
-        )
-        write_report_atomically(report, json_report_path, pretty=True)
 
         replay_id = write_report(report, file_hash, config)
 

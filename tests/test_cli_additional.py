@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
 from rlcoach.cli import (
-    _load_identity_config,
-    check_exclusion,
     handle_ingest_command,
     handle_serve_command,
 )
@@ -21,52 +17,6 @@ class _DummyConfig:
 
     def validate(self):
         return None
-
-
-def test_check_exclusion_returns_none_without_valid_config(monkeypatch):
-    monkeypatch.setattr(
-        "rlcoach.cli.load_config", lambda _: (_ for _ in ()).throw(FileNotFoundError)
-    )
-    assert check_exclusion({"players": []}) is None
-
-
-def test_check_exclusion_matches_excluded_account(monkeypatch):
-    monkeypatch.setattr("rlcoach.cli.get_default_config_path", lambda: "ignored.toml")
-    monkeypatch.setattr("rlcoach.cli.load_config", lambda _: _DummyConfig(["smurf"]))
-
-    class FakeResolver:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def find_me(self, _players):
-            return None
-
-        def should_exclude(self, display_name):
-            return display_name.lower() == "smurf"
-
-    monkeypatch.setattr("rlcoach.cli.PlayerIdentityResolver", FakeResolver)
-
-    excluded = check_exclusion({"players": [{"display_name": "Smurf"}]})
-    assert excluded == "Smurf"
-
-
-def test_load_identity_config_returns_identity(monkeypatch):
-    cfg = _DummyConfig([])
-    cfg.identity.foo = "bar"
-    monkeypatch.setattr("rlcoach.cli.get_default_config_path", lambda: "ignored.toml")
-    monkeypatch.setattr("rlcoach.cli.load_config", lambda _: cfg)
-    identity = _load_identity_config()
-    assert identity is cfg.identity
-
-
-@pytest.mark.parametrize("load", [check_exclusion, _load_identity_config])
-def test_config_helpers_propagate_unexpected_errors(monkeypatch, load):
-    monkeypatch.setattr(
-        "rlcoach.cli.load_config", lambda _: (_ for _ in ()).throw(RuntimeError("bug"))
-    )
-
-    with pytest.raises(RuntimeError, match="bug"):
-        load({"players": []}) if load is check_exclusion else load()
 
 
 def test_handle_ingest_watch_delegates(monkeypatch):

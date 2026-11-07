@@ -1,8 +1,6 @@
 """Tests for kickoff analysis."""
 
-import json
 from dataclasses import replace
-from pathlib import Path
 
 from rlcoach.analysis.kickoffs import APPROACH_KEYS, analyze_kickoffs
 from rlcoach.events import GoalEvent, KickoffEvent, detect_kickoffs
@@ -65,19 +63,6 @@ class TestApproachKeys:
         assert "FAKE_STATIONARY" in APPROACH_KEYS
         assert "FAKE_HALFFLIP" in APPROACH_KEYS
         assert "FAKE_AGGRESSIVE" in APPROACH_KEYS
-
-    def test_schema_lists_every_approach_key(self):
-        """The event enum, the count object and the analyzer must stay in step."""
-        schema_path = Path(__file__).parent.parent / "schemas"
-        schema = json.loads(
-            (schema_path / "replay_report.schema.json").read_text(encoding="utf-8")
-        )
-        definitions = schema["definitions"]
-        event = definitions["kickoffEvent"]["properties"]["players"]["items"]
-        counts = definitions["kickoffs"]["properties"]["approach_types"]
-
-        assert set(event["properties"]["approach_type"]["enum"]) == set(APPROACH_KEYS)
-        assert set(counts["properties"]) == set(APPROACH_KEYS)
 
 
 class TestKickoffAnalysis:

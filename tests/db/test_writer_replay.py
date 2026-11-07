@@ -22,7 +22,6 @@ def config():
         paths=PathsConfig(
             watch_folder=Path("~/Replays"),
             data_dir=Path("~/.rlcoach/data"),
-            reports_dir=Path("~/.rlcoach/reports"),
         ),
         preferences=PreferencesConfig(timezone="America/Los_Angeles"),
     )
