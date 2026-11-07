@@ -12,7 +12,6 @@ from sqlalchemy import and_
 from sqlalchemy.orm import selectinload
 
 from ...analysis.mistakes import CATEGORIES
-from ...analysis.weaknesses import detect_weaknesses
 from ...coaching import (
     FlagRow,
     GoalRow,
@@ -21,11 +20,12 @@ from ...coaching import (
     pick_targets,
     summarize_categories,
 )
+from ...compare import standings
 from ...db.grades import goal_ref, grades_for, mistake_ref
 from ...db.models import Benchmark, GameReview, PlayerGameStats, Replay
 from ...db.session import create_session
-from ...metrics import VALID_PLAYLISTS
-from .analysis import _metric_direction, _resolve_playlist
+from ...modes import COACHED_PLAYLISTS
+from .stats import direction, resolve_playlist
 
 router = APIRouter(tags=["coach"])
 
@@ -58,7 +58,7 @@ def _latest_playlist(session) -> str | None:
     """The playlist of your most recent game, skipping ones like Hoops."""
     latest = (
         session.query(Replay.playlist)
-        .filter(Replay.playlist.in_(VALID_PLAYLISTS))
+        .filter(Replay.playlist.in_(COACHED_PLAYLISTS))
         .order_by(Replay.played_at_utc.desc())
         .first()
     )
@@ -98,26 +98,24 @@ def _benchmark_strengths(
             "p25": b.p25_value,
             "median": b.median_value,
             "p75": b.p75_value,
-            "direction": _metric_direction(b.metric),
+            "direction": direction(b.metric),
         }
         for b in session.query(Benchmark)
         .filter(Benchmark.playlist == playlist, Benchmark.rank_tier == rank)
         .all()
         if b.metric in STRENGTH_METRICS
     }
-    results = detect_weaknesses(averages, benchmarks)
+    results = standings(averages, benchmarks)
     return [
         {
             "kind": "benchmark",
             "title": f"More {r.metric} than {rank} players"
             + (f" in {playlist.capitalize()}" if say_playlist else ""),
-            "detail": (
-                f"{r.my_value:.1f} a game, {rank} average {r.benchmark_median:.1f}"
-            ),
+            "detail": (f"{r.my_value:.1f} a game, {rank} average {r.median:.1f}"),
             "replay_id": None,
         }
         for r in sorted(results, key=lambda r: -r.z_score)
-        if r.severity.value == "strength"
+        if r.severity == "strength"
     ]
 
 
@@ -137,7 +135,7 @@ async def get_coach(
 
     session = create_session()
     try:
-        playlists = _playlists(_resolve_playlist(playlist or _latest_playlist(session)))
+        playlists = _playlists(resolve_playlist(playlist or _latest_playlist(session)))
         query = (
             session.query(Replay, PlayerGameStats)
             .outerjoin(

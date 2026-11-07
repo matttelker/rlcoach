@@ -1,6 +1,7 @@
-"""Benchmark data import and validation.
+"""The rank benchmarks bundled with rlcoach, loaded into the database.
 
-Uses the metric catalog as single source of truth for valid metrics.
+They come from ballchasing.com's population stats (see each file's notes). A
+playlist that already has rows keeps them, so loading runs once per playlist.
 """
 
 from __future__ import annotations
@@ -12,154 +13,75 @@ from typing import Any
 
 from .db.models import Benchmark
 from .db.session import create_session
-from .metrics import VALID_PLAYLISTS, VALID_RANKS, is_valid_metric
+from .metrics import VALID_RANKS, is_valid_metric
+from .modes import COACHED_PLAYLISTS
 
-_DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent / "data"
 BUNDLED_BENCHMARKS = {
-    "DOUBLES": _DATA_DIR / "benchmarks_doubles.json",
-    "STANDARD": _DATA_DIR / "benchmarks_standard.json",
+    "DOUBLES": DATA_DIR / "benchmarks_doubles.json",
+    "STANDARD": DATA_DIR / "benchmarks_standard.json",
 }
 
 
-class BenchmarkValidationError(Exception):
-    """Benchmark validation error."""
-
-    pass
+class BenchmarkValidationError(ValueError):
+    """A benchmark file names a stat, playlist or rank rlcoach doesn't know."""
 
 
-def validate_benchmark_data(data: dict[str, Any]) -> list[str]:
-    """Validate benchmark import data structure.
-
-    Uses metric catalog for validation.
-
-    Returns list of validation errors (empty if valid).
-    """
-    errors = []
-
+def problems(data: dict[str, Any]) -> list[str]:
+    """What's wrong with a benchmark file's contents, if anything."""
     if "benchmarks" not in data:
-        errors.append("Missing 'benchmarks' key")
-        return errors
-
-    for i, b in enumerate(data["benchmarks"]):
-        prefix = f"benchmarks[{i}]"
-
-        if "metric" not in b:
-            errors.append(f"{prefix}: Missing 'metric'")
-        elif not is_valid_metric(b["metric"]):
-            errors.append(
-                f"{prefix}: Invalid metric '{b['metric']}' (not in metric catalog)"
-            )
-
-        if "playlist" not in b:
-            errors.append(f"{prefix}: Missing 'playlist'")
-        elif b["playlist"] not in VALID_PLAYLISTS:
-            errors.append(f"{prefix}: Invalid playlist '{b['playlist']}'")
-
-        if "rank_tier" not in b:
-            errors.append(f"{prefix}: Missing 'rank_tier'")
-        elif b["rank_tier"] not in VALID_RANKS:
-            errors.append(f"{prefix}: Invalid rank_tier '{b['rank_tier']}'")
-
-        if "median" not in b:
-            errors.append(f"{prefix}: Missing 'median'")
-
-    return errors
+        return ["no 'benchmarks' list"]
+    found = []
+    for n, row in enumerate(data["benchmarks"]):
+        where = f"benchmarks[{n}]"
+        if not is_valid_metric(row.get("metric", "")):
+            found.append(f"{where}: unknown metric {row.get('metric')!r}")
+        if row.get("playlist") not in COACHED_PLAYLISTS:
+            found.append(f"{where}: unknown playlist {row.get('playlist')!r}")
+        if row.get("rank_tier") not in VALID_RANKS:
+            found.append(f"{where}: unknown rank {row.get('rank_tier')!r}")
+        if "median" not in row:
+            found.append(f"{where}: no median")
+    return found
 
 
-def import_benchmarks(file_path: Path, replace: bool = False) -> int:
-    """Import benchmarks from JSON file.
-
-    Args:
-        file_path: Path to benchmark JSON file
-        replace: If True, delete ALL existing benchmarks before import
-
-    Returns:
-        Number of benchmarks imported/updated
-    """
-    with open(file_path) as f:
-        data = json.load(f)
-
-    errors = validate_benchmark_data(data)
-    if errors:
-        raise BenchmarkValidationError(
-            "Validation errors:\n" + "\n".join(f"  - {e}" for e in errors)
-        )
-
-    metadata = data.get("metadata", {})
-    source = metadata.get("source", "unknown")
-    source_date_str = metadata.get("collected_date")
-    source_date = None
-    if source_date_str:
-        source_date = date.fromisoformat(source_date_str)
-    notes = metadata.get("notes")
-
-    session = create_session()
-    try:
-        if replace:
-            session.query(Benchmark).delete()
-
-        count = 0
-        for b in data["benchmarks"]:
-            existing = (
-                session.query(Benchmark)
-                .filter_by(
-                    metric=b["metric"],
-                    playlist=b["playlist"],
-                    rank_tier=b["rank_tier"],
-                )
-                .first()
-            )
-
-            if existing:
-                existing.median_value = b["median"]
-                existing.p25_value = b.get("p25")
-                existing.p75_value = b.get("p75")
-                existing.elite_threshold = b.get("elite")
-                existing.source = source
-                existing.source_date = source_date
-                existing.notes = b.get("notes") or notes
-                existing.imported_at = datetime.now(UTC)
-            else:
-                benchmark = Benchmark(
-                    metric=b["metric"],
-                    playlist=b["playlist"],
-                    rank_tier=b["rank_tier"],
-                    median_value=b["median"],
-                    p25_value=b.get("p25"),
-                    p75_value=b.get("p75"),
-                    elite_threshold=b.get("elite"),
-                    source=source,
-                    source_date=source_date,
-                    notes=b.get("notes") or notes,
-                )
-                session.add(benchmark)
-
-            count += 1
-
-        session.commit()
-        return count
-
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+def load_benchmarks(path: Path) -> int:
+    """Add or update every benchmark in a file. Returns how many it holds."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if found := problems(data):
+        raise BenchmarkValidationError(f"{path.name}: " + "; ".join(found))
+    about = data.get("metadata", {})
+    collected = about.get("collected_date")
+    with create_session() as session, session.begin():
+        for row in data["benchmarks"]:
+            key = {
+                "metric": row["metric"],
+                "playlist": row["playlist"],
+                "rank_tier": row["rank_tier"],
+            }
+            stored = session.query(Benchmark).filter_by(**key).first()
+            if stored is None:
+                stored = Benchmark(**key)
+                session.add(stored)
+            stored.median_value = row["median"]
+            stored.p25_value = row.get("p25")
+            stored.p75_value = row.get("p75")
+            stored.elite_threshold = row.get("elite")
+            stored.source = about.get("source", "unknown")
+            stored.source_date = date.fromisoformat(collected) if collected else None
+            stored.notes = row.get("notes") or about.get("notes")
+            stored.imported_at = datetime.now(UTC)
+    return len(data["benchmarks"])
 
 
 def seed_default_benchmarks() -> int:
-    """Load the bundled benchmarks for each playlist that has none yet.
-
-    Returns:
-        Number of benchmarks loaded (0 if every playlist already had rows)
-    """
-    session = create_session()
-    try:
-        loaded = {row[0] for row in session.query(Benchmark.playlist).distinct()}
-    finally:
-        session.close()
-
+    """Load the bundled benchmarks for each playlist that has none yet."""
+    with create_session() as session:
+        stocked = {
+            playlist for (playlist,) in session.query(Benchmark.playlist).distinct()
+        }
     return sum(
-        import_benchmarks(path)
+        load_benchmarks(path)
         for playlist, path in BUNDLED_BENCHMARKS.items()
-        if playlist not in loaded
+        if playlist not in stocked
     )

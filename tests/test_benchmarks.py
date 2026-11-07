@@ -1,207 +1,111 @@
+"""Tests for loading the bundled rank benchmarks."""
+
+from __future__ import annotations
+
 import json
 
 import pytest
 
 from rlcoach.benchmarks import (
     BUNDLED_BENCHMARKS,
-    import_benchmarks,
+    BenchmarkValidationError,
+    load_benchmarks,
+    problems,
     seed_default_benchmarks,
-    validate_benchmark_data,
 )
 from rlcoach.db.models import Benchmark
 from rlcoach.db.session import create_session, init_db, reset_engine
 
 
-@pytest.fixture(autouse=True)
-def reset_db():
+@pytest.fixture
+def db():
+    init_db()
     yield
     reset_engine()
 
 
-def test_validate_uses_metric_catalog():
-    """Validation should use the metric catalog, not a hardcoded list."""
-
-    data = {
-        "metadata": {"source": "test"},
-        "benchmarks": [
-            {
-                "metric": "bcpm",
-                "playlist": "DOUBLES",
-                "rank_tier": "GC1",
-                "median": 380,
-            }
-        ],
-    }
-    errors = validate_benchmark_data(data)
-    assert errors == []
-
-
-def test_validate_rejects_invalid_metric():
-    """Should reject metrics not in the catalog."""
-    data = {
-        "metadata": {"source": "test"},
-        "benchmarks": [
-            {
-                "metric": "made_up_metric",
-                "playlist": "DOUBLES",
-                "rank_tier": "GC1",
-                "median": 100,
-            }
-        ],
-    }
-    errors = validate_benchmark_data(data)
-    assert any("metric" in e.lower() for e in errors)
-
-
-def test_import_benchmarks_success(tmp_path):
-    db_path = tmp_path / "test.db"
-    init_db(db_path)
-
-    benchmark_file = tmp_path / "benchmarks.json"
-    benchmark_file.write_text(
-        json.dumps(
-            {
-                "metadata": {
-                    "source": "Test Source",
-                    "collected_date": "2024-12-01",
-                    "notes": "Test data",
-                },
-                "benchmarks": [
-                    {
-                        "metric": "bcpm",
-                        "playlist": "DOUBLES",
-                        "rank_tier": "GC1",
-                        "median": 380,
-                        "p25": 330,
-                        "p75": 420,
-                        "elite": 420,
-                    },
-                    {
-                        "metric": "avg_boost",
-                        "playlist": "DOUBLES",
-                        "rank_tier": "GC1",
-                        "median": 30,
-                        "p25": 25,
-                        "p75": 34,
-                        "elite": 20,
-                    },
-                ],
-            }
-        )
-    )
-
-    count = import_benchmarks(benchmark_file)
-    assert count == 2
-
-    session = create_session()
-    try:
-        benchmark = (
-            session.query(Benchmark).filter_by(metric="bcpm", rank_tier="GC1").first()
-        )
-        assert benchmark is not None
-        assert benchmark.median_value == 380
-        assert benchmark.source == "Test Source"
-    finally:
-        session.close()
-
-
-def test_import_benchmarks_upserts(tmp_path):
-    """Re-importing should update existing records."""
-    db_path = tmp_path / "test.db"
-    init_db(db_path)
-
-    benchmark_file = tmp_path / "benchmarks.json"
-
-    benchmark_file.write_text(
-        json.dumps(
-            {
-                "metadata": {"source": "v1"},
-                "benchmarks": [
-                    {
-                        "metric": "bcpm",
-                        "playlist": "DOUBLES",
-                        "rank_tier": "GC1",
-                        "median": 100,
-                    }
-                ],
-            }
-        )
-    )
-    import_benchmarks(benchmark_file)
-
-    benchmark_file.write_text(
-        json.dumps(
-            {
-                "metadata": {"source": "v2"},
-                "benchmarks": [
-                    {
-                        "metric": "bcpm",
-                        "playlist": "DOUBLES",
-                        "rank_tier": "GC1",
-                        "median": 200,
-                    }
-                ],
-            }
-        )
-    )
-    import_benchmarks(benchmark_file)
-
-    session = create_session()
-    try:
-        benchmarks = (
-            session.query(Benchmark).filter_by(metric="bcpm", rank_tier="GC1").all()
-        )
-        assert len(benchmarks) == 1
-        assert benchmarks[0].median_value == 200
-        assert benchmarks[0].source == "v2"
-    finally:
-        session.close()
+def _rows():
+    with create_session() as session:
+        return session.query(Benchmark).all()
 
 
 @pytest.mark.parametrize("playlist", sorted(BUNDLED_BENCHMARKS))
-def test_bundled_benchmarks_pass_validation(playlist):
-    text = BUNDLED_BENCHMARKS[playlist].read_text(encoding="utf-8")
-    data = json.loads(text)
-
-    assert validate_benchmark_data(data) == []
-    assert {b["playlist"] for b in data["benchmarks"]} == {playlist}
+def test_the_bundled_files_name_only_known_stats_and_ranks(playlist):
+    data = json.loads(BUNDLED_BENCHMARKS[playlist].read_text(encoding="utf-8"))
+    assert problems(data) == []
+    assert {row["playlist"] for row in data["benchmarks"]} == {playlist}
 
 
-@pytest.mark.parametrize("playlist", sorted(BUNDLED_BENCHMARKS))
-def test_bundled_benchmarks_are_ordered(playlist):
-    text = BUNDLED_BENCHMARKS[playlist].read_text(encoding="utf-8")
+def test_problems_name_each_bad_row():
+    data = {
+        "benchmarks": [
+            {"metric": "goals", "playlist": "DOUBLES", "rank_tier": "GC1", "median": 1},
+            {"metric": "vibes", "playlist": "HOOPS", "rank_tier": "GC9"},
+        ]
+    }
+    assert problems(data) == [
+        "benchmarks[1]: unknown metric 'vibes'",
+        "benchmarks[1]: unknown playlist 'HOOPS'",
+        "benchmarks[1]: unknown rank 'GC9'",
+        "benchmarks[1]: no median",
+    ]
+    assert problems({}) == ["no 'benchmarks' list"]
 
-    for b in json.loads(text)["benchmarks"]:
-        assert b["p25"] <= b["median"] <= b["p75"], b
 
-
-def test_seed_default_benchmarks_only_loads_once(tmp_path):
-    init_db(tmp_path / "test.db")
-
-    assert seed_default_benchmarks() == 36
+def test_seeding_loads_each_playlist_once(db):
+    loaded = seed_default_benchmarks()
+    assert loaded == len(_rows()) > 0
+    assert {row.playlist for row in _rows()} == {"DOUBLES", "STANDARD"}
     assert seed_default_benchmarks() == 0
 
 
-def test_seed_default_benchmarks_keeps_imported_rows(tmp_path):
-    init_db(tmp_path / "test.db")
-    session = create_session()
-    session.add(
-        Benchmark(
-            metric="bcpm",
-            playlist="STANDARD",
-            rank_tier="GC1",
-            median_value=999.0,
-            source="mine",
-        )
+def test_seeding_keeps_a_playlist_that_already_has_rows(db, tmp_path):
+    mine = tmp_path / "mine.json"
+    mine.write_text(
+        json.dumps(
+            {
+                "metadata": {"source": "me", "collected_date": "2026-01-02"},
+                "benchmarks": [
+                    {
+                        "metric": "goals",
+                        "playlist": "DOUBLES",
+                        "rank_tier": "GC1",
+                        "median": 9.0,
+                        "p25": 8.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
     )
-    session.commit()
-    session.close()
+    assert load_benchmarks(mine) == 1
+    seed_default_benchmarks()
+    doubles = [row for row in _rows() if row.playlist == "DOUBLES"]
+    assert [(row.metric, row.median_value, row.source) for row in doubles] == [
+        ("goals", 9.0, "me")
+    ]
+    assert doubles[0].source_date.isoformat() == "2026-01-02"
+    assert doubles[0].p75_value is None
 
-    # Standard already has rows, so only Doubles is loaded
-    assert seed_default_benchmarks() == 18
 
-    session = create_session()
-    standard = session.query(Benchmark).filter_by(playlist="STANDARD").all()
-    assert [b.median_value for b in standard] == [999.0]
-    assert session.query(Benchmark).filter_by(playlist="DOUBLES").count() == 18
-    session.close()
+def test_loading_again_updates_rows_in_place(db, tmp_path):
+    path = tmp_path / "b.json"
+    row = {"metric": "saves", "playlist": "DUEL", "rank_tier": "C3", "median": 1.0}
+    path.write_text(json.dumps({"benchmarks": [row]}), encoding="utf-8")
+    load_benchmarks(path)
+    path.write_text(
+        json.dumps({"benchmarks": [{**row, "median": 2.0}]}), encoding="utf-8"
+    )
+    load_benchmarks(path)
+    assert [(r.median_value, r.source) for r in _rows()] == [(2.0, "unknown")]
+
+
+def test_a_bad_file_loads_nothing(db, tmp_path):
+    path = tmp_path / "bad.json"
+    path.write_text(
+        json.dumps({"benchmarks": [{"metric": "nope", "median": 1}]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(BenchmarkValidationError, match="bad.json: .*unknown metric"):
+        load_benchmarks(path)
+    assert _rows() == []

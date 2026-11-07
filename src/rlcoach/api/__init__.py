@@ -1,4 +1,4 @@
-"""FastAPI REST API for RLCoach."""
+"""The local API under /api."""
 
 from .app import create_app
 

@@ -1,115 +1,50 @@
-"""Tests for FastAPI app setup."""
+"""Tests for the API starting up with or without a config."""
 
-from unittest.mock import patch
+from __future__ import annotations
+
+import json
 
 import pytest
 from fastapi.testclient import TestClient
 
-
-@pytest.fixture
-def mock_config(tmp_path):
-    """Create a mock config for testing."""
-    from rlcoach.config import (
-        IdentityConfig,
-        PathsConfig,
-        PreferencesConfig,
-        RLCoachConfig,
-    )
-
-    config = RLCoachConfig(
-        identity=IdentityConfig(
-            platform_ids=["steam:me123"],
-            display_names=["TestPlayer"],
-        ),
-        paths=PathsConfig(
-            watch_folder=tmp_path / "replays",
-            data_dir=tmp_path / "data",
-        ),
-        preferences=PreferencesConfig(
-            primary_playlist="DOUBLES",
-            target_rank="GC1",
-        ),
-    )
-    config.paths.data_dir.mkdir(parents=True, exist_ok=True)
-    return config
+from rlcoach.api.app import create_app, get_config
+from rlcoach.db.session import reset_engine
 
 
 @pytest.fixture
-def client(mock_config):
-    """Create a test client with mocked config."""
-    with patch("rlcoach.api.app.get_config", return_value=mock_config):
-        from rlcoach.api.app import create_app
-
-        app = create_app()
-        yield TestClient(app)
+def home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    yield tmp_path
+    reset_engine()
 
 
-class TestHealthEndpoint:
-    """Tests for the health check endpoint."""
-
-    def test_health_returns_ok(self, client):
-        """Should return a valid health status (healthy or degraded)."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] in ["healthy", "degraded"]
-        assert "version" in data
-
-    def test_health_includes_db_status(self, client):
-        """Should include database status in checks."""
-        response = client.get("/health")
-        data = response.json()
-        assert "checks" in data
-        assert "database" in data["checks"]
-        assert data["checks"]["database"] in [
-            "connected",
-            "disconnected",
-            "not_initialized",
-        ]
-
-    def test_health_includes_service_info(self, client):
-        """Should include service name and timestamp."""
-        response = client.get("/health")
-        data = response.json()
-        assert data["service"] == "rlcoach-backend"
-        assert "timestamp" in data
+def _write_config(home):
+    (home / ".rlcoach").mkdir()
+    data_dir = json.dumps((home / "data").as_posix())
+    (home / ".rlcoach" / "config.toml").write_text(
+        f'[identity]\ndisplay_names = ["Me"]\n[paths]\ndata_dir = {data_dir}\n',
+        encoding="utf-8",
+    )
 
 
-class TestCORS:
-    """Tests for CORS configuration."""
-
-    def test_cors_allows_localhost(self, client):
-        """Should allow requests from localhost."""
-        response = client.options(
-            "/health",
-            headers={
-                "Origin": "http://localhost:5173",
-                "Access-Control-Request-Method": "GET",
-            },
-        )
-        # CORS preflight should return 200
-        assert response.status_code == 200
+def test_starting_opens_your_database_and_loads_the_benchmarks(home):
+    _write_config(home)
+    with TestClient(create_app()) as client:
+        assert get_config().identity.display_names == ["Me"]
+        health = client.get("/health").json()
+        benchmarks = client.get("/benchmarks").json()["items"]
+    assert (home / "data" / "rlcoach.db").exists()
+    assert health["status"] == "healthy"
+    assert health["checks"] == {"database": "connected"}
+    assert {b["playlist"] for b in benchmarks} == {"DOUBLES", "STANDARD"}
+    with pytest.raises(RuntimeError):
+        get_config()
 
 
-class TestErrorHandling:
-    """Tests for error handling middleware."""
-
-    def test_404_returns_json(self, client):
-        """Should return JSON for 404 errors."""
-        response = client.get("/nonexistent/endpoint")
-        assert response.status_code == 404
-        data = response.json()
-        assert "detail" in data
-
-
-class TestRootEndpoint:
-    """Tests for the root endpoint."""
-
-    def test_root_returns_api_info(self, client):
-        """Should return API information."""
-        response = client.get("/")
-        assert response.status_code == 200
-        data = response.json()
-        assert "name" in data
-        assert "version" in data
-        assert "docs" in data
+def test_without_a_config_it_still_answers_from_memory(home):
+    with TestClient(create_app()) as client:
+        assert client.get("/health").json()["status"] == "healthy"
+        assert client.get("/games").json()["total"] == 0
+        with pytest.raises(RuntimeError):
+            get_config()
