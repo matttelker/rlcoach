@@ -24,7 +24,7 @@
         "playlist": { "type": "string", "enum": ["DUEL", "DOUBLES", "STANDARD", "CHAOS", "PRIVATE", "EXTRA_MODE", "UNKNOWN"] },
         "map": { "type": "string" },
         "team_size": { "type": "integer", "minimum": 1, "maximum": 4 },
-        "overtime": { "type": "boolean" },
+        "overtime": { "type": "boolean", "description": "True when the match went to overtime: an overtime kickoff in the events, or the replay header's own flag where an older replay has one." },
         "mutators": { "type": "object", "additionalProperties": { "type": ["string","number","boolean"] } },
         "match_guid": { "type": "string" },
         "started_at_utc": { "type": "string", "format": "date-time" },

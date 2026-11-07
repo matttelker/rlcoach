@@ -543,6 +543,28 @@ def test_generate_report_without_identity_config():
     validate_report(report)
 
 
+@pytest.mark.parametrize(
+    ("replay", "overtime"),
+    [
+        # 5-4, settled by an overtime goal.
+        ("testing_replay.replay", True),
+        # 3-2, the last goal 3 s before the end of regulation.
+        ("70c0e78e-ea32-4722-a951-937baa40efc9.replay", False),
+    ],
+)
+def test_report_says_whether_the_match_went_to_overtime(replay, overtime):
+    """Regression: current headers carry no overtime flag, so every game said no."""
+    path = REPO_ROOT / "Replay_files" / replay
+    if not path.exists():
+        pytest.skip("replay fixture missing")
+    pytest.importorskip("rlreplay_rust")
+
+    report = generate_report(path, adapter_name="rust")
+
+    assert report["metadata"]["overtime"] is overtime
+    validate_report(report)
+
+
 @pytest.mark.skipif(not TIED_TOUCH_REPLAY.exists(), reason="Sample replay not found")
 def test_touches_are_repeatable_between_parses():
     """Regression: same-frame touches swapped, which changed passing stats."""
