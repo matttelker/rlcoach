@@ -63,6 +63,10 @@ DOUBLE_COMMIT_FOLLOW_UP_S = 2.0
 UPFIELD_DEPTH = 500.0  # Past this point in the opponent's half
 UPFIELD_MIN_S = 2.0
 RETURN_SPEED = 1000.0  # Driving home this fast is already the right response
+# Behind with this little time left, the whole team should push for a goal.
+# Being caught upfield is then the price of the right play, not a mistake. It
+# also covers the clock reading 0:00 while the ball stays in the air.
+CHASE_WINDOW_S = 30.0
 
 LOW_BOOST = 20.0
 CHALLENGE_SETTLE_S = 0.5  # When the ball's direction shows who won a 50/50
@@ -591,6 +595,15 @@ def _clock_at(ctx: Context, index: int) -> str:
     return format_clock(_seconds_left_at(ctx, index))
 
 
+def _chasing_late(ctx: Context, index: int) -> bool:
+    """Check your team is behind with little regulation time left.
+
+    A tied overtime has no "behind", so it never counts.
+    """
+    ours, theirs = _tally(ctx, ctx.times[index])
+    return ours < theirs and _seconds_left_at(ctx, index) <= CHASE_WINDOW_S
+
+
 def _conceded(delay: float) -> str:
     if delay < 1.0:
         return "You conceded right after."
@@ -772,13 +785,16 @@ def detect_double_commits(ctx: Context) -> list[Mistake]:
 
 
 def detect_caught_upfield(ctx: Context) -> list[Mistake]:
-    """Flag staying in the opponent's half while they attack an undefended net."""
+    """Flag staying in the opponent's half while they attack an undefended net.
+
+    Not while your team chases a late goal, when everyone should be up.
+    """
     allowed_back = max(ctx.team_size - 2, 0)
 
     def caught(index: int) -> bool:
         frame = ctx.frames[index]
         me = frame.get_player_by_id(ctx.player_id)
-        if me is None or me.is_demolished:
+        if me is None or me.is_demolished or _chasing_late(ctx, index):
             return False
         ball_depth = ctx.depth(frame.ball.position.y)
         if ball_depth <= 0 or ctx.depth(me.position.y) >= -UPFIELD_DEPTH:
@@ -1097,6 +1113,8 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
         last_back is not None
         and last_back.player_id == ctx.player_id
         and _past_kickoff(ctx, decision)
+        # Chasing a late goal, the last player back should be up too
+        and not _chasing_late(ctx, decision)
     ):
         my_depth = ctx.depth(last_back.position.y)
         ball_past_me = my_depth < ball_depth

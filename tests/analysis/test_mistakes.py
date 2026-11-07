@@ -10,6 +10,8 @@ import pytest
 from rlcoach.analysis.mistakes import (
     CATEGORIES,
     CATEGORY,
+    CHASE_WINDOW_S,
+    GAME_LENGTH_S,
     GOAL_CHANCES,
     INSTEAD,
     LEAD_IN,
@@ -47,6 +49,7 @@ ORANGE = 1
 BLUE = 0
 KICKOFF_S = 0.2
 SETTLE_S = 4.0
+PLAYED_STEP_S = 0.25
 
 
 def _car(pid, team, x, y, vx=0.0, vy=0.0, z=17.0, vz=0.0, boost=50.0, **kwargs):
@@ -64,11 +67,12 @@ def _ball(x, y, z=93.15, vx=0.0, vy=0.0, vz=0.0):
     return create_test_ball(position=Vec3(x, y, z), velocity=Vec3(vx, vy, vz))
 
 
-def _play(seconds, players, ball, start=None):
+def _play(seconds, players, ball, start=None, played=0.0):
     """Build a kickoff, a settled spell of play, then the scenario.
 
     `players` and `ball` take scenario time, so a test only describes the moment
-    it cares about. The returned scenario starts at `KICKOFF_S + SETTLE_S`.
+    it cares about. The returned scenario starts at `KICKOFF_S + SETTLE_S`, or
+    `played` seconds of earlier open play later, which runs the clock down.
     """
     frames = []
     t = 0.0
@@ -76,7 +80,11 @@ def _play(seconds, players, ball, start=None):
         frames.append(create_test_frame(t, players(0.0), create_test_ball()))
         t += DT
     settle_ball = ball(0.0)
-    while t < KICKOFF_S + SETTLE_S:
+    # The clock counts steps up to half a second, so the long wait can be coarse
+    while t < KICKOFF_S + played:
+        frames.append(create_test_frame(t, players(0.0), settle_ball))
+        t += PLAYED_STEP_S
+    while t < KICKOFF_S + played + SETTLE_S:
         frames.append(create_test_frame(t, players(0.0), settle_ball))
         t += DT
     origin = t if start is None else start
@@ -291,7 +299,9 @@ def test_no_double_commit_when_i_drive_away():
     assert detect_double_commits(_ctx(frames)) == []
 
 
-def _upfield_scene(mate_y=-1000.0, seconds=3.0, last_touch=BLUE, **my_kwargs):
+def _upfield_scene(
+    mate_y=-1000.0, seconds=3.0, last_touch=BLUE, played=0.0, **my_kwargs
+):
     """Ball in my half while I sit in the opponent's half."""
 
     def players(t):
@@ -309,7 +319,7 @@ def _upfield_scene(mate_y=-1000.0, seconds=3.0, last_touch=BLUE, **my_kwargs):
             return _ball(hitter_x, hitter_y + 130.0, 150.0, vy=0.0)
         return _ball(hitter_x + 400.0 * t, hitter_y + 130.0, 150.0, vx=400.0)
 
-    return _play(seconds, players, ball)
+    return _play(seconds, players, ball, played=played)
 
 
 def test_caught_upfield_flags_a_long_spell_with_nobody_back():
@@ -347,6 +357,55 @@ def test_frame_gap_breaks_an_upfield_spell():
         if f.timestamp >= origin
     ]
     assert detect_caught_upfield(_ctx(first + second)) == []
+
+
+def _played_for(seconds_left):
+    """Open play before a scene that leaves `seconds_left` on the clock."""
+    return GAME_LENGTH_S - SETTLE_S - seconds_left
+
+
+def _already(team):
+    """A goal before the first frame, so the scene starts with that team ahead."""
+    return GoalEvent(t=-1.0, scorer=OPP if team == "BLUE" else ME, team=team)
+
+
+@pytest.mark.parametrize("seconds_left", [20.0, 0.0, -5.0])
+def test_not_caught_upfield_while_chasing_a_late_goal(seconds_left):
+    """From a real game: 2-3 down at 0:00, I pushed up for the equalizer."""
+    frames, _ = _upfield_scene(played=_played_for(seconds_left))
+    ctx = _ctx(frames, goals=[_already("BLUE")])
+    assert detect_caught_upfield(ctx) == []
+
+
+def test_an_upfield_spell_that_runs_into_the_chase_keeps_its_start():
+    frames, _ = _upfield_scene(seconds=5.0, played=_played_for(33.0))
+    flags = detect_caught_upfield(_ctx(frames, goals=[_already("BLUE")]))
+    assert [f.kind for f in flags] == ["caught_upfield"]
+    assert flags[0].seconds_left == pytest.approx(33.0, abs=0.5)
+    assert flags[0].duration == pytest.approx(33.0 - CHASE_WINDOW_S, abs=0.5)
+
+
+def test_caught_upfield_while_behind_with_time_to_recover():
+    frames, _ = _upfield_scene(played=_played_for(60.0))
+    flags = detect_caught_upfield(_ctx(frames, goals=[_already("BLUE")]))
+    assert [f.kind for f in flags] == ["caught_upfield"]
+    assert flags[0].score == "0-1"
+
+
+@pytest.mark.parametrize("goals", [[], [_already("ORANGE")]], ids=["level", "ahead"])
+def test_caught_upfield_late_when_level_or_ahead(goals):
+    frames, _ = _upfield_scene(played=_played_for(10.0))
+    flags = detect_caught_upfield(_ctx(frames, goals=goals))
+    assert [f.kind for f in flags] == ["caught_upfield"]
+    assert 0 < flags[0].seconds_left <= 10.0
+
+
+def test_caught_upfield_in_a_tied_overtime():
+    """Overtime is always level, so nobody is chasing."""
+    frames, _ = _upfield_scene(played=_played_for(-20.0))
+    flags = detect_caught_upfield(_ctx(frames))
+    assert [f.kind for f in flags] == ["caught_upfield"]
+    assert flags[0].clock.startswith("+")
 
 
 def _challenge(winner, my_boost, ball_vy=1500.0):
@@ -473,7 +532,7 @@ def test_clear_that_gets_out_is_not_flagged():
     assert summary == {"clears": 1, "given_back": 0}
 
 
-def _goal_scene(me, mate, ball_z=440.0):
+def _goal_scene(me, mate, ball_z=440.0, played=0.0):
     """Blue hits a slow lob at my goal from just inside my half.
 
     `me` and `mate` are functions of scenario time. The shot leaves at 0.5 s and
@@ -488,7 +547,7 @@ def _goal_scene(me, mate, ball_z=440.0):
             return _ball(0.0, 1400.0, ball_z, vy=-50.0)
         return _ball(0.0, 1400.0 + 1070.0 * (t - 0.5), ball_z, vy=1070.0)
 
-    frames, origin = _play(4.1, players, ball)
+    frames, origin = _play(4.1, players, ball, played=played)
     goal = GoalEvent(t=origin + 4.05, scorer=OPP, team="BLUE")
     return frames, goal
 
@@ -867,7 +926,7 @@ def test_sitting_in_goal_while_a_shot_goes_past_me_is_no_save_attempt():
     assert [f.kind for f in flags] == ["no_save_attempt"]
 
 
-def test_leaving_the_net_as_last_back_is_on_me_when_the_ball_gets_past():
+def _overcommit_scene(played=0.0):
     """From a real goal: all three went out at the ball and it beat them all."""
 
     def players(t):
@@ -888,8 +947,12 @@ def test_leaving_the_net_as_last_back_is_on_me_when_the_ball_gets_past():
             vy=900.0,
         )
 
-    frames, origin = _play(1.5, players, ball)
-    goal = GoalEvent(t=origin + 1.45, scorer=OPP, team="BLUE")
+    frames, origin = _play(1.5, players, ball, played=played)
+    return frames, GoalEvent(t=origin + 1.45, scorer=OPP, team="BLUE")
+
+
+def test_leaving_the_net_as_last_back_is_on_me_when_the_ball_gets_past():
+    frames, goal = _overcommit_scene()
     reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
     assert reviews[0].on_you is True
     assert [f.kind for f in flags] == ["last_back_overcommit"]
@@ -1007,6 +1070,34 @@ def test_last_back_in_their_half_with_the_ball_past_me_says_both():
         "You were your team's last player back, 15 m into their half, and the ball "
         "was already between you and your net when the shot came."
     )
+
+
+def _last_back_upfield_scene(played):
+    return _goal_scene(
+        me=lambda t: _car(ME, ORANGE, 0.0, -1500.0),
+        mate=lambda t: _car(MATE, ORANGE, 3000.0, -3000.0),
+        played=played,
+    )
+
+
+@pytest.mark.parametrize(
+    "scene",
+    [_last_back_upfield_scene, _overcommit_scene],
+    ids=["upfield", "overcommit"],
+)
+def test_last_back_is_not_on_me_while_chasing_a_late_goal(scene):
+    frames, goal = scene(played=_played_for(15.0))
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[_already("BLUE"), goal]))
+    assert reviews[-1].on_you is False
+    assert reviews[-1].summary == "No mistake found."
+    assert flags == []
+
+
+def test_last_back_late_is_still_on_me_when_level():
+    frames, goal = _last_back_upfield_scene(played=_played_for(15.0))
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert reviews[0].on_you is True
+    assert [f.kind for f in flags] == ["last_back_upfield"]
 
 
 def test_goal_review_ignores_the_ball_left_in_the_net_by_the_last_goal():
