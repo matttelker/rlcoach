@@ -126,10 +126,10 @@ export function Benchmarks() {
                     <div className="text-right">
                       <div
                         className={`type-score text-[26px] ${
-                          p.direction === 'higher_when_winning' ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'
+                          p.direction === 'higher_in_wins' ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'
                         }`}
                       >
-                        {p.direction === 'higher_when_winning' ? '+' : ''}
+                        {p.direction === 'higher_in_wins' ? '+' : ''}
                         {p.delta.toFixed(2)}
                       </div>
                       <div className="text-[13px] text-[var(--color-text-muted)]">Effect size {p.effect_size.toFixed(2)}</div>

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 
+import { Benchmarks } from '../Benchmarks';
 import { Coach, GradesTable } from '../Coach';
 import { GameDetail } from '../GameDetail';
 import { GameReviewBody } from '../GameReview';
@@ -11,8 +12,10 @@ import type {
   CategorySummary,
   CoachResponse,
   GradesResponse,
+  PatternsResponse,
   ReplayDetail,
   ReplayReview,
+  WeaknessesResponse,
 } from '../../types/api';
 
 // These payloads mirror real API responses. Pages once rendered against a
@@ -372,5 +375,50 @@ describe('GameDetail', () => {
   it('puts the review timeline above the box score', () => {
     expect(html.indexOf('Timeline')).toBeGreaterThan(-1);
     expect(html.indexOf('Timeline')).toBeLessThan(html.indexOf('Match info'));
+  });
+});
+
+// From GET /api/weaknesses and GET /api/patterns on real games
+const WEAKNESSES: WeaknessesResponse = {
+  game_count: 30,
+  has_benchmarks: true,
+  playlist: 'STANDARD',
+  strengths: [],
+  weaknesses: [
+    { metric: 'bcpm', my_value: 206.69, severity: 'critical', target_median: 366.4, z_score: -2.93 },
+  ],
+};
+
+const PATTERNS: PatternsResponse = {
+  loss_count: 12,
+  min_games: 5,
+  playlist: 'STANDARD',
+  win_count: 18,
+  patterns: [
+    { delta: -1.78, direction: 'lower_in_wins', effect_size: -1.644, loss_avg: 2.17, metric: 'saves', win_avg: 0.39 },
+    { delta: 1.75, direction: 'higher_in_wins', effect_size: 1.439, loss_avg: 1.08, metric: 'shots', win_avg: 2.83 },
+  ],
+};
+
+describe('Benchmarks', () => {
+  const html = renderWithCache(
+    [
+      [['weaknesses', '30d', 'GC1', undefined], WEAKNESSES],
+      [['patterns', '30d', undefined], PATTERNS],
+    ],
+    '/',
+    <Benchmarks />,
+  );
+  const row = (metric: string) => html.split('<li').find((item) => item.includes(`>${metric}<`)) ?? '';
+
+  it('shows a stat that is higher in wins in green with a plus sign', () => {
+    expect(row('SHOTS')).toContain('--color-success');
+    expect(row('SHOTS')).toMatch(/\+(<!-- -->)?1\.75/);
+  });
+
+  it('shows a stat that is lower in wins in red', () => {
+    expect(row('SAVES')).toContain('--color-error');
+    expect(row('SAVES')).toContain('-1.78');
+    expect(row('SAVES')).not.toContain('+');
   });
 });

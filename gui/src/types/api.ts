@@ -89,7 +89,7 @@ export interface Pattern {
   loss_avg: number;
   delta: number;
   effect_size: number;
-  direction: 'higher_when_winning' | 'lower_when_winning';
+  direction: 'higher_in_wins' | 'lower_in_wins';
 }
 
 export interface PatternsResponse {
