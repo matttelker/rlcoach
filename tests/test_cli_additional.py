@@ -95,3 +95,20 @@ def test_handle_serve_command_runs_the_site(monkeypatch, tmp_path):
     assert (called["host"], called["port"]) == ("0.0.0.0", 9999)
     assert called["access_log"] is True
     assert not service.pid_path().exists()
+
+
+def test_main_writes_utf8_when_output_is_piped(monkeypatch):
+    import io
+    import sys
+
+    from rlcoach.cli import main
+
+    raw = io.BytesIO()
+    piped = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", piped)
+
+    main([])
+    print("✓ ✗")
+    piped.flush()
+
+    assert "✓ ✗" in raw.getvalue().decode("utf-8")

@@ -91,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     Args:
         argv: Command line arguments. If None, uses sys.argv[1:].
     """
+    # Windows writes piped output in its ANSI code page, which has no ✓ or ✗
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(
         prog="rlcoach",
         description="All-local Rocket League replay analysis tool for coaching",
