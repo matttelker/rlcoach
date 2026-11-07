@@ -10,7 +10,9 @@ import pytest
 from rlcoach.analysis.mistakes import (
     CATEGORIES,
     CATEGORY,
+    GOAL_CHANCES,
     INSTEAD,
+    LEAD_IN,
     UnsupportedReplayError,
     build_context,
     check_supported_map,
@@ -22,6 +24,7 @@ from rlcoach.analysis.mistakes import (
     format_clock,
     game_clock,
     goal_timeline,
+    link_goals_to_moments,
     live_mask,
     load_full_frames,
     own_depth,
@@ -498,6 +501,7 @@ def test_goal_is_not_on_me_with_a_teammate_back():
     reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
     assert len(reviews) == 1
     assert reviews[0].on_you is False
+    assert reviews[0].summary == "No mistake found."
     assert flags == []
 
 
@@ -1006,6 +1010,72 @@ def test_moments_away_from_goals_do_not_cost_one():
     assert flags[0].cost_goal is False
     assert flags[0].category == "rotation"
     assert 0 < flags[0].seconds_left <= 300
+
+
+def _clear_into_goal_scene(mate_touch=False):
+    """My clear goes straight back to Blue, who scores past nobody.
+
+    I clear at 0.5 s and leave for the far side, Blue returns it at 2.5 s, and it
+    crosses my line just before 3.7 s. With `mate_touch`, my teammate gets a
+    touch on it at 3.0 s that doesn't stop it.
+    """
+
+    def players(t):
+        me = _car(ME, ORANGE, 0.0 if t < 1.0 else -3000.0, 3100.0)
+        mate = _car(MATE, ORANGE, -200.0 if mate_touch else 3000.0, 3150.0)
+        return [me, mate, _car(OPP, BLUE, 0.0, 1700.0)]
+
+    def ball(t):
+        if t < 0.5:
+            return _ball(0.0, 3000.0, 150.0, vy=-100.0)
+        if t < 2.5:
+            return _ball(0.0, 3000.0 - 600.0 * (t - 0.5), 150.0, vy=-600.0)
+        if t < 3.0 or not mate_touch:
+            return _ball(0.0, 1800.0 + 2800.0 * (t - 2.5), 150.0, vy=2800.0)
+        after = t - 3.0
+        return _ball(300.0 * after, 3200.0 + 2800.0 * after, 150.0, 300.0, 2800.0)
+
+    frames, origin = _play(4.2, players, ball)
+    goal = GoalEvent(t=origin + 3.75, scorer=OPP, team="BLUE")
+    ctx = _ctx(frames, goals=[goal])
+    reviews, _ = review_conceded_goals(ctx)
+    clears, _ = detect_clears_given_back(ctx)
+    return ctx, reviews, clears
+
+
+def test_a_clear_that_goes_straight_back_in_costs_the_goal():
+    ctx, reviews, clears = _clear_into_goal_scene()
+    assert reviews[0].summary == "No mistake found."
+    assert clears[0].outcome == "You conceded 3 s later."
+
+    reviews, flags = link_goals_to_moments(ctx, reviews, clears)
+    assert flags[0].cost_goal is True
+    assert reviews[0].on_you is True
+    assert reviews[0].summary == "Your clear went straight back to them 3 s before."
+
+
+def test_a_clear_my_team_won_back_before_the_goal_costs_nothing():
+    ctx, reviews, clears = _clear_into_goal_scene(mate_touch=True)
+    assert clears[0].outcome == "The ball reached your end."
+
+    reviews, flags = link_goals_to_moments(ctx, reviews, clears)
+    assert flags[0].cost_goal is False
+    assert reviews[0].on_you is False
+
+
+def test_a_goal_already_on_me_keeps_its_own_verdict():
+    ctx, reviews, clears = _clear_into_goal_scene()
+    blamed = [replace(reviews[0], on_you=True, summary="You were the last one back.")]
+
+    reviews, flags = link_goals_to_moments(ctx, blamed, clears)
+    assert flags[0].cost_goal is False
+    assert reviews[0].summary == "You were the last one back."
+
+
+def test_every_moment_before_a_goal_can_lead_to_one():
+    """Goal reviews flag their own kinds, so every other kind needs a lead-in."""
+    from_goal_reviews = {*GOAL_CHANCES, "last_back_upfield", "last_back_overcommit"}
+    assert set(LEAD_IN) == set(CATEGORY) - from_goal_reviews
 
 
 def _scored(*teams):

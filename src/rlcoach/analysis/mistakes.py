@@ -52,6 +52,7 @@ TOUCH_EVENT_WINDOW_S = 0.16  # The replay's touch events run a little off the ba
 DANGER_DEPTH = 3500.0  # Ball this deep in your half threatens the net
 DANGER_WINDOW_S = 5.0
 GOAL_CONSEQUENCE_S = 10.0
+MOMENT_TOUCH_S = 0.5  # A flagged moment's own touch, such as the clear or the 50/50
 
 DOUBLE_COMMIT_RANGE = 1200.0
 DOUBLE_COMMIT_MIN_CLOSING = 500.0
@@ -195,7 +196,7 @@ class Mistake:
     outcome: str = ""
     category: str = ""
     seconds_left: float = 0.0
-    cost_goal: bool = False  # The goal review blames this moment for a goal
+    cost_goal: bool = False  # This moment led to a goal against
 
 
 @dataclass(frozen=True)
@@ -589,15 +590,31 @@ def _clock_at(ctx: Context, index: int) -> str:
     return format_clock(_seconds_left_at(ctx, index))
 
 
-def _outcome_after(ctx: Context, t: float) -> str:
-    """Describe what the moment led to, so the worst ones can be ranked first."""
+def _conceded(delay: float) -> str:
+    if delay < 1.0:
+        return "You conceded right after."
+    return f"You conceded {delay:.0f} s later."
+
+
+def _opponents_kept_it(ctx: Context, t: float, goal_t: float) -> bool:
+    """Check your team never touched the ball between a moment and a goal."""
+    return not any(
+        c.team == ctx.team and t + MOMENT_TOUCH_S < c.t <= goal_t for c in ctx.contacts
+    )
+
+
+def _outcome_after(ctx: Context, t: float, *, cost_goal: bool = False) -> str:
+    """Describe what the moment led to, so the worst ones can be ranked first.
+
+    A goal only follows from the moment if your team never got the ball back
+    before it went in, unless the goal review already blamed this moment.
+    """
     mine = team_name(ctx.team)
     for goal in ctx.goals:
         if goal.team != mine and t <= goal.t <= t + GOAL_CONSEQUENCE_S:
-            delay = goal.t - t
-            if delay < 1.0:
-                return "You conceded right after."
-            return f"You conceded {delay:.0f} s later."
+            if cost_goal or _opponents_kept_it(ctx, t, goal.t):
+                return _conceded(goal.t - t)
+            break
     start = ctx.index_at(t)
     end = ctx.index_at(t + DANGER_WINDOW_S)
     for index in range(start, end + 1):
@@ -608,7 +625,15 @@ def _outcome_after(ctx: Context, t: float) -> str:
     return ""
 
 
-def _flag(ctx: Context, kind: str, index: int, duration: float, what: str) -> Mistake:
+def _flag(
+    ctx: Context,
+    kind: str,
+    index: int,
+    duration: float,
+    what: str,
+    *,
+    cost_goal: bool = False,
+) -> Mistake:
     t = ctx.times[index]
     return Mistake(
         kind=kind,
@@ -619,9 +644,10 @@ def _flag(ctx: Context, kind: str, index: int, duration: float, what: str) -> Mi
         duration=round(duration, 1),
         what=what,
         instead=INSTEAD[kind],
-        outcome=_outcome_after(ctx, t),
+        outcome=_outcome_after(ctx, t, cost_goal=cost_goal),
         category=CATEGORY[kind],
         seconds_left=round(_seconds_left_at(ctx, index), 1),
+        cost_goal=cost_goal,
     )
 
 
@@ -1090,7 +1116,7 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
     elif any(r.label in GOAL_CHANCES for r in roles.values()):
         summary = "A teammate had the chance to stop this."
     else:
-        summary = "Not on you."
+        summary = "No mistake found."
 
     review = GoalReview(
         t=round(goal.t, 2),
@@ -1104,7 +1130,7 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
     )
     flag = None
     if kind is not None:
-        flag = replace(_flag(ctx, kind, moment, 0.0, what), cost_goal=True)
+        flag = _flag(ctx, kind, moment, 0.0, what, cost_goal=True)
     return review, flag
 
 
@@ -1120,6 +1146,53 @@ def review_conceded_goals(ctx: Context) -> tuple[list[GoalReview], list[Mistake]
         reviews.append(review)
         if flag is not None:
             flags.append(flag)
+    return reviews, flags
+
+
+# How a goal review names the earlier moment that led to the goal
+LEAD_IN = {
+    "clear_given_back": "Your clear went straight back to them",
+    "double_commit": "You double committed",
+    "caught_upfield": "You were caught upfield",
+    "low_boost_challenge": "You lost a 50/50 on low boost",
+}
+
+
+def link_goals_to_moments(
+    ctx: Context, reviews: list[GoalReview], flags: list[Mistake]
+) -> tuple[list[GoalReview], list[Mistake]]:
+    """Blame a goal the review cleared you of on your moment that started it.
+
+    The goal review only looks a few seconds back. If one of your flagged
+    moments came earlier and the opponents kept the ball from then until it
+    went in, that moment cost the goal. Each goal costs at most one moment, the
+    latest, and a goal the review already put on you keeps its own verdict.
+    """
+    mine = team_name(ctx.team)
+    against = [g for g in ctx.goals if g.team != mine]
+    reviews = list(reviews)
+    flags = list(flags)
+    for position, (goal, review) in enumerate(zip(against, reviews, strict=True)):
+        if review.on_you:
+            continue
+        leads = [
+            i
+            for i, flag in enumerate(flags)
+            if flag.kind in LEAD_IN
+            and not flag.cost_goal
+            and flag.t <= goal.t <= flag.t + GOAL_CONSEQUENCE_S
+            and _opponents_kept_it(ctx, flag.t, goal.t)
+        ]
+        if not leads:
+            continue
+        lead = max(leads, key=lambda i: flags[i].t)
+        flag = flags[lead]
+        delay = goal.t - flag.t
+        when = "just before" if delay < 1.0 else f"{delay:.0f} s before"
+        flags[lead] = replace(flag, cost_goal=True)
+        reviews[position] = replace(
+            review, on_you=True, summary=f"{LEAD_IN[flag.kind]} {when}."
+        )
     return reviews, flags
 
 
@@ -1203,16 +1276,17 @@ def analyze_replay(
 
     reviews, goal_flags = review_conceded_goals(ctx)
     clear_flags, clears = detect_clears_given_back(ctx)
-    mistakes = sorted(
+    reviews, earlier_flags = link_goals_to_moments(
+        ctx,
+        reviews,
         [
-            *goal_flags,
             *detect_double_commits(ctx),
             *detect_caught_upfield(ctx),
             *detect_low_boost_challenges(ctx),
             *clear_flags,
         ],
-        key=lambda m: m.t,
     )
+    mistakes = sorted([*goal_flags, *earlier_flags], key=lambda m: m.t)
     return MistakeReport(
         player=match.display_name,
         team=match.team,

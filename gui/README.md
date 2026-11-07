@@ -50,6 +50,9 @@ npm --prefix gui run dev
   every 30 seconds while it's on screen, so it keeps up while you play.
 - **Games** lists every game. A game's page puts your flagged moments and every goal on a
   timeline of the game clock, groups the moments by category, and explains each goal against.
+  A goal is on you when you had a chance to stop it in its last seconds, or when an earlier
+  moment of yours led to it and the opponents kept the ball until it went in. Otherwise it
+  reads "No mistake found", which means none of the rules matched, not that the play was clean.
 - **Stats** holds the trends, the rank comparison and the benchmarks.
 - **Players** lists the people you've played with and against.
 

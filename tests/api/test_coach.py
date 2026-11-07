@@ -173,7 +173,7 @@ def client(config):
             ],
             [
                 GoalReview(
-                    90.0, "3:30", "1-0", "Them", False, "Not on you.", (), 210.0
+                    90.0, "3:30", "1-0", "Them", False, "No mistake found.", (), 210.0
                 ),
             ],
         ),
