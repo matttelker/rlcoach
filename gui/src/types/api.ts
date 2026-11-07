@@ -228,6 +228,7 @@ export interface ReviewMistake {
   instead: string;
   outcome: string;
   cost_goal: boolean;
+  grade: Grade | null;
 }
 
 export interface ReviewGoal {
@@ -244,6 +245,29 @@ export interface ReviewGoal {
   on_me: boolean | null;
   summary: string | null;
   lines: string[];
+  grade: Grade | null;
+}
+
+// Your verdict on one of the review's calls
+export type Grade = 'right' | 'wrong';
+
+export interface GradeRequest {
+  item: 'mistake' | 'goal';
+  t: number;
+  kind?: string;
+  grade: Grade | null;
+}
+
+export interface RuleGrades {
+  item: 'mistake' | 'goal';
+  kind: string;
+  label: string;
+  right: number;
+  wrong: number;
+}
+
+export interface GradesResponse {
+  rules: RuleGrades[];
 }
 
 export interface ReplayReview {

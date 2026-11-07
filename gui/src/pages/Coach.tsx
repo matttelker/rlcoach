@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getCoach } from '../api/client';
+import { getCoach, getGrades } from '../api/client';
 import {
   Card,
   CardContent,
@@ -10,11 +10,12 @@ import {
   NoGamesEmpty,
   PlaylistSelect,
 } from '../components';
-import type { CategorySummary, CoachResponse, CoachSession, Highlight } from '../types/api';
+import type { CategorySummary, CoachResponse, CoachSession, Highlight, RuleGrades } from '../types/api';
 import {
   PERIOD_OPTIONS,
   categoryTrend,
   formatRate,
+  gradeAccuracy,
   headline,
   kindLabel,
   prettyMap,
@@ -69,7 +70,62 @@ export function Coach() {
       ) : (
         <CoachBody data={data} />
       )}
+
+      <CallGrades />
     </div>
+  );
+}
+
+/** How your right and wrong grades on the review's calls add up, per rule. */
+function CallGrades() {
+  const { data } = useQuery({ queryKey: ['grades'], queryFn: getGrades, retry: false });
+  // Nothing graded yet, or an older API without grades
+  if (!data || data.rules.length === 0) return null;
+  return (
+    <section>
+      <SectionTitle
+        title="How its calls hold up"
+        note="Your right and wrong marks on game pages, across every game you've graded"
+      />
+      <GradesTable rules={data.rules} />
+    </section>
+  );
+}
+
+export function GradesTable({ rules }: { rules: RuleGrades[] }) {
+  return (
+    <Card>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-xs text-[var(--color-text-muted)] border-b border-[var(--color-border)]">
+            <th className="text-left font-medium p-3">Call</th>
+            <th className="text-right font-medium p-3 w-20">Right</th>
+            <th className="text-right font-medium p-3 w-20">Wrong</th>
+            <th className="text-right font-medium p-3 w-24">Right %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rules.map((rule) => {
+            const accuracy = gradeAccuracy(rule);
+            return (
+              <tr key={`${rule.item}-${rule.kind}`} className="border-b last:border-b-0 border-[var(--color-border)]">
+                <td className="p-3">
+                  {rule.label}
+                  <span className="ml-2 text-xs text-[var(--color-text-muted)]">
+                    {rule.item === 'goal' ? 'goal verdict' : 'flagged moment'}
+                  </span>
+                </td>
+                <td className="p-3 text-right text-[var(--color-success)]">{rule.right}</td>
+                <td className="p-3 text-right text-[var(--color-error)]">{rule.wrong}</td>
+                <td className={`p-3 text-right ${accuracy !== null && accuracy < 50 ? 'text-[var(--color-error)]' : ''}`}>
+                  {accuracy === null ? '–' : `${accuracy}%`}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 

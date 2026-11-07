@@ -18,6 +18,7 @@ from .routers import (
     analysis_router,
     coach_router,
     games_router,
+    grades_router,
     players_router,
 )
 
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis_router)
     app.include_router(players_router)
     app.include_router(coach_router)
+    app.include_router(grades_router)
 
     @app.get("/")
     async def root():

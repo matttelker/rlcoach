@@ -1,22 +1,41 @@
-import { useQuery } from '@tanstack/react-query';
-import { getReplayReview } from '../api/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getReplayReview, setGrade } from '../api/client';
 import { Card, CardHeader, CardContent } from '../components';
-import type { ReplayReview } from '../types/api';
-import { REGULATION_SECONDS, groupByCategory, timelineX } from './coachTransforms';
+import type { Grade, GradeRequest, ReplayReview } from '../types/api';
+import { REGULATION_SECONDS, applyGrade, groupByCategory, timelineX } from './coachTransforms';
 
 export function GameReview({ replayId }: { replayId: string }) {
+  const queryClient = useQueryClient();
+  const queryKey = ['replay-review', replayId];
   const { data, error } = useQuery({
-    queryKey: ['replay-review', replayId],
+    queryKey,
     queryFn: () => getReplayReview(replayId),
     retry: false,
+  });
+  const grade = useMutation({
+    mutationFn: (request: GradeRequest) => setGrade(replayId, request),
+    // Show the grade straight away, then reload what the server stored
+    onMutate: (request) => {
+      queryClient.setQueryData<ReplayReview>(queryKey, (old) => old && applyGrade(old, request));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ['grades'] });
+    },
   });
 
   // An older API has no review endpoint. The rest of the page still works.
   if (error || !data) return null;
-  return <GameReviewBody review={data} />;
+  return <GameReviewBody review={data} onGrade={grade.mutate} />;
 }
 
-export function GameReviewBody({ review }: { review: ReplayReview }) {
+export function GameReviewBody({
+  review,
+  onGrade,
+}: {
+  review: ReplayReview;
+  onGrade?: (request: GradeRequest) => void;
+}) {
   if (review.status !== 'ok') {
     const message =
       review.status === 'missing'
@@ -49,7 +68,9 @@ export function GameReviewBody({ review }: { review: ReplayReview }) {
         <Card>
           <CardHeader className="flex items-baseline gap-3">
             <h2 className="text-lg font-semibold">Your flagged moments</h2>
-            <span className="text-xs text-[var(--color-text-muted)]">{review.mistakes.length} in this game</span>
+            <span className="text-xs text-[var(--color-text-muted)]">
+              {review.mistakes.length} in this game · mark each right or wrong as you rewatch
+            </span>
           </CardHeader>
           <CardContent className="space-y-5">
             {groups.length === 0 && (
@@ -79,6 +100,11 @@ export function GameReviewBody({ review }: { review: ReplayReview }) {
                           </div>
                         )}
                         <div className="text-[var(--color-text-muted)]">Instead: {m.instead}</div>
+                        <GradeButtons
+                          grade={m.grade}
+                          what={`${m.clock} ${m.label}`}
+                          onChange={onGrade && ((grade) => onGrade({ item: 'mistake', kind: m.kind, t: m.t, grade }))}
+                        />
                       </div>
                     </li>
                   ))}
@@ -119,12 +145,58 @@ export function GameReviewBody({ review }: { review: ReplayReview }) {
                       <li key={line}>{line}</li>
                     ))}
                   </ul>
+                  <GradeButtons
+                    grade={g.grade}
+                    what={`the verdict on the ${g.clock} goal`}
+                    onChange={onGrade && ((grade) => onGrade({ item: 'goal', t: g.t, grade }))}
+                  />
                 </div>
               </div>
             ))}
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+const GRADE_STYLES: Record<Grade, string> = {
+  right: 'border-[var(--color-success)] bg-[var(--color-success)]/15 text-[var(--color-success)]',
+  wrong: 'border-[var(--color-error)] bg-[var(--color-error)]/15 text-[var(--color-error)]',
+};
+
+/** Right and wrong buttons for one call. Pressing the chosen one again clears it. */
+function GradeButtons({
+  grade,
+  what,
+  onChange,
+}: {
+  grade: Grade | null;
+  what: string;
+  onChange?: (grade: Grade | null) => void;
+}) {
+  return (
+    <div className="flex gap-1.5 pt-1">
+      {(['right', 'wrong'] as const).map((value) => {
+        const active = grade === value;
+        return (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={active}
+            aria-label={`Mark ${what} ${value}`}
+            disabled={!onChange}
+            onClick={() => onChange?.(active ? null : value)}
+            className={`px-2 py-0.5 rounded border text-xs transition-colors ${
+              active
+                ? GRADE_STYLES[value]
+                : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+            }`}
+          >
+            {value === 'right' ? 'Right' : 'Wrong'}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -279,6 +279,34 @@ class ReviewGoal(Base):
     review = relationship("GameReview", back_populates="goals")
 
 
+class ReviewGrade(Base):
+    """Your verdict on one call the review made: right or wrong.
+
+    Grades sit apart from the review, so `rlcoach reviews --redo` keeps them.
+    `ref` names the call: a flagged moment by its kind and time, a goal against
+    by its time. `kind` and `label` record what the review said when you graded
+    it, so a grade only applies while the review still says the same thing.
+    """
+
+    __tablename__ = "review_grades"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    replay_id = Column(
+        String, ForeignKey("replays.replay_id", ondelete="CASCADE"), nullable=False
+    )
+    item = Column(String, nullable=False)  # "mistake" or "goal"
+    ref = Column(String, nullable=False)
+    kind = Column(String, nullable=False)
+    label = Column(Text, nullable=False)
+    grade = Column(String, nullable=False)  # "right" or "wrong"
+    graded_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("replay_id", "item", "ref", name="uq_review_grade"),
+        Index("ix_review_grades_replay", "replay_id"),
+    )
+
+
 class Benchmark(Base):
     __tablename__ = "benchmarks"
 

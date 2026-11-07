@@ -4,12 +4,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 
-import { Coach } from '../Coach';
+import { Coach, GradesTable } from '../Coach';
 import { GameDetail } from '../GameDetail';
 import { GameReviewBody } from '../GameReview';
 import type {
   CategorySummary,
   CoachResponse,
+  GradesResponse,
   ReplayDetail,
   ReplayReview,
 } from '../../types/api';
@@ -127,6 +128,7 @@ const REVIEW: ReplayReview = {
       instead: 'When teammates are already challenging, stay in goal.',
       outcome: 'You conceded right after.',
       cost_goal: true,
+      grade: 'wrong',
     },
   ],
   goals: [
@@ -144,6 +146,7 @@ const REVIEW: ReplayReview = {
       on_me: null,
       summary: null,
       lines: [],
+      grade: null,
     },
     {
       t: 309.4,
@@ -159,7 +162,15 @@ const REVIEW: ReplayReview = {
       on_me: true,
       summary: 'You were the last one back.',
       lines: ['You were beaten by the shot (12 boost)'],
+      grade: null,
     },
+  ],
+};
+
+const GRADES: GradesResponse = {
+  rules: [
+    { item: 'mistake', kind: 'last_back_upfield', label: 'Last back upfield', right: 1, wrong: 3 },
+    { item: 'goal', kind: 'goal_on_you', label: 'Goal put on you', right: 2, wrong: 0 },
   ],
 };
 
@@ -246,6 +257,34 @@ describe('Coach', () => {
     expect(html).toContain('Scored the winner');
     expect(html).toContain('href="/games/abc"');
   });
+
+  it('leaves out the grades tally until you grade something', () => {
+    expect(html).not.toContain('How its calls hold up');
+  });
+});
+
+describe('Coach grades', () => {
+  const html = renderWithCache(
+    [
+      [['coach', undefined, '30d'], COACH],
+      [['grades'], GRADES],
+    ],
+    '/',
+    <Coach />,
+  );
+
+  it('shows how each rule has held up', () => {
+    expect(html).toContain('How its calls hold up');
+    expect(html).toContain('Last back upfield');
+    expect(html).toContain('25%');
+    expect(html).toContain('100%');
+  });
+
+  it('says whether a rule flags moments or calls goals', () => {
+    const table = renderToStaticMarkup(<GradesTable rules={GRADES.rules} />);
+    expect(table).toContain('flagged moment');
+    expect(table).toContain('goal verdict');
+  });
 });
 
 describe('GameReviewBody', () => {
@@ -255,6 +294,20 @@ describe('GameReviewBody', () => {
     expect(html).toContain('cost 1 goal');
     expect(html).toContain('1 of 1 on you');
     expect(html).toContain('1 of 3 clears');
+  });
+
+  it('shows right and wrong buttons on each call, with your grade pressed', () => {
+    const html = renderToStaticMarkup(<GameReviewBody review={REVIEW} onGrade={() => {}} />);
+    expect(html).toContain('aria-pressed="true" aria-label="Mark 1:47 Last back overcommit wrong"');
+    expect(html).toContain('aria-pressed="false" aria-label="Mark 1:47 Last back overcommit right"');
+    // Only the goal against gets buttons, not your own goal
+    expect(html).toContain('Mark the verdict on the 1:46 goal right');
+    expect(html).not.toContain('3:45 goal');
+  });
+
+  it('disables the buttons when there is nowhere to send a grade', () => {
+    const html = renderToStaticMarkup(<GameReviewBody review={REVIEW} />);
+    expect(html).toContain('disabled=""');
   });
 
   it('explains a missing review instead of showing an empty timeline', () => {

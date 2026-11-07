@@ -20,6 +20,7 @@ from ...coaching import (
     pick_targets,
     summarize_categories,
 )
+from ...db.grades import goal_ref, grades_for, mistake_ref
 from ...db.models import Benchmark, GameReview, PlayerGameStats, Replay
 from ...db.session import create_session
 from ...metrics import VALID_PLAYLISTS
@@ -243,6 +244,7 @@ async def get_replay_review(replay_id: str) -> dict[str, Any]:
                 "mistakes": [],
                 "goals": [],
             }
+        grades = grades_for(session, replay_id)
         return {
             "replay_id": replay_id,
             "status": review.status,
@@ -264,6 +266,7 @@ async def get_replay_review(replay_id: str) -> dict[str, Any]:
                     "instead": m.instead,
                     "outcome": m.outcome,
                     "cost_goal": bool(m.cost_goal),
+                    "grade": grades.get(("mistake", mistake_ref(m.kind, m.t))),
                 }
                 for m in review.mistakes
             ],
@@ -282,6 +285,7 @@ async def get_replay_review(replay_id: str) -> dict[str, Any]:
                     "on_me": g.on_me,
                     "summary": g.summary,
                     "lines": json.loads(g.lines) if g.lines else [],
+                    "grade": (None if g.ours else grades.get(("goal", goal_ref(g.t)))),
                 }
                 for g in review.goals
             ],

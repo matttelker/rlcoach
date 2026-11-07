@@ -1,4 +1,4 @@
-import type { CategorySummary, ReviewMistake } from '../types/api';
+import type { CategorySummary, GradeRequest, ReplayReview, ReviewMistake, RuleGrades } from '../types/api';
 import { parseLocalDate } from './dataTransforms';
 
 export const PERIOD_OPTIONS = [
@@ -79,6 +79,28 @@ export function groupByCategory(mistakes: ReviewMistake[]) {
   return [...groups.entries()]
     .map(([category, group]) => ({ category, ...group }))
     .sort((a, b) => b.goals - a.goals || b.items.length - a.items.length);
+}
+
+// The review with one call's grade set, before the server answers
+export function applyGrade(review: ReplayReview, request: GradeRequest): ReplayReview {
+  if (request.item === 'mistake') {
+    return {
+      ...review,
+      mistakes: review.mistakes.map((m) =>
+        m.kind === request.kind && m.t === request.t ? { ...m, grade: request.grade } : m,
+      ),
+    };
+  }
+  return {
+    ...review,
+    goals: review.goals.map((g) => (!g.ours && g.t === request.t ? { ...g, grade: request.grade } : g)),
+  };
+}
+
+// Share of graded calls you marked right, as a whole percent
+export function gradeAccuracy(rule: RuleGrades): number | null {
+  const total = rule.right + rule.wrong;
+  return total === 0 ? null : Math.round((100 * rule.right) / total);
 }
 
 // Position on a 5:00 → 0:00 axis that stretches to fit any overtime.

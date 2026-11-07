@@ -14,6 +14,8 @@ import type {
   GameResult,
   CoachResponse,
   ReplayReview,
+  GradeRequest,
+  GradesResponse,
 } from '../types/api';
 
 const api = axios.create({
@@ -115,6 +117,15 @@ export async function getCoach(params: CoachParams = {}): Promise<CoachResponse>
 
 export async function getReplayReview(replayId: string): Promise<ReplayReview> {
   const { data } = await api.get<ReplayReview>(`/replays/${encodeURIComponent(replayId)}/review`);
+  return data;
+}
+
+export async function setGrade(replayId: string, request: GradeRequest): Promise<void> {
+  await api.put(`/replays/${encodeURIComponent(replayId)}/grades`, request);
+}
+
+export async function getGrades(): Promise<GradesResponse> {
+  const { data } = await api.get<GradesResponse>('/grades');
   return data;
 }
 

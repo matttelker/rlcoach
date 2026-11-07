@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CategorySummary, ReviewMistake } from '../../types/api';
+import type { CategorySummary, ReplayReview, ReviewMistake } from '../../types/api';
 import {
+  applyGrade,
   categoryTrend,
+  gradeAccuracy,
   groupByCategory,
   headline,
   prettyMap,
@@ -40,6 +42,7 @@ const mistake = (category: string, cost_goal: boolean): ReviewMistake => ({
   instead: '',
   outcome: '',
   cost_goal,
+  grade: null,
 });
 
 describe('categoryTrend', () => {
@@ -70,6 +73,30 @@ describe('groupByCategory', () => {
     ]);
     expect(groups.map((g) => g.category)).toEqual(['last_back', 'clearing']);
     expect(groups[0].goals).toBe(1);
+  });
+});
+
+describe('grades', () => {
+  const review: ReplayReview = {
+    replay_id: 'abc',
+    status: 'ok',
+    error: null,
+    clears: 0,
+    clears_given_back: 0,
+    mistakes: [mistake('clearing', false), { ...mistake('clearing', false), t: 2 }],
+    goals: [],
+  };
+
+  it('sets the grade on the one call you pressed', () => {
+    const graded = applyGrade(review, { item: 'mistake', kind: 'k', t: 2, grade: 'wrong' });
+    expect(graded.mistakes.map((m) => m.grade)).toEqual([null, 'wrong']);
+    expect(review.mistakes[1].grade).toBeNull();
+  });
+
+  it('turns a tally into a right percentage', () => {
+    const rule = { item: 'mistake' as const, kind: 'k', label: 'K' };
+    expect(gradeAccuracy({ ...rule, right: 1, wrong: 2 })).toBe(33);
+    expect(gradeAccuracy({ ...rule, right: 0, wrong: 0 })).toBeNull();
   });
 });
 

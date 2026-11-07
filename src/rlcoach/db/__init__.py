@@ -8,6 +8,7 @@ from .models import (
     PlayerGameStats,
     Replay,
     ReviewGoal,
+    ReviewGrade,
     ReviewMistake,
 )
 from .session import create_session, get_session, init_db, reset_engine
@@ -21,6 +22,7 @@ __all__ = [
     "GameReview",
     "ReviewMistake",
     "ReviewGoal",
+    "ReviewGrade",
     "init_db",
     "get_session",
     "create_session",

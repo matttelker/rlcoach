@@ -59,6 +59,10 @@ http://localhost:5173 that reloads on every edit and sends `/api` to the server 
   A goal is on you when you had a chance to stop it in its last seconds, or when an earlier
   moment of yours led to it and the opponents kept the ball until it went in. Otherwise it
   reads "No mistake found", which means none of the rules matched, not that the play was clean.
+  Mark each flagged moment and each goal verdict right or wrong as you rewatch the replay. Once
+  you've graded some, the Coach page tallies them per rule, so you can see which rules to trust
+  and which to fix. Grades outlast `rlcoach reviews --redo`, but a grade only counts while the
+  review still makes the call you graded.
 - **Stats** holds the trends, the rank comparison and the benchmarks.
 - **Players** lists the people you've played with and against.
 

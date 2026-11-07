@@ -16,6 +16,7 @@ A local Rocket League replay coach for one player, on Windows. There are no acco
 | Analysis modules | `src/rlcoach/analysis/` |
 | Mistake detector | `src/rlcoach/analysis/mistakes.py` |
 | Stored reviews, training targets and highlights | `src/rlcoach/db/reviews.py`, `src/rlcoach/coaching.py` |
+| Your right or wrong grades on the review's calls | `src/rlcoach/db/grades.py` |
 | JSON and Markdown reports | `src/rlcoach/report.py`, `src/rlcoach/report_markdown.py`, `schemas/` |
 | Database (SQLite, one file) | `src/rlcoach/db/` |
 | Local API (FastAPI) | `src/rlcoach/api/` |
