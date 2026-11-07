@@ -17,7 +17,12 @@ from pathlib import Path
 from .config import RLCoachConfig, compute_play_date
 from .db.reviews import review_game
 from .db.session import init_db
-from .db.writer import PlayerNotFoundError, ReplayExistsError, write_report
+from .db.writer import (
+    PlayerNotFoundError,
+    ReplayExistsError,
+    check_not_stored,
+    write_report,
+)
 from .identity import PlayerIdentityResolver
 from .ingest import ingest_replay
 from .report import generate_report, write_report_atomically
@@ -67,7 +72,8 @@ def process_replay_file(
 
     This function:
     1. Initializes the database if needed
-    2. Ingests the replay file (validation + hashing)
+    2. Ingests the replay file (validation + hashing), and stops with DUPLICATE
+       if it is already stored
     3. Generates the analysis report
     4. Writes to database (players, replay, stats)
 
@@ -85,6 +91,10 @@ def process_replay_file(
 
         ingest_result = ingest_replay(path)
         file_hash = ingest_result["sha256"]
+
+        # Skip stored replays before the parse, so a watcher restart doesn't
+        # re-analyze every game in the folder. insert_replay checks again.
+        check_not_stored(file_hash)
 
         report = generate_report(
             path,

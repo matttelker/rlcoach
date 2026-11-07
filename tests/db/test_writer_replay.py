@@ -6,7 +6,7 @@ import pytest
 from rlcoach.config import IdentityConfig, PathsConfig, PreferencesConfig, RLCoachConfig
 from rlcoach.db.models import Player, Replay
 from rlcoach.db.session import create_session, init_db, reset_engine
-from rlcoach.db.writer import ReplayExistsError, insert_replay
+from rlcoach.db.writer import ReplayExistsError, check_not_stored, insert_replay
 
 
 @pytest.fixture(autouse=True)
@@ -109,3 +109,23 @@ def test_insert_replay_rejects_duplicate_file_hash(tmp_path, config, sample_repo
     sample_report["replay_id"] = "different_id"
     with pytest.raises(ReplayExistsError, match="file_hash"):
         insert_replay(sample_report, "samehash", config)
+
+
+def test_check_not_stored_finds_a_stored_replay_by_its_hash(
+    tmp_path, config, sample_report
+):
+    init_db(tmp_path / "test.db")
+    session = create_session()
+    session.add(Player(player_id="steam:me123", display_name="Me", is_me=True))
+    session.commit()
+    session.close()
+
+    check_not_stored("filehash123")  # nothing stored yet
+    insert_replay(sample_report, "filehash123", config)
+
+    with pytest.raises(ReplayExistsError, match="file_hash"):
+        check_not_stored("filehash123")
+    # Reports use the file hash as their replay_id, so that is checked too.
+    with pytest.raises(ReplayExistsError, match="replay_id"):
+        check_not_stored("abc123hash")
+    check_not_stored("some_other_hash")

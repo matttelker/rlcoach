@@ -1,15 +1,20 @@
 """Tests for the integrated ingestion pipeline."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from rlcoach.db.session import reset_engine
 from rlcoach.db.writer import ReplayExistsError
+from rlcoach.ingest import file_sha256
 from rlcoach.pipeline import (
     IngestionResult,
     IngestionStatus,
     process_replay_file,
 )
+
+REPLAY = Path("Replay_files/testing_replay.replay")
 
 
 @pytest.fixture
@@ -53,6 +58,7 @@ class TestProcessReplayFile:
             patch("rlcoach.pipeline.generate_report") as mock_report,
             patch("rlcoach.pipeline.write_report") as mock_write,
             patch("rlcoach.pipeline.init_db"),
+            patch("rlcoach.pipeline.check_not_stored"),
         ):
 
             mock_ingest.return_value = {"sha256": "abc123", "status": "success"}
@@ -71,7 +77,7 @@ class TestProcessReplayFile:
             assert result.replay_id == "test123"
 
     def test_process_replay_handles_duplicate(self, mock_config, tmp_path):
-        """Should return DUPLICATE status for existing replays."""
+        """Should return DUPLICATE when the write is the step that finds it."""
         replay_path = tmp_path / "test.replay"
         replay_path.write_bytes(b"x" * 100)
 
@@ -80,6 +86,7 @@ class TestProcessReplayFile:
             patch("rlcoach.pipeline.generate_report") as mock_report,
             patch("rlcoach.pipeline.write_report") as mock_write,
             patch("rlcoach.pipeline.init_db"),
+            patch("rlcoach.pipeline.check_not_stored"),
         ):
 
             mock_ingest.return_value = {"sha256": "abc123", "status": "success"}
@@ -103,6 +110,7 @@ class TestProcessReplayFile:
         with (
             patch("rlcoach.pipeline.ingest_replay") as mock_ingest,
             patch("rlcoach.pipeline.init_db"),
+            patch("rlcoach.pipeline.check_not_stored"),
         ):
 
             mock_ingest.side_effect = ValueError("Parse error")
@@ -122,6 +130,7 @@ class TestProcessReplayFile:
             patch("rlcoach.pipeline.generate_report") as mock_report,
             patch("rlcoach.pipeline.write_report") as mock_write,
             patch("rlcoach.pipeline.init_db") as mock_init,
+            patch("rlcoach.pipeline.check_not_stored"),
         ):
 
             mock_ingest.return_value = {"sha256": "abc123", "status": "success"}
@@ -167,6 +176,7 @@ class TestProcessReplayFile:
             patch("rlcoach.pipeline.ingest_replay") as mock_ingest,
             patch("rlcoach.pipeline.generate_report") as mock_report,
             patch("rlcoach.pipeline.init_db"),
+            patch("rlcoach.pipeline.check_not_stored"),
         ):
 
             mock_ingest.return_value = {"sha256": "abc123", "status": "success"}
@@ -216,6 +226,7 @@ class TestProcessReplayFile:
             patch("rlcoach.pipeline.generate_report") as mock_report,
             patch("rlcoach.pipeline.write_report") as mock_write,
             patch("rlcoach.pipeline.init_db"),
+            patch("rlcoach.pipeline.check_not_stored"),
         ):
 
             mock_ingest.return_value = {"sha256": "abc123", "status": "success"}
@@ -245,6 +256,7 @@ def _ingest_with_players(mock_config, tmp_path, players, review_side_effect=None
         patch("rlcoach.pipeline.generate_report") as mock_report,
         patch("rlcoach.pipeline.write_report") as mock_write,
         patch("rlcoach.pipeline.init_db"),
+        patch("rlcoach.pipeline.check_not_stored"),
         patch("rlcoach.pipeline.review_game") as mock_review,
     ):
         mock_ingest.return_value = {"sha256": "abc123", "status": "success"}
@@ -280,3 +292,47 @@ def test_a_failed_review_still_stores_the_game(mock_config, tmp_path):
         mock_config, tmp_path, [me], review_side_effect=RuntimeError("db locked")
     )
     assert result.status == IngestionStatus.SUCCESS
+
+
+@pytest.fixture
+def real_db():
+    yield
+    reset_engine()
+
+
+def _storable_report(path, **_):
+    return {
+        "replay_id": file_sha256(path),
+        "metadata": {"started_at_utc": "2024-12-24T02:00:00Z"},
+        "teams": {
+            "blue": {"score": 3, "players": ["steam:me123"]},
+            "orange": {"score": 1, "players": ["steam:opp456"]},
+        },
+        "players": [
+            {"player_id": "steam:me123", "display_name": "TestPlayer", "team": "BLUE"},
+            {"player_id": "steam:opp456", "display_name": "Opponent", "team": "ORANGE"},
+        ],
+        "analysis": {"per_player": {}},
+    }
+
+
+def test_a_stored_replay_is_skipped_before_it_is_parsed(mock_config, real_db):
+    with (
+        patch("rlcoach.pipeline.generate_report", side_effect=_storable_report),
+        patch("rlcoach.pipeline.review_game"),
+    ):
+        first = process_replay_file(REPLAY, mock_config)
+    assert first.status == IngestionStatus.SUCCESS
+
+    with (
+        patch("rlcoach.pipeline.generate_report") as parse,
+        patch("rlcoach.pipeline.write_report_atomically") as write_json,
+        patch("rlcoach.pipeline.write_report") as write_db,
+    ):
+        second = process_replay_file(REPLAY, mock_config)
+
+    assert second.status == IngestionStatus.DUPLICATE
+    assert "already exists" in second.error
+    parse.assert_not_called()
+    write_json.assert_not_called()
+    write_db.assert_not_called()
