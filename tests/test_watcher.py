@@ -1,342 +1,138 @@
-"""Tests for watch folder service and file stability check."""
+"""Tests for watching the replay folder."""
 
-import threading
+from __future__ import annotations
+
+import os
 import time
-from pathlib import Path
-
-import pytest
-
-from rlcoach.watcher import (
-    FileStabilityTimeout,
-    ReplayWatcher,
-    wait_for_stable_file,
-)
-
-
-class TestFileStabilityCheck:
-    """Tests for file stability checking."""
-
-    def test_stable_file_returns_immediately(self, tmp_path):
-        """A file that doesn't change should return quickly."""
-        test_file = tmp_path / "stable.replay"
-        test_file.write_bytes(b"x" * 1000)
-
-        # With short check intervals, should complete fast
-        result = wait_for_stable_file(
-            test_file, stability_seconds=0.1, check_interval=0.05
-        )
-
-        assert result is True
-
-    def test_growing_file_waits_for_stability(self, tmp_path):
-        """A file being written to should wait until it stabilizes."""
-        test_file = tmp_path / "growing.replay"
-        test_file.write_bytes(b"x" * 500)
-
-        sizes = []
-
-        def record_and_check():
-            nonlocal sizes
-            # Simulate file growing in a background thread
-            time.sleep(0.05)
-            sizes.append(test_file.stat().st_size)
-            test_file.write_bytes(b"x" * 1000)
-            sizes.append(test_file.stat().st_size)
-            time.sleep(0.05)
-            test_file.write_bytes(b"x" * 1500)
-            sizes.append(test_file.stat().st_size)
-
-        writer = threading.Thread(target=record_and_check)
-        writer.start()
-
-        # Start stability check
-        result = wait_for_stable_file(
-            test_file, stability_seconds=0.1, check_interval=0.05, timeout=2.0
-        )
-
-        writer.join()
-
-        assert result is True
-        # File should have been written multiple times
-        assert len(sizes) == 3
-
-    def test_timeout_raises_exception(self, tmp_path):
-        """Should raise FileStabilityTimeout if file keeps changing."""
-        test_file = tmp_path / "unstable.replay"
-        test_file.write_bytes(b"x" * 100)
-
-        # Keep modifying the file in background
-        stop_event = threading.Event()
-
-        def keep_writing():
-            counter = 0
-            while not stop_event.is_set():
-                time.sleep(0.02)
-                test_file.write_bytes(b"x" * (100 + counter))
-                counter += 1
-
-        writer = threading.Thread(target=keep_writing)
-        writer.start()
-
-        try:
-            with pytest.raises(FileStabilityTimeout):
-                wait_for_stable_file(
-                    test_file,
-                    stability_seconds=0.5,
-                    check_interval=0.05,
-                    timeout=0.3,
-                )
-        finally:
-            stop_event.set()
-            writer.join()
-
-    def test_nonexistent_file_raises_error(self, tmp_path):
-        """Should raise FileNotFoundError for nonexistent files."""
-        test_file = tmp_path / "missing.replay"
-
-        with pytest.raises(FileNotFoundError):
-            wait_for_stable_file(test_file)
-
-    def test_default_parameters(self, tmp_path):
-        """Default parameters should be reasonable."""
-        test_file = tmp_path / "test.replay"
-        test_file.write_bytes(b"x" * 1000)
-
-        # Should work with defaults (stability_seconds=2.0 is too slow for tests)
-        # Just verify no errors
-        result = wait_for_stable_file(
-            test_file, stability_seconds=0.1, check_interval=0.05
-        )
-        assert result is True
 
-
-class TestReplayWatcher:
-    """Tests for the replay watcher service."""
-
-    def test_watcher_detects_new_replay_file(self, tmp_path):
-        """Should detect and process new .replay files."""
-        watch_dir = tmp_path / "replays"
-        watch_dir.mkdir()
-
-        processed_files = []
-
-        def callback(path: Path) -> None:
-            processed_files.append(path)
-
-        watcher = ReplayWatcher(
-            watch_dir=watch_dir,
-            callback=callback,
-            poll_interval=0.1,
-            stability_seconds=0.1,
-        )
-
-        # Start watcher in background
-        watcher.start()
-
-        try:
-            # Give watcher time to start
-            time.sleep(0.1)
-
-            test_file = watch_dir / "test.replay"
-            test_file.write_bytes(b"x" * 1000)
-
-            # Wait for processing
-            time.sleep(0.5)
-
-            assert len(processed_files) == 1
-            assert processed_files[0] == test_file
-        finally:
-            watcher.stop()
-
-    def test_watcher_ignores_non_replay_files(self, tmp_path):
-        """Should ignore files without .replay extension."""
-        watch_dir = tmp_path / "replays"
-        watch_dir.mkdir()
-
-        processed_files = []
-
-        def callback(path: Path) -> None:
-            processed_files.append(path)
-
-        watcher = ReplayWatcher(
-            watch_dir=watch_dir,
-            callback=callback,
-            poll_interval=0.1,
-            stability_seconds=0.1,
-        )
-
-        watcher.start()
-
-        try:
-            time.sleep(0.1)
-
-            (watch_dir / "test.txt").write_text("hello")
-            (watch_dir / "test.json").write_text("{}")
-            (watch_dir / "test.mp4").write_bytes(b"video")
-
-            time.sleep(0.3)
-
-            assert len(processed_files) == 0
-        finally:
-            watcher.stop()
-
-    def test_watcher_tracks_processed_files(self, tmp_path):
-        """Should not reprocess already processed files."""
-        watch_dir = tmp_path / "replays"
-        watch_dir.mkdir()
-
-        processed_files = []
-
-        def callback(path: Path) -> None:
-            processed_files.append(path)
-
-        watcher = ReplayWatcher(
-            watch_dir=watch_dir,
-            callback=callback,
-            poll_interval=0.1,
-            stability_seconds=0.1,
-        )
-
-        watcher.start()
-
-        try:
-            time.sleep(0.1)
-
-            test_file = watch_dir / "test.replay"
-            test_file.write_bytes(b"x" * 1000)
-
-            # Wait for processing
-            time.sleep(0.5)
-            assert len(processed_files) == 1
-
-            # Wait more - should not reprocess
-            time.sleep(0.3)
-            assert len(processed_files) == 1
-        finally:
-            watcher.stop()
-
-    def test_watcher_processes_existing_files_on_start(self, tmp_path):
-        """Should process existing replay files when starting."""
-        watch_dir = tmp_path / "replays"
-        watch_dir.mkdir()
-
-        (watch_dir / "existing1.replay").write_bytes(b"x" * 1000)
-        (watch_dir / "existing2.replay").write_bytes(b"y" * 1000)
-
-        processed_files = []
-
-        def callback(path: Path) -> None:
-            processed_files.append(path)
-
-        watcher = ReplayWatcher(
-            watch_dir=watch_dir,
-            callback=callback,
-            poll_interval=0.1,
-            stability_seconds=0.1,
-            process_existing=True,
-        )
-
-        watcher.start()
-
-        try:
-            time.sleep(0.5)
-            assert len(processed_files) == 2
-        finally:
-            watcher.stop()
-
-    def test_watcher_skip_existing_files_option(self, tmp_path):
-        """Should skip existing files when process_existing=False."""
-        watch_dir = tmp_path / "replays"
-        watch_dir.mkdir()
-
-        (watch_dir / "existing.replay").write_bytes(b"x" * 1000)
-
-        processed_files = []
-
-        def callback(path: Path) -> None:
-            processed_files.append(path)
-
-        watcher = ReplayWatcher(
-            watch_dir=watch_dir,
-            callback=callback,
-            poll_interval=0.1,
-            stability_seconds=0.1,
-            process_existing=False,
-        )
-
-        watcher.start()
-
-        try:
-            # Existing file should be skipped
-            timeout = time.monotonic() + 1.0
-            while time.monotonic() < timeout and len(processed_files) < 1:
-                time.sleep(0.05)
-            assert len(processed_files) == 0
-
-            # New file should be processed
-            (watch_dir / "new.replay").write_bytes(b"y" * 1000)
-            timeout = time.monotonic() + 1.0
-            while time.monotonic() < timeout and len(processed_files) < 1:
-                time.sleep(0.05)
-            assert len(processed_files) == 1
-        finally:
-            watcher.stop()
-
-    def test_watcher_handles_callback_exception(self, tmp_path):
-        """Should continue watching even if callback raises exception."""
-        watch_dir = tmp_path / "replays"
-        watch_dir.mkdir()
-
-        processed_files = []
-        call_count = 0
-
-        def callback(path: Path) -> None:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise ValueError("Test error")
-            processed_files.append(path)
-
-        watcher = ReplayWatcher(
-            watch_dir=watch_dir,
-            callback=callback,
-            poll_interval=0.1,
-            stability_seconds=0.1,
-        )
-
-        watcher.start()
-
-        try:
-            time.sleep(0.1)
-
-            # First file triggers exception
-            (watch_dir / "first.replay").write_bytes(b"x" * 1000)
-            time.sleep(0.3)
-
-            # Second file should still be processed
-            (watch_dir / "second.replay").write_bytes(b"y" * 1000)
-            time.sleep(0.3)
-
-            assert len(processed_files) == 1
-            assert processed_files[0].name == "second.replay"
-        finally:
-            watcher.stop()
-
-    def test_watcher_stop_is_idempotent(self, tmp_path):
-        """Should be safe to call stop multiple times."""
-        watch_dir = tmp_path / "replays"
-        watch_dir.mkdir()
-
-        watcher = ReplayWatcher(
-            watch_dir=watch_dir,
-            callback=lambda p: None,
-            poll_interval=0.1,
-        )
-
-        watcher.start()
-        time.sleep(0.1)
-
-        # Multiple stops should be safe
+from rlcoach.watcher import ReplayWatcher
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def _replay(folder, name, mtime, size=100):
+    path = folder / name
+    path.write_bytes(b"x" * size)
+    os.utime(path, ns=(mtime, mtime))
+    return path
+
+
+def _watcher(folder, seen, **kwargs):
+    clock = Clock()
+    watcher = ReplayWatcher(folder, seen.append, clock=clock, **kwargs)
+    return watcher, clock
+
+
+def test_a_replay_is_handed_over_once_after_it_settles(tmp_path):
+    seen = []
+    watcher, clock = _watcher(tmp_path, seen, settle_seconds=2.0)
+    path = _replay(tmp_path, "a.replay", 1_000_000_000)
+    watcher.scan()
+    clock.now = 1.0
+    watcher.scan()
+    assert seen == []
+    clock.now = 2.5
+    watcher.scan()
+    clock.now = 10.0
+    watcher.scan()
+    assert seen == [path]
+
+
+def test_a_growing_file_waits_until_it_stops_changing(tmp_path):
+    seen = []
+    watcher, clock = _watcher(tmp_path, seen, settle_seconds=2.0)
+    path = _replay(tmp_path, "a.replay", 1_000_000_000, size=10)
+    watcher.scan()
+    clock.now = 3.0
+    _replay(tmp_path, "a.replay", 2_000_000_000, size=20)
+    watcher.scan()
+    assert seen == []
+    clock.now = 4.0
+    watcher.scan()
+    assert seen == []
+    clock.now = 5.0
+    watcher.scan()
+    assert seen == [path]
+
+
+def test_replays_go_oldest_first_and_other_files_are_ignored(tmp_path):
+    seen = []
+    watcher, clock = _watcher(tmp_path, seen, settle_seconds=0)
+    newer = _replay(tmp_path, "a.replay", 3_000_000_000)
+    older = _replay(tmp_path, "b.replay", 1_000_000_000)
+    _replay(tmp_path, "notes.txt", 2_000_000_000)
+    watcher.scan()
+    watcher.scan()
+    assert seen == [older, newer]
+
+
+def test_a_failing_callback_is_logged_and_not_retried(tmp_path, caplog):
+    calls = []
+
+    def fail(path):
+        calls.append(path)
+        raise RuntimeError("bad replay")
+
+    watcher = ReplayWatcher(tmp_path, fail, settle_seconds=0, clock=Clock())
+    _replay(tmp_path, "a.replay", 1_000_000_000)
+    good = _replay(tmp_path, "b.replay", 2_000_000_000)
+    watcher.scan()
+    watcher.scan()
+    watcher.scan()
+    assert len(calls) == 2 and calls[1] == good
+    assert "Couldn't load" in caplog.text
+
+
+def test_a_missing_folder_is_waited_for(tmp_path):
+    seen = []
+    folder = tmp_path / "Demos"
+    watcher, _ = _watcher(folder, seen, settle_seconds=0)
+    watcher.scan()
+    folder.mkdir()
+    path = _replay(folder, "a.replay", 1_000_000_000)
+    watcher.scan()
+    watcher.scan()
+    assert seen == [path]
+
+
+def _wait_for(condition, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return condition()
+
+
+def test_the_thread_loads_existing_replays_and_stops(tmp_path):
+    seen = []
+    path = _replay(tmp_path, "a.replay", 1_000_000_000)
+    watcher = ReplayWatcher(tmp_path, seen.append, poll_seconds=0.01, settle_seconds=0)
+    watcher.start()
+    try:
+        assert _wait_for(lambda: seen == [path])
+    finally:
         watcher.stop()
-        watcher.stop()
+    assert watcher._thread is None
+
+
+def test_existing_replays_can_be_skipped(tmp_path):
+    seen = []
+    _replay(tmp_path, "old.replay", 1_000_000_000)
+    watcher = ReplayWatcher(
+        tmp_path,
+        seen.append,
+        poll_seconds=0.01,
+        settle_seconds=0,
+        process_existing=False,
+    )
+    watcher.start()
+    try:
+        new = _replay(tmp_path, "new.replay", 2_000_000_000)
+        assert _wait_for(lambda: seen == [new])
+    finally:
         watcher.stop()

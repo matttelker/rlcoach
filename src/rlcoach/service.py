@@ -152,10 +152,8 @@ def ingest_watcher(
     counts = stats if stats is not None else {}
 
     return ReplayWatcher(
-        watch_dir=config.paths.watch_folder,
-        callback=lambda path: load_replay(path, config, counts),
-        poll_interval=2.0,
-        stability_seconds=2.0,
+        config.paths.watch_folder,
+        lambda path: load_replay(path, config, counts),
         process_existing=process_existing,
     )
 

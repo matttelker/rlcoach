@@ -1,9 +1,9 @@
-"""Watch folder service and file stability utilities.
+"""Watch the replay folder and hand each new replay to a callback.
 
-This module provides:
-- File stability checking (wait for files to finish syncing/writing)
-- Directory watching for new replay files
-- Integration with the ingestion pipeline
+Rocket League writes a replay about 30 seconds after the match, and OneDrive
+may still be syncing it, so a file is only handed over once its size and
+modified time have held still between scans for a couple of seconds. Polling
+works the same on synced and local folders, where file events don't.
 """
 
 from __future__ import annotations
@@ -11,200 +11,101 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
 
-class WatcherCallback(Protocol):
-    """Protocol for replay watcher callbacks."""
-
-    def __call__(self, path: Path) -> None:
-        """Process a replay file.
-
-        Args:
-            path: Path to the replay file to process
-        """
-        ...
-
-
-class FileStabilityTimeout(Exception):
-    """Raised when a file doesn't stabilize within the timeout period."""
-
-    def __init__(self, path: Path, timeout: float):
-        self.path = path
-        self.timeout = timeout
-        super().__init__(f"File '{path}' did not stabilize within {timeout} seconds")
-
-
-def wait_for_stable_file(
-    path: Path,
-    stability_seconds: float = 2.0,
-    check_interval: float = 0.5,
-    timeout: float = 60.0,
-) -> bool:
-    """Wait for a file's size to stabilize before processing.
-
-    This is useful for files being synced (e.g., from Dropbox) or written
-    by another process. The file is considered stable when its size hasn't
-    changed for `stability_seconds`.
-
-    Args:
-        path: Path to the file to monitor
-        stability_seconds: Time in seconds the file size must remain unchanged
-        check_interval: How often to check the file size
-        timeout: Maximum time to wait before raising FileStabilityTimeout
-
-    Returns:
-        True if file is stable
-
-    Raises:
-        FileNotFoundError: If the file doesn't exist
-        FileStabilityTimeout: If the file doesn't stabilize within timeout
-    """
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {path}")
-
-    start_time = time.monotonic()
-    last_size = path.stat().st_size
-    stable_since = time.monotonic()
-
-    while True:
-        elapsed = time.monotonic() - start_time
-        if elapsed > timeout:
-            raise FileStabilityTimeout(path, timeout)
-
-        time.sleep(check_interval)
-
-        current_size = path.stat().st_size
-        if current_size != last_size:
-            last_size = current_size
-            stable_since = time.monotonic()
-        else:
-            stable_duration = time.monotonic() - stable_since
-            if stable_duration >= stability_seconds:
-                return True
-
-
 class ReplayWatcher:
-    """Watch a directory for new .replay files and process them.
+    """Calls `callback(path)` once for each replay that settles in `folder`.
 
-    This uses polling rather than filesystem events for reliability across
-    different platforms and filesystems (especially network/synced folders).
-
-    Example:
-        def process_replay(path: Path) -> None:
-            print(f"Processing: {path}")
-
-        watcher = ReplayWatcher(
-            watch_dir=Path("~/Replays"),
-            callback=process_replay,
-        )
-        watcher.start()
-        watcher.stop()
+    A replay that fails isn't retried until the watcher restarts, when every
+    file is offered again and stored ones are skipped by their hash.
     """
 
     def __init__(
         self,
-        watch_dir: Path,
-        callback: WatcherCallback,
-        poll_interval: float = 2.0,
-        stability_seconds: float = 2.0,
-        stability_timeout: float = 60.0,
+        folder: Path,
+        callback: Callable[[Path], object],
+        *,
+        poll_seconds: float = 2.0,
+        settle_seconds: float = 2.0,
         process_existing: bool = True,
+        clock: Callable[[], float] = time.monotonic,
     ):
-        """Initialize the replay watcher.
-
-        Args:
-            watch_dir: Directory to watch for .replay files
-            callback: Function to call for each new replay file
-            poll_interval: How often to scan the directory (seconds)
-            stability_seconds: How long a file must be unchanged before processing
-            stability_timeout: Maximum time to wait for file stability
-            process_existing: If True, process existing files on start
-        """
-        self.watch_dir = watch_dir
+        self.folder = folder
         self.callback = callback
-        self.poll_interval = poll_interval
-        self.stability_seconds = stability_seconds
-        self.stability_timeout = stability_timeout
+        self.poll_seconds = poll_seconds
+        self.settle_seconds = settle_seconds
         self.process_existing = process_existing
-
-        self._processed: set[Path] = set()
-        self._stop_event = threading.Event()
+        self._clock = clock
+        self._done: set[Path] = set()
+        # Each unsettled file's last (size, mtime), and when that was first seen
+        self._pending: dict[Path, tuple[tuple[int, int], float]] = {}
+        self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+    def _replays(self) -> list[Path]:
+        """The folder's replays, oldest first, so games load in the order played."""
+        found = []
+        for path in self.folder.glob("*.replay"):
+            try:
+                found.append((path.stat().st_mtime_ns, path))
+            except OSError:
+                continue
+        return [path for _, path in sorted(found)]
+
+    def scan(self) -> None:
+        """Hand over every replay that has settled since the last scan."""
+        if not self.folder.is_dir():
+            return
+        now = self._clock()
+        for path in self._replays():
+            if self._stop.is_set():
+                return
+            if path in self._done:
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            state = (stat.st_size, stat.st_mtime_ns)
+            last = self._pending.get(path)
+            if last is None or last[0] != state:
+                self._pending[path] = (state, now)
+                continue
+            if now - last[1] < self.settle_seconds:
+                continue
+            del self._pending[path]
+            self._done.add(path)
+            try:
+                self.callback(path)
+            except Exception:
+                logger.exception("Couldn't load %s", path)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.scan()
+            except Exception:
+                logger.exception("Couldn't scan %s", self.folder)
+            self._stop.wait(self.poll_seconds)
+
     def start(self) -> None:
-        """Start watching the directory in a background thread."""
+        """Start watching on a background thread."""
         if self._thread is not None and self._thread.is_alive():
             return
-
-        self._stop_event.clear()
-
-        if not self.process_existing:
-            for path in self.watch_dir.glob("*.replay"):
-                self._processed.add(path)
-
-        self._thread = threading.Thread(target=self._watch_loop, daemon=True)
+        self._stop.clear()
+        if not self.process_existing and self.folder.is_dir():
+            self._done.update(self._replays())
+        self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        logger.info(f"Started watching {self.watch_dir}")
+        logger.info("Watching %s", self.folder)
 
     def stop(self) -> None:
-        """Stop watching and wait for the thread to finish."""
-        self._stop_event.set()
-        if self._thread is not None and self._thread.is_alive():
+        """Stop watching, after the replay being loaded, if any, finishes."""
+        self._stop.set()
+        if self._thread is not None:
             self._thread.join(timeout=5.0)
         self._thread = None
-        logger.info(f"Stopped watching {self.watch_dir}")
-
-    def _watch_loop(self) -> None:
-        """Main watch loop that runs in background thread."""
-        while not self._stop_event.is_set():
-            try:
-                self._scan_for_new_files()
-            except Exception as e:
-                logger.error(f"Error during scan: {e}")
-
-            self._stop_event.wait(self.poll_interval)
-
-    def _scan_for_new_files(self) -> None:
-        """Scan directory for new .replay files and process them."""
-        if not self.watch_dir.exists():
-            return
-
-        for path in self.watch_dir.glob("*.replay"):
-            if path in self._processed:
-                continue
-
-            if self._stop_event.is_set():
-                break
-
-            try:
-                check_interval = min(0.5, self.stability_seconds / 2)
-                wait_for_stable_file(
-                    path,
-                    stability_seconds=self.stability_seconds,
-                    check_interval=check_interval,
-                    timeout=self.stability_timeout,
-                )
-
-                self._process_file(path)
-
-            except FileStabilityTimeout:
-                logger.warning(f"File {path} did not stabilize, skipping for now")
-            except Exception as e:
-                logger.error(f"Error processing {path}: {e}")
-                # Do not retry callback failures forever.
-                self._processed.add(path)
-
-    def _process_file(self, path: Path) -> None:
-        """Process a single replay file."""
-        try:
-            self.callback(path)
-            self._processed.add(path)
-            logger.info(f"Processed: {path}")
-        except Exception as e:
-            logger.error(f"Callback error for {path}: {e}")
-            # Do not retry callback failures forever.
-            self._processed.add(path)
