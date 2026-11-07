@@ -28,12 +28,12 @@ from rlcoach.analysis.mistakes import (
     goal_timeline,
     link_goals_to_moments,
     live_mask,
-    load_full_frames,
     own_depth,
     review_conceded_goals,
 )
 from rlcoach.events.types import ChallengeEvent, GoalEvent
 from rlcoach.field_constants import Vec3
+from rlcoach.game import read_game
 from rlcoach.parser.types import ParserTouchEvent
 from tests.fixtures.builders import (
     create_test_ball,
@@ -1159,9 +1159,9 @@ def test_standard_arena_is_accepted():
 @pytest.mark.skipif(
     not Path("Replay_files/0925.replay").exists(), reason="replay fixture missing"
 )
-def test_load_full_frames_keeps_the_end_of_the_game():
-    """The default timeline cuts replays at NumFrames/30 seconds."""
-    _, frames = load_full_frames(Path("Replay_files/0925.replay"))
+def test_the_review_sees_the_end_of_the_game():
+    """NumFrames/30 seconds, the header's match length, would cut it short."""
+    frames = read_game(Path("Replay_files/0925.replay")).frames
     assert frames[-1].timestamp == pytest.approx(323.09, abs=0.5)
 
 

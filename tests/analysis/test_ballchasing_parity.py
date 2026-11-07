@@ -80,7 +80,7 @@ def players() -> dict[str, dict]:
     pytest.importorskip("rlreplay_rust")
     if REPLAY.stat().st_size < 1024:
         pytest.skip("0925.replay is a git symlink stub on this checkout")
-    report = generate_report(REPLAY, adapter_name="rust")
+    report = generate_report(REPLAY)
     if "error" in report:
         pytest.skip(f"Rust parser could not read 0925: {report.get('details')}")
     return report["analysis"]["per_player"]

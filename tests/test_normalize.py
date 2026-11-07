@@ -15,7 +15,7 @@ from rlcoach.normalize import (
     to_field_coords,
     to_vec3,
 )
-from rlcoach.parser import get_adapter
+from rlcoach.parser import RustAdapter
 from rlcoach.parser.types import GoalHeader, Header, PlayerInfo
 
 PARITY_REPLAY_PATH = Path(__file__).resolve().parents[1] / "Replay_files/0925.replay"
@@ -655,7 +655,7 @@ class TestTimelineBuilding:
     def test_real_replay_keeps_every_frame(self):
         """Regression: 0925 used to stop at 304.88 s, before its 320.11 s goal."""
         pytest.importorskip("rlreplay_rust")
-        adapter = get_adapter("rust")
+        adapter = RustAdapter()
         header = adapter.parse_header(PARITY_REPLAY_PATH)
         raw_frames = adapter.parse_network(PARITY_REPLAY_PATH).frames
 

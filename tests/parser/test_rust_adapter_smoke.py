@@ -18,12 +18,11 @@ def _has_rust_core():
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
 def test_rust_header_and_frames_smoke():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
     path = Path("Replay_files/testing_replay.replay")
 
-    adapter = get_adapter("rust")
-    assert adapter.supports_network_parsing is True
+    adapter = RustAdapter()
 
     header = adapter.parse_header(path)
     assert header is not None
@@ -66,9 +65,9 @@ def test_rust_network_parse_returns_diagnostics_shape():
     not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
 )
 def test_0925_header_exposes_declared_record_fps():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    header = get_adapter("rust").parse_header(PARITY_REPLAY_PATH)
+    header = RustAdapter().parse_header(PARITY_REPLAY_PATH)
 
     assert header.declared_record_fps is not None
     assert 1.0 <= header.declared_record_fps <= 240.0
@@ -79,9 +78,9 @@ def test_0925_header_exposes_declared_record_fps():
     not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
 )
 def test_0925_replay_exposes_frame_delta():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    network = get_adapter("rust").parse_network(PARITY_REPLAY_PATH)
+    network = RustAdapter().parse_network(PARITY_REPLAY_PATH)
 
     assert network is not None
     assert network.frames
@@ -95,9 +94,9 @@ def test_0925_replay_exposes_frame_delta():
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
 @pytest.mark.skipif(not LTM_REPLAY_PATH.exists(), reason="LTM replay fixture missing")
 def test_ltm_replay_reports_parse_reason_not_silent_none():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     nf = adapter.parse_network(LTM_REPLAY_PATH)
 
     assert nf is not None
@@ -113,9 +112,9 @@ def test_ltm_replay_reports_parse_reason_not_silent_none():
     not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
 )
 def test_rust_network_preserves_header_player_frames_after_respawn():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     network = adapter.parse_network(PARITY_REPLAY_PATH)
 
     assert network is not None
@@ -147,9 +146,9 @@ def test_rust_network_preserves_header_player_frames_after_respawn():
     not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
 )
 def test_0925_replay_exposes_car_angular_velocity():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     network = adapter.parse_network(PARITY_REPLAY_PATH)
 
     assert network is not None
@@ -175,9 +174,9 @@ def test_0925_replay_exposes_car_angular_velocity():
     not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
 )
 def test_0925_replay_exposes_rigid_body_sleeping_flags():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     network = adapter.parse_network(PARITY_REPLAY_PATH)
 
     assert network is not None
@@ -201,9 +200,9 @@ def test_0925_replay_exposes_rigid_body_sleeping_flags():
     not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
 )
 def test_0925_replay_exposes_driving_inputs():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     network = adapter.parse_network(PARITY_REPLAY_PATH)
 
     assert network is not None
@@ -235,9 +234,9 @@ def test_0925_replay_exposes_driving_inputs():
     not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
 )
 def test_0925_replay_exposes_component_state_and_events():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     network = adapter.parse_network(PARITY_REPLAY_PATH)
 
     assert network is not None

@@ -22,7 +22,7 @@ from rlcoach.events import (
 )
 from rlcoach.field_constants import FIELD, Vec3
 from rlcoach.normalize import build_timeline as build_normalized_frames
-from rlcoach.parser import get_adapter
+from rlcoach.parser import RustAdapter
 from rlcoach.parser.types import (
     BallFrame,
     BoostPadEventFrame,
@@ -747,7 +747,7 @@ class TestKickoffDetection:
         if not path.exists():
             pytest.skip("replay fixture missing")
         pytest.importorskip("rlreplay_rust")
-        adapter = get_adapter("rust")
+        adapter = RustAdapter()
         header = adapter.parse_header(path)
         frames = build_normalized_frames(header, adapter.parse_network(path).frames)
 
@@ -939,7 +939,7 @@ class TestKickoffCountdown:
         if not replay.exists():
             pytest.skip("testing_replay.replay not found")
 
-        adapter = get_adapter("rust")
+        adapter = RustAdapter()
         header = adapter.parse_header(replay)
         network = adapter.parse_network(replay)
         frames = build_normalized_frames(header, network.frames)
@@ -1336,7 +1336,7 @@ class TestKickoffApproach:
         if not replay.exists():
             pytest.skip("testing_replay.replay not found")
 
-        adapter = get_adapter("rust")
+        adapter = RustAdapter()
         header = adapter.parse_header(replay)
         network = adapter.parse_network(replay)
         frames = build_normalized_frames(header, network.frames)

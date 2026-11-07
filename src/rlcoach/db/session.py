@@ -1,8 +1,8 @@
-"""Database session management for the local SQLite database."""
+"""Open the SQLite database once per process and hand out sessions on it."""
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Iterator
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine
@@ -11,66 +11,45 @@ from sqlalchemy.orm import Session, sessionmaker
 from .models import Base
 
 _engine: Engine | None = None
-_SessionFactory: sessionmaker | None = None
-
-
-def get_engine() -> Engine:
-    """Get the database engine (must call init_db first)."""
-    if _engine is None:
-        raise RuntimeError("Database not initialized. Call init_db() first.")
-    return _engine
+_sessions: sessionmaker[Session] | None = None
 
 
 def init_db(db_path: Path | None = None) -> Engine:
-    """Initialize the database, creating tables if needed.
+    """Open the database at db_path, or in memory, creating any missing tables.
 
-    Args:
-        db_path: Path to the SQLite file, or None for an in-memory database
-
-    Returns:
-        SQLAlchemy engine
+    New tables appear in an existing database. Changed ones don't, because
+    there are no migrations: reload the games instead.
     """
-    global _engine, _SessionFactory
-
-    if db_path:
+    global _engine, _sessions
+    if db_path is not None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        url = f"sqlite:///{db_path}"
-    else:
-        url = "sqlite:///:memory:"
-
-    _engine = create_engine(url, echo=False, connect_args={"check_same_thread": False})
+    url = f"sqlite:///{db_path}" if db_path is not None else "sqlite://"
+    # The API and the replay watcher share it from different threads
+    _engine = create_engine(url, connect_args={"check_same_thread": False})
     Base.metadata.create_all(_engine)
-    _SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False)
-
+    _sessions = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
 
 
-def reset_engine() -> None:
-    """Reset the global engine (for testing)."""
-    global _engine, _SessionFactory
-    if _engine:
-        _engine.dispose()
-    _engine = None
-    _SessionFactory = None
-
-
-def get_session() -> Generator[Session]:
-    """Get a database session (for use with FastAPI Depends)."""
-    if _SessionFactory is None:
+def create_session() -> Session:
+    """A new session. Close it when you're done."""
+    if _sessions is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")
+    return _sessions()
 
-    session = _SessionFactory()
+
+def get_session() -> Iterator[Session]:
+    """A session for one API request, as a FastAPI dependency."""
+    session = create_session()
     try:
         yield session
     finally:
         session.close()
 
 
-def create_session() -> Session:
-    """Create a database session directly (for scripts/CLI).
-
-    Remember to close the session when done!
-    """
-    if _SessionFactory is None:
-        raise RuntimeError("Database not initialized. Call init_db() first.")
-    return _SessionFactory()
+def reset_engine() -> None:
+    """Close the database, as tests do between cases."""
+    global _engine, _sessions
+    if _engine is not None:
+        _engine.dispose()
+    _engine = _sessions = None

@@ -14,9 +14,9 @@ def _has_rust_core():
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
 def test_rust_pad_registry_event_completeness():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
 
     pad_events = []
@@ -63,9 +63,9 @@ def test_rust_pad_registry_event_completeness():
 def test_rust_pad_registry_survives_checkpoints():
     """Pad actors re-spawn about every 10s and re-send their last state."""
     from rlcoach.field_constants import FIELD
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
     pad_events = [
         event for frame in frames.frames for event in frame.get("boost_pad_events", [])
@@ -86,9 +86,9 @@ def test_rust_pad_registry_survives_checkpoints():
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
 def test_location_component_events_do_not_break_pad_registry():
-    from rlcoach.parser import get_adapter
+    from rlcoach.parser import RustAdapter
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
 
     pad_events = []

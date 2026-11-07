@@ -1,142 +1,125 @@
-"""SQLAlchemy models for RLCoach database.
+"""The database's tables.
 
-IMPORTANT: All datetime fields store UTC. Use datetime.now(timezone.utc).
-The play_date field is computed from played_at_utc + configured timezone.
+Times are stored in UTC. A game's play_date is the day it was played on in
+your timezone, worked out when it loads.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import (
-    Boolean,
-    Column,
-    Date,
-    DateTime,
-    Float,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-)
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy import ForeignKey, Index, Text, UniqueConstraint, text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import DateTime, Float
 
 
-def _utc_now() -> datetime:
-    """Get current UTC time (timezone-aware)."""
+def _now() -> datetime:
     return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
-    pass
+    type_annotation_map = {datetime: DateTime(timezone=True), float: Float}
 
 
 class Replay(Base):
+    """One loaded game, seen from your side."""
+
     __tablename__ = "replays"
 
-    replay_id = Column(String, primary_key=True)
-    source_file = Column(String, nullable=False)
-    file_hash = Column(String, nullable=False, index=True)  # For dedup
-    match_id = Column(String, index=True)  # Rocket League match GUID for dedup
-    ingested_at = Column(DateTime(timezone=True), default=_utc_now)
-    played_at_utc = Column(DateTime(timezone=True), nullable=False)
-    play_date = Column(Date, nullable=False)  # Local date from timezone
-    map = Column(String, nullable=False)
-    playlist = Column(String, nullable=False)
-    team_size = Column(Integer, nullable=False)
-    duration_seconds = Column(Float, nullable=False)
-    overtime = Column(Boolean, default=False)
-    my_player_id = Column(String, ForeignKey("players.player_id"), nullable=True)
-    my_team = Column(String, nullable=True)
-    my_score = Column(Integer, nullable=True)
-    opponent_score = Column(Integer, nullable=True)
-    result = Column(String, nullable=True)
+    replay_id: Mapped[str] = mapped_column(primary_key=True)  # The file's SHA-256
+    source_file: Mapped[str]
+    file_hash: Mapped[str] = mapped_column(index=True)
+    ingested_at: Mapped[datetime | None] = mapped_column(default=_now)
+    played_at_utc: Mapped[datetime]
+    play_date: Mapped[date]
+    map: Mapped[str]
+    playlist: Mapped[str]  # See modes.py
+    team_size: Mapped[int]
+    duration_seconds: Mapped[float]
+    overtime: Mapped[bool | None] = mapped_column(default=False)
+    my_player_id: Mapped[str | None] = mapped_column(ForeignKey("players.player_id"))
+    my_team: Mapped[str | None]  # "BLUE" or "ORANGE"
+    my_score: Mapped[int | None]
+    opponent_score: Mapped[int | None]
+    result: Mapped[str | None]  # "WIN", "LOSS" or "DRAW"
 
-    player_stats = relationship(
-        "PlayerGameStats", back_populates="replay", cascade="all, delete-orphan"
+    player_stats: Mapped[list[PlayerGameStats]] = relationship(
+        back_populates="replay", cascade="all, delete-orphan"
     )
-    review = relationship(
-        "GameReview",
-        uselist=False,
-        back_populates="replay",
-        cascade="all, delete-orphan",
+    review: Mapped[GameReview | None] = relationship(
+        back_populates="replay", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
-        Index("ix_replays_play_date", play_date.desc()),
-        Index("ix_replays_playlist", playlist),
-        Index("ix_replays_result", result),
+        Index("ix_replays_play_date", text("play_date DESC")),
+        Index("ix_replays_playlist", "playlist"),
+        Index("ix_replays_result", "result"),
     )
 
 
 class Player(Base):
+    """Everyone you've played with or against, and you."""
+
     __tablename__ = "players"
 
-    player_id = Column(String, primary_key=True)
-    display_name = Column(String, nullable=False)
-    platform = Column(String)
-    is_me = Column(Boolean, default=False, index=True)
-    is_tagged_teammate = Column(Boolean, default=False)
-    teammate_notes = Column(Text)
-    first_seen_utc = Column(DateTime(timezone=True), default=_utc_now)
-    last_seen_utc = Column(DateTime(timezone=True), default=_utc_now)
-    # Games played with you are counted from PlayerGameStats when asked for
+    player_id: Mapped[str] = mapped_column(primary_key=True)  # See identity.py
+    display_name: Mapped[str]  # From their most recent game
+    platform: Mapped[str | None]
+    is_me: Mapped[bool | None] = mapped_column(default=False, index=True)
+    is_tagged_teammate: Mapped[bool | None] = mapped_column(default=False)
+    teammate_notes: Mapped[str | None] = mapped_column(Text)
+    # The first and last games they were in, by when they were played
+    first_seen_utc: Mapped[datetime | None] = mapped_column(default=_now)
+    last_seen_utc: Mapped[datetime | None] = mapped_column(default=_now)
 
 
 class PlayerGameStats(Base):
+    """One player's numbers in one game."""
+
     __tablename__ = "player_game_stats"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    replay_id = Column(
-        String, ForeignKey("replays.replay_id", ondelete="CASCADE"), nullable=False
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("replays.replay_id", ondelete="CASCADE")
     )
-    player_id = Column(
-        String, ForeignKey("players.player_id", ondelete="CASCADE"), nullable=False
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("players.player_id", ondelete="CASCADE")
     )
-    team = Column(String, nullable=False)
-    is_me = Column(Boolean, default=False)
+    team: Mapped[str]
+    is_me: Mapped[bool | None] = mapped_column(default=False)
 
-    # Fundamentals
-    goals = Column(Integer, default=0)
-    assists = Column(Integer, default=0)
-    saves = Column(Integer, default=0)
-    shots = Column(Integer, default=0)
-    shooting_pct = Column(Float)
-    score = Column(Integer, default=0)
-    demos_inflicted = Column(Integer, default=0)
-    demos_taken = Column(Integer, default=0)
+    goals: Mapped[int | None] = mapped_column(default=0)
+    assists: Mapped[int | None] = mapped_column(default=0)
+    saves: Mapped[int | None] = mapped_column(default=0)
+    shots: Mapped[int | None] = mapped_column(default=0)
+    shooting_pct: Mapped[float | None]
+    score: Mapped[int | None] = mapped_column(default=0)
+    demos_inflicted: Mapped[int | None] = mapped_column(default=0)
+    demos_taken: Mapped[int | None] = mapped_column(default=0)
 
-    # Boost
-    bcpm = Column(Float)
-    avg_boost = Column(Float)
-    time_zero_boost_s = Column(Float)
-    time_full_boost_s = Column(Float)
-    boost_collected = Column(Float)
-    boost_stolen = Column(Float)
+    bcpm: Mapped[float | None]  # Boost used per minute, Ballchasing's BCPM
+    avg_boost: Mapped[float | None]
+    time_zero_boost_s: Mapped[float | None]
+    time_full_boost_s: Mapped[float | None]
+    boost_collected: Mapped[float | None]
+    boost_stolen: Mapped[float | None]
 
-    # Movement
-    avg_speed_kph = Column(Float)
-    time_supersonic_s = Column(Float)
+    avg_speed_kph: Mapped[float | None]
+    time_supersonic_s: Mapped[float | None]
 
-    # Positioning
-    behind_ball_pct = Column(Float)
-    first_man_pct = Column(Float)
-    second_man_pct = Column(Float)
-    third_man_pct = Column(Float)
+    behind_ball_pct: Mapped[float | None]
+    first_man_pct: Mapped[float | None]
+    second_man_pct: Mapped[float | None]
+    third_man_pct: Mapped[float | None]
+
+    replay: Mapped[Replay] = relationship(back_populates="player_stats")
 
     __table_args__ = (
         UniqueConstraint("replay_id", "player_id", name="uq_replay_player"),
         Index("ix_player_game_stats_replay", "replay_id"),
         Index("ix_player_game_stats_player", "player_id"),
-        Index(
-            "ix_player_game_stats_is_me",
-            "is_me",
-        ),
+        Index("ix_player_game_stats_is_me", "is_me"),
     )
-
-    replay = relationship("Replay", back_populates="player_stats")
 
 
 class GameReview(Base):
@@ -147,25 +130,23 @@ class GameReview(Base):
 
     __tablename__ = "game_reviews"
 
-    replay_id = Column(
-        String, ForeignKey("replays.replay_id", ondelete="CASCADE"), primary_key=True
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("replays.replay_id", ondelete="CASCADE"), primary_key=True
     )
-    player_id = Column(String, nullable=False)
-    status = Column(String, nullable=False)
-    error = Column(Text)
-    clears = Column(Integer, default=0)
-    clears_given_back = Column(Integer, default=0)
-    reviewed_at = Column(DateTime(timezone=True), default=_utc_now)
+    player_id: Mapped[str]
+    status: Mapped[str]
+    error: Mapped[str | None] = mapped_column(Text)
+    clears: Mapped[int | None] = mapped_column(default=0)
+    clears_given_back: Mapped[int | None] = mapped_column(default=0)
+    reviewed_at: Mapped[datetime | None] = mapped_column(default=_now)
 
-    replay = relationship("Replay", back_populates="review")
-    mistakes = relationship(
-        "ReviewMistake",
+    replay: Mapped[Replay] = relationship(back_populates="review")
+    mistakes: Mapped[list[ReviewMistake]] = relationship(
         back_populates="review",
         cascade="all, delete-orphan",
         order_by="ReviewMistake.t",
     )
-    goals = relationship(
-        "ReviewGoal",
+    goals: Mapped[list[ReviewGoal]] = relationship(
         back_populates="review",
         cascade="all, delete-orphan",
         order_by="ReviewGoal.t",
@@ -177,30 +158,28 @@ class ReviewMistake(Base):
 
     __tablename__ = "review_mistakes"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    replay_id = Column(
-        String,
-        ForeignKey("game_reviews.replay_id", ondelete="CASCADE"),
-        nullable=False,
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE")
     )
-    kind = Column(String, nullable=False)
-    category = Column(String, nullable=False)
-    t = Column(Float, nullable=False)
-    seconds_left = Column(Float, nullable=False)
-    clock = Column(String, nullable=False)
-    score = Column(String, nullable=False)
-    duration = Column(Float, default=0.0)
-    what = Column(Text, nullable=False)
-    instead = Column(Text, nullable=False)
-    outcome = Column(Text, default="")
-    cost_goal = Column(Boolean, default=False)
+    kind: Mapped[str]
+    category: Mapped[str]
+    t: Mapped[float]
+    seconds_left: Mapped[float]
+    clock: Mapped[str]
+    score: Mapped[str]
+    duration: Mapped[float | None] = mapped_column(default=0.0)
+    what: Mapped[str] = mapped_column(Text)
+    instead: Mapped[str] = mapped_column(Text)
+    outcome: Mapped[str | None] = mapped_column(Text, default="")
+    cost_goal: Mapped[bool | None] = mapped_column(default=False)
+
+    review: Mapped[GameReview] = relationship(back_populates="mistakes")
 
     __table_args__ = (
         Index("ix_review_mistakes_replay", "replay_id"),
         Index("ix_review_mistakes_category", "category"),
     )
-
-    review = relationship("GameReview", back_populates="mistakes")
 
 
 class ReviewGoal(Base):
@@ -208,30 +187,28 @@ class ReviewGoal(Base):
 
     __tablename__ = "review_goals"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    replay_id = Column(
-        String,
-        ForeignKey("game_reviews.replay_id", ondelete="CASCADE"),
-        nullable=False,
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE")
     )
-    t = Column(Float, nullable=False)
-    seconds_left = Column(Float, nullable=False)
-    clock = Column(String, nullable=False)
-    score = Column(String, nullable=False)  # Before the goal, your team first
-    ours = Column(Boolean, nullable=False)
-    scorer = Column(String, nullable=False)
-    by_me = Column(Boolean, default=False)
-    assist_by_me = Column(Boolean, default=False)
-    winner = Column(Boolean, default=False)
-    equalizer = Column(Boolean, default=False)
+    t: Mapped[float]
+    seconds_left: Mapped[float]
+    clock: Mapped[str]
+    score: Mapped[str]  # Before the goal, your team first
+    ours: Mapped[bool]
+    scorer: Mapped[str]
+    by_me: Mapped[bool | None] = mapped_column(default=False)
+    assist_by_me: Mapped[bool | None] = mapped_column(default=False)
+    winner: Mapped[bool | None] = mapped_column(default=False)
+    equalizer: Mapped[bool | None] = mapped_column(default=False)
     # Goals against only
-    on_me = Column(Boolean)
-    summary = Column(Text)
-    lines = Column(Text)  # JSON array
+    on_me: Mapped[bool | None]
+    summary: Mapped[str | None] = mapped_column(Text)
+    lines: Mapped[str | None] = mapped_column(Text)  # JSON array
+
+    review: Mapped[GameReview] = relationship(back_populates="goals")
 
     __table_args__ = (Index("ix_review_goals_replay", "replay_id"),)
-
-    review = relationship("GameReview", back_populates="goals")
 
 
 class ReviewGrade(Base):
@@ -245,16 +222,16 @@ class ReviewGrade(Base):
 
     __tablename__ = "review_grades"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    replay_id = Column(
-        String, ForeignKey("replays.replay_id", ondelete="CASCADE"), nullable=False
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("replays.replay_id", ondelete="CASCADE")
     )
-    item = Column(String, nullable=False)  # "mistake" or "goal"
-    ref = Column(String, nullable=False)
-    kind = Column(String, nullable=False)
-    label = Column(Text, nullable=False)
-    grade = Column(String, nullable=False)  # "right" or "wrong"
-    graded_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+    item: Mapped[str]  # "mistake" or "goal"
+    ref: Mapped[str]
+    kind: Mapped[str]
+    label: Mapped[str] = mapped_column(Text)
+    grade: Mapped[str]  # "right" or "wrong"
+    graded_at: Mapped[datetime | None] = mapped_column(default=_now, onupdate=_now)
 
     __table_args__ = (
         UniqueConstraint("replay_id", "item", "ref", name="uq_review_grade"),
@@ -263,20 +240,22 @@ class ReviewGrade(Base):
 
 
 class Benchmark(Base):
+    """What players of one rank average for one stat in one playlist."""
+
     __tablename__ = "benchmarks"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    metric = Column(String, nullable=False)
-    playlist = Column(String, nullable=False)
-    rank_tier = Column(String, nullable=False)
-    median_value = Column(Float, nullable=False)
-    p25_value = Column(Float)
-    p75_value = Column(Float)
-    elite_threshold = Column(Float)
-    source = Column(String, nullable=False)
-    source_date = Column(Date)
-    notes = Column(Text)
-    imported_at = Column(DateTime(timezone=True), default=_utc_now)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    metric: Mapped[str]
+    playlist: Mapped[str]
+    rank_tier: Mapped[str]
+    median_value: Mapped[float]
+    p25_value: Mapped[float | None]
+    p75_value: Mapped[float | None]
+    elite_threshold: Mapped[float | None]
+    source: Mapped[str]
+    source_date: Mapped[date | None]
+    notes: Mapped[str | None] = mapped_column(Text)
+    imported_at: Mapped[datetime | None] = mapped_column(default=_now)
 
     __table_args__ = (
         UniqueConstraint("metric", "playlist", "rank_tier", name="uq_benchmark"),

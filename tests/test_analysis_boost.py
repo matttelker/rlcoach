@@ -14,7 +14,7 @@ from rlcoach.analysis.boost import (
 from rlcoach.events import BoostPickupEvent
 from rlcoach.field_constants import Vec3
 from rlcoach.normalize import build_timeline
-from rlcoach.parser import get_adapter
+from rlcoach.parser import RustAdapter
 from rlcoach.parser.types import BallFrame, Frame, PlayerFrame
 from rlcoach.physics_constants import CAR_MAX_SPEED_UU_S
 
@@ -842,7 +842,7 @@ def test_real_replay_capped_cars_reach_the_waste_threshold():
     if not replay.exists() or replay.stat().st_size < 1024:
         pytest.skip("real testing_replay.replay not available")
 
-    adapter = get_adapter("rust")
+    adapter = RustAdapter()
     frames = build_timeline(
         adapter.parse_header(replay), adapter.parse_network(replay).frames
     )

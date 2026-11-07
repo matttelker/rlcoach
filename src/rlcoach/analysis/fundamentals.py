@@ -15,12 +15,12 @@ from __future__ import annotations
 from typing import Any
 
 from ..events import DemoEvent, GoalEvent
-from ..parser.types import Frame, Header
-from ..utils.identity import (
+from ..identity import (
     build_alias_lookup,
     build_player_identities,
     sanitize_display_name,
 )
+from ..parser.types import Frame, Header
 
 
 def analyze_fundamentals(

@@ -1,23 +1,17 @@
-"""Rust-based parser adapter shim (boxcars-backed).
+"""Read replays with the Rust parser, rlreplay_rust (boxcars through pyo3).
 
-This adapter attempts to import the compiled Rust extension module
-(`rlreplay_rust`) built with pyo3. If available, it uses it to produce
-real header information and a network frame iterator. If the Rust core
-is not available, it degrades gracefully to a header-only path using the
-ingest validator, with explicit quality warnings.
+It's the only parser. Without it nothing can be read, so a missing build
+raises rather than falling back to the header alone.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
-import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ..ingest import ingest_replay
 from .errors import HeaderParseError
-from .interface import ParserAdapter
 from .types import (
     GoalHeader,
     Header,
@@ -27,13 +21,12 @@ from .types import (
     PlayerInfo,
 )
 
-try:  # best-effort import of Rust core
+try:
     import rlreplay_rust as _rust
-
-    _RUST_AVAILABLE = True
-except Exception:  # pragma: no cover - environment may not have the module
+except ImportError:  # pragma: no cover - only before the parser is built
     _rust = None  # type: ignore
-    _RUST_AVAILABLE = False
+
+MISSING_PARSER = "the Rust parser rlreplay_rust isn't installed; see AGENTS.md"
 
 _REPLAY_DATE_FORMATS = ("%Y-%m-%d %H-%M-%S", "%Y-%m-%d:%H-%M")
 
@@ -67,46 +60,8 @@ def _read_started_at_utc(path: Path) -> str | None:
         return None
 
 
-def _parse_backend_chain_env() -> list[str] | None:
-    raw_chain = os.getenv("RLCOACH_PARSER_BACKEND_CHAIN")
-    if raw_chain is None:
-        return None
-    parsed = [item.strip().lower() for item in raw_chain.split(",") if item.strip()]
-    return parsed or None
-
-
-def _normalize_backend_chain(backend_chain: list[str] | None) -> list[str]:
-    if not backend_chain:
-        return ["boxcars"]
-    normalized: list[str] = []
-    for item in backend_chain:
-        candidate = item.strip().lower()
-        if candidate and candidate not in normalized:
-            normalized.append(candidate)
-    return normalized or ["boxcars"]
-
-
-class RustAdapter(ParserAdapter):
-    """Rust-backed adapter with graceful fallback."""
-
-    def __init__(self, backend_chain: list[str] | None = None):
-        configured_chain = backend_chain
-        if configured_chain is None:
-            configured_chain = _parse_backend_chain_env()
-        self._backend_chain = _normalize_backend_chain(configured_chain)
-
-    @property
-    def name(self) -> str:
-        return "rust"
-
-    @property
-    def supports_network_parsing(self) -> bool:
-        # Only claim support if the Rust core is importable
-        return bool(_RUST_AVAILABLE)
-
-    @property
-    def backend_chain(self) -> list[str]:
-        return list(self._backend_chain)
+class RustAdapter:
+    """Header and frames from the Rust parser, as the Python types."""
 
     def _header_from_rust_dict(self, d: dict[str, Any]) -> Header:
         # Convert rust dict to Header dataclass
@@ -313,95 +268,30 @@ class RustAdapter(ParserAdapter):
         return {}
 
     def parse_header(self, path: Path) -> Header:
+        if _rust is None:
+            raise HeaderParseError(str(path), MISSING_PARSER)
         try:
-            if _RUST_AVAILABLE and _rust is not None:
-                # Use Rust implementation
-                d = _rust.parse_header(str(path))  # returns dict-like
-                if not isinstance(d, dict):  # defensive check
-                    raise HeaderParseError(
-                        str(path), "Rust core returned non-dict header"
-                    )
-                d["started_at_utc"] = _read_started_at_utc(path)
-                header = self._header_from_rust_dict(d)
-                return header
-
-            # Fallback path: reuse ingest for validation and build minimal header
-            ingest_result = ingest_replay(path)
-            quality_warnings = [
-                "rust_core_unavailable_fallback_header_only",
-                "network_data_unparsed_fallback_header_only",
-            ]
-            if ingest_result.get("warnings"):
-                quality_warnings.extend(ingest_result["warnings"])  # type: ignore[index]
-
-            players = [
-                PlayerInfo(name="Unknown Player 1", team=0),
-                PlayerInfo(name="Unknown Player 2", team=1),
-            ]
-            return Header(
-                playlist_id="unknown",
-                map_name="unknown",
-                team_size=1,
-                team0_score=0,
-                team1_score=0,
-                match_length=0.0,
-                players=players,
-                quality_warnings=quality_warnings,
-            )
+            d = _rust.parse_header(str(path))  # returns dict-like
+            if not isinstance(d, dict):  # defensive check
+                raise HeaderParseError(str(path), "Rust core returned non-dict header")
+            d["started_at_utc"] = _read_started_at_utc(path)
+            return self._header_from_rust_dict(d)
         except Exception as e:  # normalize to HeaderParseError
             raise HeaderParseError(str(path), f"Rust adapter failed: {e}") from e
 
-    def parse_network(self, path: Path) -> NetworkFrames | None:
-        if not _RUST_AVAILABLE or _rust is None:
-            return None
-        attempted_backends: list[str] = []
-        degraded_result: NetworkFrames | None = None
-        degraded_diagnostics: NetworkDiagnostics | None = None
-
-        for backend in self.backend_chain:
-            attempted_backends.append(backend)
-            if backend != "boxcars":
-                degraded_diagnostics = NetworkDiagnostics(
-                    status="unavailable",
-                    error_code=f"{backend}_backend_unavailable",
-                    error_detail=f"Backend '{backend}' is not implemented",
-                    frames_emitted=0,
-                    attempted_backends=list(attempted_backends),
-                )
-                continue
-
-            parsed, frames = self._parse_boxcars_network(path)
-            self._dedupe_frame_players(frames)
-            diagnostics = self._build_diagnostics(
-                parsed.get("diagnostics"), attempted_backends
-            )
-            if diagnostics.frames_emitted is None:
-                diagnostics = replace(diagnostics, frames_emitted=len(frames))
-
-            network = self._build_network_frames(
-                frames, self._normalize_player_metadata(parsed.get("player_metadata"))
-            )
-            object.__setattr__(network, "diagnostics", diagnostics)
-
-            if diagnostics.status == "ok":
-                return network
-
-            degraded_result = network
-            degraded_diagnostics = diagnostics
-
-        if degraded_result is not None:
-            return degraded_result
-
-        diagnostics = degraded_diagnostics or NetworkDiagnostics(
-            status="unavailable",
-            error_code="no_backend_attempted",
-            error_detail="No parser backend could be executed",
-            frames_emitted=0,
-            attempted_backends=list(attempted_backends),
+    def parse_network(self, path: Path) -> NetworkFrames:
+        if _rust is None:
+            raise RuntimeError(MISSING_PARSER)
+        parsed, frames = self._parse_boxcars_network(path)
+        self._dedupe_frame_players(frames)
+        diagnostics = self._build_diagnostics(parsed.get("diagnostics"), ["boxcars"])
+        if diagnostics.frames_emitted is None:
+            diagnostics = replace(diagnostics, frames_emitted=len(frames))
+        network = self._build_network_frames(
+            frames, self._normalize_player_metadata(parsed.get("player_metadata"))
         )
-        fallback_network = NetworkFrames(frame_count=0, sample_rate=30.0, frames=[])
-        object.__setattr__(fallback_network, "diagnostics", diagnostics)
-        return fallback_network
+        object.__setattr__(network, "diagnostics", diagnostics)
+        return network
 
     @staticmethod
     def _coerce_frames(payload: Any) -> list[dict[str, Any]]:
@@ -416,19 +306,6 @@ class RustAdapter(ParserAdapter):
     def _parse_boxcars_network(
         self, path: Path
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        if _rust is None:
-            return (
-                {
-                    "diagnostics": {
-                        "status": "unavailable",
-                        "error_code": "rust_core_unavailable",
-                        "error_detail": "Rust core module is unavailable",
-                        "frames_emitted": 0,
-                    }
-                },
-                [],
-            )
-
         try:
             if hasattr(_rust, "parse_network_with_diagnostics"):
                 parsed = _rust.parse_network_with_diagnostics(str(path))

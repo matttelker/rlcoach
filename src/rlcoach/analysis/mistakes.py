@@ -18,15 +18,14 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from ..events import detect_challenge_events, detect_goals, detect_touches
 from ..events.types import ChallengeEvent, GoalEvent
 from ..events.utils import team_name
 from ..field_constants import FieldConstants
-from ..normalize import build_timeline
-from ..parser import get_adapter
-from ..parser.types import BallFrame, Frame, Header, NetworkFrames, PlayerFrame
+from ..game import Game, read_game
+from ..identity import build_player_identities
+from ..modes import mode_of
+from ..parser.types import BallFrame, Frame, PlayerFrame
 from ..physics_constants import BALL_RADIUS_UU
-from ..utils.identity import build_player_identities
 
 GOAL_LINE_Y = FieldConstants.BACK_WALL_Y
 GOAL_WIDTH = FieldConstants.GOAL_WIDTH
@@ -98,8 +97,6 @@ OVERCOMMIT_SPEED = 800.0  # Leaving the net this fast is a commitment
 MISS_RANGE = 400.0  # Closer than this in the last seconds counts as a chance
 SLOW_BALL_SPEED = 1000.0
 UU_S_TO_KPH = 0.036
-
-UNSUPPORTED_MAP_MARKERS = ("hoops", "shattershot", "labs_", "knockout")
 
 INSTEAD = {
     "double_commit": (
@@ -305,31 +302,10 @@ def own_depth(y: float, team: int) -> float:
 
 def check_supported_map(map_name: str | None) -> None:
     """Refuse arenas where goal positions and rotation rules don't apply."""
-    lowered = (map_name or "").lower()
-    if any(marker in lowered for marker in UNSUPPORTED_MAP_MARKERS):
+    if not mode_of(map_name).reviewed:
         raise UnsupportedReplayError(
             f"{map_name} is not a standard arena, so the mistake rules don't apply."
         )
-
-
-def load_full_frames(path: Path) -> tuple[Header, list[Frame]]:
-    """Parse a replay and keep the whole game.
-
-    `Header.match_length` is NumFrames / 30, but replays run nearer 27.5 frames
-    per second, so the default timeline cuts the end of the game. Passing the
-    measured duration keeps every frame.
-    """
-    adapter = get_adapter("rust")
-    header = adapter.parse_header(path)
-    raw = adapter.parse_network(path)
-    raw_frames = raw.frames if isinstance(raw, NetworkFrames) else (raw or [])
-    if not raw_frames:
-        raise UnsupportedReplayError(
-            f"No frame data could be read from {path.name}. The replay parser may "
-            "need updating for this game build."
-        )
-    duration = raw_frames[-1]["timestamp"] - raw_frames[0]["timestamp"] + 1.0
-    return header, build_timeline(replace(header, match_length=duration), raw_frames)
 
 
 def _distance(a: Any, b: Any) -> float:
@@ -1280,12 +1256,19 @@ def _replay_owner(path: Path) -> str | None:
 def analyze_replay(
     path: Path, player: str | None = None, *, player_id: str | None = None
 ) -> MistakeReport:
-    """Review one player in a replay, defaulting to whoever saved it.
+    """Read a replay and review one player in it. See review_player."""
+    return review_player(read_game(path), player, player_id=player_id)
+
+
+def review_player(
+    game: Game, player: str | None = None, *, player_id: str | None = None
+) -> MistakeReport:
+    """Review one player in a game, defaulting to whoever saved the replay.
 
     `player_id` picks the player by the id the database stores, which survives
     a name change. Otherwise `player` matches a display name.
     """
-    header, frames = load_full_frames(path)
+    header, frames = game.header, game.frames
     check_supported_map(header.map_name)
 
     identities = build_player_identities(header.players)
@@ -1294,7 +1277,7 @@ def analyze_replay(
         match = next((i for i in identities if i.canonical_id == player_id), None)
         wanted = player_id
     else:
-        wanted = player or _replay_owner(path)
+        wanted = player or _replay_owner(game.path)
         match = next(
             (i for i in identities if wanted and i.display_name == wanted), None
         )
@@ -1302,14 +1285,11 @@ def analyze_replay(
         options = ", ".join(sorted(names.values()))
         raise ValueError(f"No player {wanted!r}. Players: {options}")
 
-    goals = detect_goals(frames, header, header_only=False)
-    touches = detect_touches(frames)
-    challenges = detect_challenge_events(frames, touches)
     ctx = build_context(
         frames,
         player_id=match.canonical_id,
-        goals=goals,
-        challenges=challenges,
+        goals=game.goals,
+        challenges=game.challenges,
         names=names,
         team_size=header.team_size,
     )

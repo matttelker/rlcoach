@@ -1,13 +1,15 @@
 """Store the mistake detector's review of each game.
 
-Ingest reviews every new game. `rlcoach reviews` fills in games loaded before
-reviews existed, or redoes them all after the detector changes.
+Loading a game reviews it from the frames it already read. `rlcoach reviews`
+fills in games loaded before reviews existed, or redoes them all after the
+detector changes, reading each replay again.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +18,7 @@ from .session import create_session
 
 if TYPE_CHECKING:
     from ..analysis.mistakes import MistakeReport
+    from ..game import Game
 
 logger = logging.getLogger(__name__)
 
@@ -89,21 +92,41 @@ def save_review(
         session.close()
 
 
-def review_game(replay_id: str, path: Path | str, player_id: str) -> str:
-    """Review one game and store the result. Returns the stored status."""
-    from ..analysis.mistakes import UnsupportedReplayError, analyze_replay
+def _review_and_save(
+    replay_id: str, player_id: str, review: Callable[[], MistakeReport]
+) -> str:
+    """Run a review and store what came of it. Returns the stored status."""
+    from ..analysis.mistakes import UnsupportedReplayError
 
     try:
-        report = analyze_replay(Path(path), player_id=player_id)
+        report = review()
     except UnsupportedReplayError as e:
         save_review(replay_id, player_id, status="unsupported", error=str(e))
         return "unsupported"
     except Exception as e:  # noqa: BLE001 - one bad replay mustn't stop ingest
-        logger.warning("Mistake review failed for %s: %s", path, e)
+        logger.warning("Mistake review failed for %s: %s", replay_id, e)
         save_review(replay_id, player_id, status="error", error=str(e))
         return "error"
     save_review(replay_id, player_id, report)
     return "ok"
+
+
+def store_review(replay_id: str, player_id: str, game: Game) -> str:
+    """Review you in a game that's already loaded, and store the result."""
+    from ..analysis.mistakes import review_player
+
+    return _review_and_save(
+        replay_id, player_id, lambda: review_player(game, player_id=player_id)
+    )
+
+
+def review_game(replay_id: str, path: Path | str, player_id: str) -> str:
+    """Read a stored game's replay again, review it and store the result."""
+    from ..analysis.mistakes import analyze_replay
+
+    return _review_and_save(
+        replay_id, player_id, lambda: analyze_replay(Path(path), player_id=player_id)
+    )
 
 
 def games_to_review(redo: bool = False) -> list[tuple[str, str, str]]:

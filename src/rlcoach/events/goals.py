@@ -9,14 +9,14 @@ from __future__ import annotations
 from typing import Any
 
 from ..field_constants import FIELD, Vec3
-from ..normalize import measure_frame_rate
-from ..parser.types import Frame, Header, PlayerFrame
-from ..physics_constants import UU_S_TO_KPH
-from ..utils.identity import (
+from ..identity import (
     build_alias_lookup,
     build_player_identities,
     sanitize_display_name,
 )
+from ..normalize import measure_frame_rate
+from ..parser.types import Frame, Header, PlayerFrame
+from ..physics_constants import UU_S_TO_KPH
 from .constants import (
     GOAL_EXIT_THRESHOLD,
     GOAL_LINE_THRESHOLD,

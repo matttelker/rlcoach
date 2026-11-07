@@ -15,6 +15,11 @@ from dataclasses import replace
 from typing import Any
 
 from .field_constants import FIELD, Vec3
+from .identity import (
+    build_alias_lookup,
+    build_player_identities,
+    sanitize_display_name,
+)
 from .parser.types import (
     BallFrame,
     BoostPadEventFrame,
@@ -29,11 +34,6 @@ from .parser.types import (
     PlayerFrame,
     Quaternion,
     Rotation,
-)
-from .utils.identity import (
-    build_alias_lookup,
-    build_player_identities,
-    sanitize_display_name,
 )
 
 # Default frame rate when unable to measure from replay data

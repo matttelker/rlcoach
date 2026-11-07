@@ -88,7 +88,6 @@ def test_parse_network_returns_diagnostics_on_degradation(monkeypatch):
             }
 
     monkeypatch.setattr("rlcoach.parser.rust_adapter._rust", FakeRustDegraded())
-    monkeypatch.setattr("rlcoach.parser.rust_adapter._RUST_AVAILABLE", True)
 
     adapter = RustAdapter()
     result = adapter.parse_network(Path("testing_replay.replay"))
@@ -245,7 +244,6 @@ def test_parse_header_maps_extended_metadata(monkeypatch):
             }
 
     monkeypatch.setattr("rlcoach.parser.rust_adapter._rust", FakeRustHeader())
-    monkeypatch.setattr("rlcoach.parser.rust_adapter._RUST_AVAILABLE", True)
 
     header = RustAdapter().parse_header(Path("testing_replay.replay"))
     assert header.engine_build == "build-1234"

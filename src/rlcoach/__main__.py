@@ -1,6 +1,7 @@
-"""Entry point for running rlcoach as a module."""
+"""`python -m rlcoach` runs the command line, as the background server does."""
+
+import sys
 
 from .cli import main
 
-if __name__ == "__main__":
-    main()
+sys.exit(main())
