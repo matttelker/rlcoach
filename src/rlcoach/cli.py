@@ -60,8 +60,7 @@ def handle_ingest_watch(args) -> int:
     """Handle ingest --watch mode."""
     import signal
 
-    from .pipeline import IngestionStatus, process_replay_file
-    from .watcher import ReplayWatcher
+    from .service import ingest_watcher
 
     config_path = get_default_config_path()
     try:
@@ -80,33 +79,14 @@ def handle_ingest_watch(args) -> int:
         print(f"Watch folder does not exist: {watch_dir}")
         return 1
 
-    stats = {"success": 0, "duplicate": 0, "excluded": 0, "error": 0}
-
-    def process_callback(path: Path) -> None:
-        result = process_replay_file(path, config)
-        if result.status == IngestionStatus.SUCCESS:
-            stats["success"] += 1
-            print(f"✓ {path.name} -> {result.replay_id}")
-        elif result.status == IngestionStatus.DUPLICATE:
-            stats["duplicate"] += 1
-            print(f"⊘ {path.name} (duplicate)")
-        elif result.status == IngestionStatus.EXCLUDED:
-            stats["excluded"] += 1
-            print(f"⊘ {path.name} (excluded)")
-        else:
-            stats["error"] += 1
-            print(f"✗ {path.name}: {result.error}")
+    stats: dict[str, int] = {}
 
     print(f"Watching {watch_dir} for new replays...")
     print("Press Ctrl+C to stop")
     print()
 
-    watcher = ReplayWatcher(
-        watch_dir=watch_dir,
-        callback=process_callback,
-        poll_interval=2.0,
-        stability_seconds=2.0,
-        process_existing=args.process_existing,
+    watcher = ingest_watcher(
+        config, process_existing=args.process_existing, stats=stats
     )
 
     stop_requested = False
@@ -134,10 +114,12 @@ def handle_ingest_watch(args) -> int:
     watcher.stop()
 
     print()
+    fine = ("success", "duplicate", "excluded")
+    errors = sum(n for status, n in stats.items() if status not in fine)
     print(
         "Processed: "
-        f"{stats['success']} new, {stats['duplicate']} duplicate, "
-        f"{stats['error']} errors"
+        f"{stats.get('success', 0)} new, {stats.get('duplicate', 0)} duplicate, "
+        f"{errors} errors"
     )
     return 0
 
@@ -517,7 +499,10 @@ def main(argv: list[str] | None = None) -> int:
     benchmarks_list.add_argument("--playlist", type=str, help="Filter by playlist")
     benchmarks_list.add_argument("--rank", type=str, help="Filter by rank tier")
 
-    serve_parser = subparsers.add_parser("serve", help="Start the API server")
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Serve the dashboard and API on one port, and load new replays",
+    )
     serve_parser.add_argument(
         "--host",
         type=str,
@@ -530,6 +515,31 @@ def main(argv: list[str] | None = None) -> int:
         default=8000,
         help="Port to bind to (default: 8000)",
     )
+    serve_parser.add_argument(
+        "--no-watch",
+        action="store_true",
+        dest="no_watch",
+        help="Don't watch the replay folder",
+    )
+    serve_parser.add_argument(
+        "--log-file",
+        type=str,
+        dest="log_file",
+        help="Write output to this file instead of the console",
+    )
+
+    start_parser = subparsers.add_parser(
+        "start", help="Run serve in the background, with no window"
+    )
+    start_parser.add_argument("--port", type=int, default=8000)
+
+    subparsers.add_parser("stop", help="Stop the background server")
+
+    autostart_parser = subparsers.add_parser(
+        "autostart", help="Start the background server when you sign in to Windows"
+    )
+    autostart_parser.add_argument("action", choices=["on", "off", "status"])
+    autostart_parser.add_argument("--port", type=int, default=8000)
 
     args = parser.parse_args(argv)
 
@@ -620,6 +630,12 @@ def main(argv: list[str] | None = None) -> int:
         return handle_benchmarks_command(args)
     elif args.command == "serve":
         return handle_serve_command(args)
+    elif args.command == "start":
+        return handle_start_command(args)
+    elif args.command == "stop":
+        return handle_stop_command(args)
+    elif args.command == "autostart":
+        return handle_autostart_command(args)
     else:
         parser.print_help()
         return 0
@@ -676,10 +692,15 @@ def handle_reviews_command(args) -> int:
 
 
 def handle_serve_command(args) -> int:
-    """Handle the serve subcommand."""
+    """Serve the dashboard and API on one port, with the replay watcher."""
     import uvicorn
 
+    from . import service
     from .api import create_app
+
+    log_file = getattr(args, "log_file", None)
+    if log_file:
+        service.redirect_output(Path(log_file))
 
     config_path = get_default_config_path()
     try:
@@ -696,12 +717,90 @@ def handle_serve_command(args) -> int:
     host = args.host
     port = args.port
 
-    print(f"Starting RLCoach API server at http://{host}:{port}")
-    print("Press Ctrl+C to stop")
+    watcher = None
+    if not getattr(args, "no_watch", False):
+        watch_dir = config.paths.watch_folder
+        if not watch_dir.exists():
+            # OneDrive may not be ready yet at sign-in, and the watcher keeps
+            # looking, so start it anyway.
+            print(f"Watch folder not found yet, will keep checking: {watch_dir}")
+        print(f"Loading new replays from {watch_dir}")
+        watcher = service.ingest_watcher(config, process_existing=True)
 
-    app = create_app()
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    gui_dir = service.GUI_DIST
+    if not (gui_dir / "index.html").exists():
+        print("No built dashboard, so serving the API only.")
+        print("Build it with: npm --prefix gui run build")
+        gui_dir = None
 
+    shown = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
+    print(f"rlcoach is at http://{shown}:{port} (API under /api)")
+    if not log_file:
+        print("Press Ctrl+C to stop")
+
+    app = service.create_site(create_app(), gui_dir, watcher)
+    service.claim_pid_file()
+    try:
+        # The dashboard polls every 30 seconds, which would fill the log
+        uvicorn.run(
+            app, host=host, port=port, log_level="info", access_log=not log_file
+        )
+    finally:
+        service.release_pid_file()
+
+    return 0
+
+
+def handle_start_command(args) -> int:
+    """Run the server in the background and wait until it answers."""
+    from . import service
+
+    url = service.site_url(args.port)
+    if service.start_background(args.port):
+        print(f"rlcoach is running at {url}")
+        return 0
+    print(f"rlcoach didn't answer at {url}. See {service.log_path()}")
+    return 1
+
+
+def handle_stop_command(args) -> int:
+    """Stop the background server."""
+    from . import service
+
+    if service.stop_background():
+        print("Stopped rlcoach.")
+    else:
+        print("rlcoach wasn't running in the background.")
+    return 0
+
+
+def handle_autostart_command(args) -> int:
+    """Turn starting at Windows sign-in on or off, or show whether it's on."""
+    from . import service
+
+    if sys.platform != "win32":
+        print("Starting at sign-in is only set up for Windows.")
+        return 1
+
+    if args.action == "on":
+        service.enable_autostart(args.port)
+        print("rlcoach will start when you sign in to Windows.")
+        return handle_start_command(args)
+    if args.action == "off":
+        if service.disable_autostart():
+            print("rlcoach won't start at sign-in any more.")
+        else:
+            print("rlcoach wasn't set to start at sign-in.")
+        return 0
+
+    entry = service.autostart_entry()
+    print(f"Starts at sign-in: {'yes' if entry else 'no'}")
+    if entry:
+        print(f"  {entry}")
+    pid = service.running_pid()
+    running = f"yes, pid {pid}" if pid is not None else "no"
+    print(f"Running in the background: {running}")
+    print(f"Log: {service.log_path()}")
     return 0
 
 

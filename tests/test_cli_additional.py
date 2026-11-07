@@ -126,22 +126,28 @@ def test_handle_serve_command_missing_config(monkeypatch, capsys):
     assert "config file not found" in out.lower()
 
 
-def test_handle_serve_command_runs_uvicorn(monkeypatch):
-    args = SimpleNamespace(host="0.0.0.0", port=9999)
+def test_handle_serve_command_runs_the_site(monkeypatch, tmp_path):
+    from rlcoach import service
+
+    args = SimpleNamespace(host="0.0.0.0", port=9999, no_watch=True)
     monkeypatch.setattr("rlcoach.cli.get_default_config_path", lambda: "ok.toml")
     monkeypatch.setattr("rlcoach.cli.load_config", lambda _: _DummyConfig([]))
+    monkeypatch.setattr(service, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr("rlcoach.api.create_app", lambda: "api")
+    monkeypatch.setattr(
+        service, "create_site", lambda api, gui, watcher: ("site", api, watcher)
+    )
 
-    called = {"run": False}
+    called = {}
 
-    def fake_run(app, host, port, log_level):
-        called["run"] = True
-        assert app == "app"
-        assert host == "0.0.0.0"
-        assert port == 9999
-        assert log_level == "info"
+    def fake_run(app, host, port, **kwargs):
+        called.update(app=app, host=host, port=port, **kwargs)
+        assert service.pid_path().exists()
 
-    monkeypatch.setattr("rlcoach.api.create_app", lambda: "app")
     monkeypatch.setattr("uvicorn.run", fake_run)
 
     assert handle_serve_command(args) == 0
-    assert called["run"] is True
+    assert called["app"] == ("site", "api", None)
+    assert (called["host"], called["port"]) == ("0.0.0.0", 9999)
+    assert called["access_log"] is True
+    assert not service.pid_path().exists()

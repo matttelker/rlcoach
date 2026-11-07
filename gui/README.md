@@ -1,6 +1,7 @@
 # RLCoach local dashboard
 
-A React dashboard for your own replays. It reads the local API, which reads your SQLite database.
+A React dashboard for your own replays. `rlcoach serve` serves the built copy at
+http://localhost:8000, with the API it reads under `/api`.
 
 ## Setup
 
@@ -20,25 +21,30 @@ npm --prefix gui ci
 
 ## Run
 
-Each of these runs until you stop it, so give each its own terminal.
-
-Load your replays, and keep picking up new ones:
-
-```bash
-uv run rlcoach ingest --watch --process-existing
-```
-
-Start the API on port 8000:
+Build the dashboard, then run rlcoach in the background and start it whenever you sign in to
+Windows. It loads new replays as they land, and the dashboard is at http://localhost:8000.
 
 ```bash
-uv run rlcoach serve
+npm --prefix gui run build
 ```
-
-Start the dashboard at http://localhost:5173:
 
 ```bash
-npm --prefix gui run dev
+uv run rlcoach autostart on
 ```
+
+The server keeps the build it started with. After changing the dashboard, build it again and
+restart the server:
+
+```bash
+uv run rlcoach stop
+```
+
+```bash
+uv run rlcoach start
+```
+
+While working on the dashboard, `npm --prefix gui run dev` serves a live copy at
+http://localhost:5173 that reloads on every edit and sends `/api` to the server on port 8000.
 
 ## Pages
 
@@ -67,7 +73,7 @@ After a change to the mistake detector, review every game again with `--redo`.
 
 ## Benchmarks
 
-On startup the API loads the bundled benchmarks for any playlist that has none. Doubles and
+On startup the server loads the bundled benchmarks for any playlist that has none. Doubles and
 Standard each have their own file, with C2, C3 and GC1 rows measured by ballchasing.com across all
 seasons. Ballchasing groups every Grand Champion tier together, so the GC1 rows combine GC1 through
 SSL. Add other ranks or playlists with `uv run rlcoach benchmarks import <file>`.

@@ -42,27 +42,29 @@ Always pass `--inexact`. Without it `uv sync` removes the Rust parser, which isn
 
 Run Python through `uv run`, never the system Python.
 
+One process serves everything at http://localhost:8000: the built dashboard at `/`, the API under `/api`, and a watcher that loads new replays. It runs in the background and starts when you sign in to Windows, so nothing depends on a terminal staying open.
+
 ```bash
-uv run rlcoach ingest --watch --process-existing
+npm --prefix gui run build
 ```
 
 ```bash
-uv run rlcoach serve
+uv run rlcoach autostart on
 ```
 
-```bash
-npm --prefix gui run dev
-```
+`rlcoach start` and `rlcoach stop` start and stop it by hand, and `rlcoach autostart status` says whether it's running. Output goes to `~/.rlcoach/serve.log`. It runs the code and the built dashboard it started with, so after a change, rebuild the dashboard if it changed, then stop and start it.
+
+To run it in a terminal instead, stop the background one and use `uv run rlcoach serve`. For dashboard work, `npm --prefix gui run dev` serves a live copy at http://localhost:5173 that sends `/api` to port 8000.
 
 ```bash
 uv run rlcoach mistakes path/to/game.replay --player YourName
 ```
 
-The dashboard is at http://localhost:5173 and the API at http://localhost:8000. A replay file can land about 30 seconds after a match ends.
+A replay file can land about 30 seconds after a match ends.
 
 ## Building the parser
 
-This PC has the Rust GNU toolchain, so `maturin develop` fails at link time. Use cargo and copy the result. Stop the API first, because it locks the `.pyd`.
+This PC has the Rust GNU toolchain, so `maturin develop` fails at link time. Use cargo and copy the result. Run `uv run rlcoach stop` first, because the running server locks the `.pyd`.
 
 ```bash
 export PATH="$HOME/.cargo/bin:$HOME/.rustup/toolchains/stable-x86_64-pc-windows-gnu/lib/rustlib/x86_64-pc-windows-gnu/bin/self-contained:$PATH"

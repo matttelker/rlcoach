@@ -26,21 +26,19 @@ Then edit `~/.rlcoach/config.toml` and set your `display_names` or `platform_ids
 
 ## Use it
 
-Load your replays and keep picking up new ones:
+Build the dashboard, then set rlcoach to run in the background and start whenever you sign in to Windows:
 
 ```bash
-uv run rlcoach ingest --watch --process-existing
-```
-
-Start the API and the dashboard, each in its own terminal, then open http://localhost:5173:
-
-```bash
-uv run rlcoach serve
+npm --prefix gui run build
 ```
 
 ```bash
-npm --prefix gui run dev
+uv run rlcoach autostart on
 ```
+
+Open http://localhost:8000. It loads your existing replays and every new one as it lands. `uv run rlcoach stop` and `uv run rlcoach start` stop and start it, `uv run rlcoach autostart off` stops it starting at sign-in, and its output goes to `~/.rlcoach/serve.log`.
+
+To run it in a terminal instead, use `uv run rlcoach serve` and press Ctrl+C to stop.
 
 List one player's mistakes in a game and what to do instead:
 
@@ -62,7 +60,7 @@ uv run rlcoach report-md path/to/game.replay --adapter rust --out out --pretty
 
 ## Benchmarks
 
-On startup the API loads the bundled benchmarks for any playlist that has none. Doubles and Standard have their own files, with C2, C3 and GC1 rows measured by ballchasing.com. Ballchasing groups every Grand Champion tier together, so the GC1 rows combine GC1 through SSL. Add other ranks or playlists with `uv run rlcoach benchmarks import <file>`.
+On startup the server loads the bundled benchmarks for any playlist that has none. Doubles and Standard have their own files, with C2, C3 and GC1 rows measured by ballchasing.com. Ballchasing groups every Grand Champion tier together, so the GC1 rows combine GC1 through SSL. Add other ranks or playlists with `uv run rlcoach benchmarks import <file>`.
 
 ## Docs
 
