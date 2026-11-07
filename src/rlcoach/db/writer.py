@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from ..config import IdentityConfig, RLCoachConfig, compute_play_date
 from ..identity import PlayerIdentityResolver
 from .models import Player, PlayerGameStats, Replay
@@ -98,6 +100,27 @@ def upsert_players(
         session.close()
 
 
+def _check_not_stored(session: Session, replay_id: str, file_hash: str) -> None:
+    if session.get(Replay, replay_id):
+        raise ReplayExistsError(f"Replay with replay_id '{replay_id}' already exists")
+    if session.query(Replay).filter_by(file_hash=file_hash).first():
+        raise ReplayExistsError(f"Replay with file_hash '{file_hash}' already exists")
+
+
+def check_not_stored(file_hash: str) -> None:
+    """Raise ReplayExistsError if this replay file is already stored.
+
+    A report's replay_id is the file's SHA256 (see generate_report), so the
+    file hash alone runs both of insert_replay's duplicate checks, before the
+    replay is parsed.
+    """
+    session = create_session()
+    try:
+        _check_not_stored(session, replay_id=file_hash, file_hash=file_hash)
+    finally:
+        session.close()
+
+
 def insert_replay(
     report: dict[str, Any],
     file_hash: str,
@@ -124,16 +147,7 @@ def insert_replay(
 
     session = create_session()
     try:
-        if session.get(Replay, replay_id):
-            raise ReplayExistsError(
-                f"Replay with replay_id '{replay_id}' already exists"
-            )
-
-        existing_hash = session.query(Replay).filter_by(file_hash=file_hash).first()
-        if existing_hash:
-            raise ReplayExistsError(
-                f"Replay with file_hash '{file_hash}' already exists"
-            )
+        _check_not_stored(session, replay_id, file_hash)
 
         resolver = PlayerIdentityResolver(config.identity)
         my_player = resolver.find_me(players)
