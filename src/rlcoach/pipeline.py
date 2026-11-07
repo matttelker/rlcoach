@@ -24,7 +24,7 @@ from .db.writer import (
     write_report,
 )
 from .identity import PlayerIdentityResolver
-from .ingest import ingest_replay
+from .ingest import file_sha256, ingest_replay
 from .report import generate_report, write_report_atomically
 
 logger = logging.getLogger(__name__)
@@ -72,8 +72,8 @@ def process_replay_file(
 
     This function:
     1. Initializes the database if needed
-    2. Ingests the replay file (validation + hashing), and stops with DUPLICATE
-       if it is already stored
+    2. Hashes the file and stops with DUPLICATE if it is already stored, then
+       validates it (size, format, CRC)
     3. Generates the analysis report
     4. Writes to database (players, replay, stats)
 
@@ -89,12 +89,13 @@ def process_replay_file(
     try:
         init_db(config.db_path)
 
-        ingest_result = ingest_replay(path)
-        file_hash = ingest_result["sha256"]
-
-        # Skip stored replays before the parse, so a watcher restart doesn't
-        # re-analyze every game in the folder. insert_replay checks again.
+        # Stored replays stop here, on a hash that takes milliseconds, so a
+        # watcher restart skips the slow CRC check and the parse for every
+        # game already in the folder. insert_replay checks again.
+        file_hash = file_sha256(path)
         check_not_stored(file_hash)
+
+        ingest_replay(path)  # validates size, format and CRC
 
         report = generate_report(
             path,

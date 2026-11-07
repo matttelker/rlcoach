@@ -316,7 +316,9 @@ def _storable_report(path, **_):
     }
 
 
-def test_a_stored_replay_is_skipped_before_it_is_parsed(mock_config, real_db):
+def test_a_stored_replay_is_skipped_before_it_is_checked_or_parsed(
+    mock_config, real_db
+):
     with (
         patch("rlcoach.pipeline.generate_report", side_effect=_storable_report),
         patch("rlcoach.pipeline.review_game"),
@@ -325,6 +327,7 @@ def test_a_stored_replay_is_skipped_before_it_is_parsed(mock_config, real_db):
     assert first.status == IngestionStatus.SUCCESS
 
     with (
+        patch("rlcoach.pipeline.ingest_replay") as validate,
         patch("rlcoach.pipeline.generate_report") as parse,
         patch("rlcoach.pipeline.write_report_atomically") as write_json,
         patch("rlcoach.pipeline.write_report") as write_db,
@@ -333,6 +336,7 @@ def test_a_stored_replay_is_skipped_before_it_is_parsed(mock_config, real_db):
 
     assert second.status == IngestionStatus.DUPLICATE
     assert "already exists" in second.error
+    validate.assert_not_called()  # the CRC check takes seconds per replay
     parse.assert_not_called()
     write_json.assert_not_called()
     write_db.assert_not_called()
