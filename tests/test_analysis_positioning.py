@@ -5,7 +5,6 @@ import math
 from rlcoach.analysis.positioning import (
     _calculate_distance,
     analyze_positioning,
-    calculate_rotation_compliance,
 )
 from rlcoach.field_constants import Vec3
 from rlcoach.parser.types import BallFrame, Frame, PlayerFrame
@@ -437,102 +436,6 @@ class TestPositioningAnalysis:
         # Test 3D case
         dist = _calculate_distance(Vec3(0.0, 0.0, 0.0), Vec3(1.0, 1.0, 1.0))
         assert abs(dist - math.sqrt(3.0)) < 0.0001
-
-    def test_rotation_compliance_double_commit_detection(self):
-        """Test rotation compliance detects double commits."""
-        ball_pos = Vec3(0.0, 0.0, 93.15)
-
-        # Both players very close to ball (double commit scenario)
-        players = [
-            create_test_player(
-                "player1", 0, position=Vec3(100.0, 100.0, 17.0)
-            ),  # Close to ball
-            create_test_player(
-                "player2", 0, position=Vec3(150.0, 150.0, 17.0)
-            ),  # Also close
-        ]
-
-        frames = [
-            create_test_frame(0.0, ball_pos, players),
-            create_test_frame(1.0, ball_pos, players),
-            create_test_frame(2.0, ball_pos, players),
-        ]
-
-        result = calculate_rotation_compliance(frames, "player1")
-
-        # Should detect double commit and lower score
-        assert result["score_0_to_100"] < 90.0
-        assert "double_commit" in result["flags"]
-
-    def test_rotation_compliance_overcommit_detection(self):
-        """Test rotation compliance detects last man overcommits."""
-        ball_pos = Vec3(0.0, 1000.0, 93.15)  # Ball in offensive position
-
-        # Blue team scenario:
-        # player1 is furthest back (last man) but goes forward with low boost.
-        players_frame1 = [
-            create_test_player(
-                "player1", 0, position=Vec3(0.0, -2000.0, 17.0), boost_amount=10
-            ),  # Last man, low boost
-            create_test_player("player2", 0, position=Vec3(0.0, 0.0, 17.0)),  # Forward
-            create_test_player(
-                "player3", 0, position=Vec3(0.0, 500.0, 17.0)
-            ),  # Most forward
-        ]
-
-        # Player1 moves to offensive half with low boost but remains last man.
-        players_frame2 = [
-            create_test_player(
-                "player1", 0, position=Vec3(0.0, 100.0, 17.0), boost_amount=5
-            ),  # Offensive half, low boost, but still last man
-            create_test_player(
-                "player2", 0, position=Vec3(0.0, 200.0, 17.0)
-            ),  # More forward
-            create_test_player(
-                "player3", 0, position=Vec3(0.0, 1000.0, 17.0)
-            ),  # Most forward
-        ]
-
-        frames = [
-            create_test_frame(0.0, ball_pos, players_frame1),
-            create_test_frame(1.0, ball_pos, players_frame2),
-            create_test_frame(2.0, ball_pos, players_frame2),
-        ]
-
-        result = calculate_rotation_compliance(frames, "player1")
-
-        # Should detect overcommit and include flag
-        assert result["score_0_to_100"] < 95.0
-        assert "last_man_overcommit" in result["flags"]
-
-    def test_rotation_compliance_good_positioning(self):
-        """Test rotation compliance with good positioning."""
-        ball_pos = Vec3(0.0, 0.0, 93.15)
-
-        # Well-spaced team with good positioning
-        players = [
-            create_test_player(
-                "player1", 0, position=Vec3(0.0, -1000.0, 17.0), boost_amount=50
-            ),  # Back
-            create_test_player(
-                "player2", 0, position=Vec3(0.0, 0.0, 17.0), boost_amount=60
-            ),  # Mid
-            create_test_player(
-                "player3", 0, position=Vec3(0.0, 800.0, 17.0), boost_amount=40
-            ),  # Forward
-        ]
-
-        frames = [
-            create_test_frame(0.0, ball_pos, players),
-            create_test_frame(1.0, ball_pos, players),
-            create_test_frame(2.0, ball_pos, players),
-        ]
-
-        result = calculate_rotation_compliance(frames, "player1")
-
-        # Should have high score with good positioning
-        assert result["score_0_to_100"] >= 95.0
-        assert len(result["flags"]) == 0  # No violations
 
     def test_complex_positioning_scenario(self):
         """Test complex positioning scenario with multiple metrics."""

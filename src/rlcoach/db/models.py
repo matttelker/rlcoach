@@ -97,8 +97,6 @@ class PlayerGameStats(Base):
     )
     team = Column(String, nullable=False)
     is_me = Column(Boolean, default=False)
-    is_teammate = Column(Boolean, default=False)
-    is_opponent = Column(Boolean, default=False)
 
     # Fundamentals
     goals = Column(Integer, default=0)
@@ -117,58 +115,16 @@ class PlayerGameStats(Base):
     time_full_boost_s = Column(Float)
     boost_collected = Column(Float)
     boost_stolen = Column(Float)
-    big_pads = Column(Integer)
-    small_pads = Column(Integer)
 
     # Movement
     avg_speed_kph = Column(Float)
-    distance_km = Column(Float)
-    max_speed_kph = Column(Float)
     time_supersonic_s = Column(Float)
-    time_slow_s = Column(Float)
-    time_ground_s = Column(Float)
-    time_low_air_s = Column(Float)
-    time_high_air_s = Column(Float)
 
     # Positioning
-    time_offensive_third_s = Column(Float)
-    time_middle_third_s = Column(Float)
-    time_defensive_third_s = Column(Float)
     behind_ball_pct = Column(Float)
-    avg_distance_to_ball_m = Column(Float)
-    avg_distance_to_teammate_m = Column(Float)
     first_man_pct = Column(Float)
     second_man_pct = Column(Float)
     third_man_pct = Column(Float)
-
-    # Challenges
-    challenge_wins = Column(Integer)
-    challenge_losses = Column(Integer)
-    challenge_neutral = Column(Integer)
-    first_to_ball_pct = Column(Float)
-
-    # Kickoffs
-    kickoffs_participated = Column(Integer)
-    kickoff_first_touches = Column(Integer)
-
-    # Mechanics
-    wavedash_count = Column(Integer)
-    halfflip_count = Column(Integer)
-    speedflip_count = Column(Integer)
-    aerial_count = Column(Integer)
-    flip_cancel_count = Column(Integer)
-
-    # Recovery
-    total_recoveries = Column(Integer)
-    avg_recovery_momentum = Column(Float)
-
-    # Defense
-    time_last_defender_s = Column(Float)
-    time_shadow_defense_s = Column(Float)
-
-    # xG
-    total_xg = Column(Float)
-    shots_xg_list = Column(Text)  # JSON array
 
     __table_args__ = (
         UniqueConstraint("replay_id", "player_id", name="uq_replay_player"),

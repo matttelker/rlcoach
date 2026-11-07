@@ -559,7 +559,6 @@ def generate_report(
         analysis_block = {
             "per_team": per_team,
             "per_player": per_player_map,
-            "coaching_insights": analysis_out.get("coaching_insights", []),
         }
         report = {
             "replay_id": replay_id,

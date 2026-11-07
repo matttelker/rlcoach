@@ -108,7 +108,6 @@ def db_with_players(mock_config):
                 player_id="steam:teammate1",
                 team="BLUE",
                 is_me=False,
-                is_teammate=True,
                 goals=1,
                 assists=1,
                 saves=2,
@@ -119,7 +118,6 @@ def db_with_players(mock_config):
                 bcpm=360.0,
                 avg_boost=35.0,
                 behind_ball_pct=55.0,
-                time_last_defender_s=60.0,
             )
         )
         # Teammate2 played the first 3 games, Opponent1 the first 2
@@ -134,7 +132,6 @@ def db_with_players(mock_config):
                         player_id=player_id,
                         team=team,
                         is_me=False,
-                        is_teammate=team == "BLUE",
                     )
                 )
 

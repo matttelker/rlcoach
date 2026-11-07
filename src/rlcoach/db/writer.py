@@ -228,7 +228,6 @@ def insert_player_stats(report: dict[str, Any], config: RLCoachConfig) -> None:
     resolver = PlayerIdentityResolver(config.identity)
     my_player = resolver.find_me(players)
     my_player_id = my_player["player_id"] if my_player else None
-    my_team = my_player["team"] if my_player else None
 
     session = create_session()
     try:
@@ -241,24 +240,12 @@ def insert_player_stats(report: dict[str, Any], config: RLCoachConfig) -> None:
             boost = player_data.get("boost", {})
             movement = player_data.get("movement", {})
             positioning = player_data.get("positioning", {})
-            challenges = player_data.get("challenges", {})
-            kickoffs = player_data.get("kickoffs", {})
-            mechanics = player_data.get("mechanics", {})
-            recovery = player_data.get("recovery", {})
-            defense = player_data.get("defense", {})
-            xg = player_data.get("xg", {})
-
-            is_me = pid == my_player_id
-            is_teammate = not is_me and team == my_team
-            is_opponent = team != my_team
 
             stats = PlayerGameStats(
                 replay_id=replay_id,
                 player_id=pid,
                 team=team,
-                is_me=is_me,
-                is_teammate=is_teammate,
-                is_opponent=is_opponent,
+                is_me=pid == my_player_id,
                 # Fundamentals
                 goals=fundamentals.get("goals"),
                 assists=fundamentals.get("assists"),
@@ -268,61 +255,21 @@ def insert_player_stats(report: dict[str, Any], config: RLCoachConfig) -> None:
                 score=fundamentals.get("score"),
                 demos_inflicted=fundamentals.get("demos_inflicted"),
                 demos_taken=fundamentals.get("demos_taken"),
-                bcpm=boost.get(
-                    "bpm"
-                ),  # Boost amount per minute (industry-standard BCPM)
+                # Boost used per minute, Ballchasing's BCPM
+                bcpm=boost.get("bpm"),
                 avg_boost=boost.get("avg_boost"),
                 time_zero_boost_s=boost.get("time_zero_boost_s"),
                 time_full_boost_s=boost.get("time_full_boost_s"),
                 boost_collected=boost.get("boost_collected"),
                 boost_stolen=boost.get("boost_stolen"),
-                small_pads=boost.get("small_pads"),
-                big_pads=boost.get("big_pads"),
                 # Movement
                 avg_speed_kph=movement.get("avg_speed_kph"),
-                distance_km=movement.get("distance_km"),
-                max_speed_kph=movement.get("max_speed_kph"),
                 time_supersonic_s=movement.get("time_supersonic_s"),
-                time_slow_s=movement.get("time_slow_s"),
-                time_ground_s=movement.get("time_ground_s"),
-                time_low_air_s=movement.get("time_low_air_s"),
-                time_high_air_s=movement.get("time_high_air_s"),
                 # Positioning
                 behind_ball_pct=positioning.get("behind_ball_pct"),
-                time_offensive_third_s=positioning.get("time_offensive_third_s"),
-                time_middle_third_s=positioning.get("time_middle_third_s"),
-                time_defensive_third_s=positioning.get("time_defensive_third_s"),
-                avg_distance_to_ball_m=positioning.get("avg_distance_to_ball_m"),
-                avg_distance_to_teammate_m=positioning.get(
-                    "avg_distance_to_teammate_m"
-                ),
                 first_man_pct=positioning.get("first_man_pct"),
                 second_man_pct=positioning.get("second_man_pct"),
                 third_man_pct=positioning.get("third_man_pct"),
-                # Challenges - Map from analysis keys (wins/losses/neutral)
-                challenge_wins=challenges.get("wins"),
-                challenge_losses=challenges.get("losses"),
-                challenge_neutral=challenges.get("neutral"),
-                first_to_ball_pct=challenges.get("first_to_ball_pct"),
-                # Kickoffs - Map from analysis keys
-                kickoffs_participated=kickoffs.get("count"),
-                kickoff_first_touches=kickoffs.get(
-                    "first_possession"
-                ),  # Closest available metric
-                # Mechanics
-                wavedash_count=mechanics.get("wavedash_count"),
-                halfflip_count=mechanics.get("halfflip_count"),
-                speedflip_count=mechanics.get("speedflip_count"),
-                aerial_count=mechanics.get("aerial_count"),
-                flip_cancel_count=mechanics.get("flip_cancel_count"),
-                # Recovery - Map from analysis keys
-                total_recoveries=recovery.get("total_recoveries"),
-                avg_recovery_momentum=recovery.get("average_momentum_retained"),
-                # Defense - Map from analysis keys
-                time_last_defender_s=defense.get("time_as_last_defender"),
-                time_shadow_defense_s=defense.get("time_shadowing"),
-                # xG
-                total_xg=xg.get("total_xg"),
             )
             session.add(stats)
 

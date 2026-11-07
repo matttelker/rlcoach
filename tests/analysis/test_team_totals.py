@@ -4,9 +4,7 @@ Float addition depends on order, so looping over a set of player IDs gives a tea
 of three or more slightly different totals from one run to the next.
 """
 
-from unittest.mock import Mock
-
-from rlcoach.analysis import _aggregate_team_mechanics, boost, movement, positioning
+from rlcoach.analysis import boost, movement, positioning
 from rlcoach.field_constants import Vec3
 from rlcoach.parser.types import BallFrame, Frame, PlayerFrame
 
@@ -74,14 +72,4 @@ def test_team_boost_adds_players_in_sorted_order(monkeypatch):
 
     boost._analyze_team_boost(_team_frames(), [0.0], [], "BLUE", 60.0)
 
-    assert seen == sorted(PLAYER_IDS)
-
-
-def test_team_mechanics_adds_players_in_sorted_order():
-    per_player = Mock()
-    per_player.get.return_value = {}
-
-    _aggregate_team_mechanics(_team_frames(), "BLUE", {"per_player": per_player})
-
-    seen = [call.args[0] for call in per_player.get.call_args_list]
     assert seen == sorted(PLAYER_IDS)
