@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
 
 from ..field_constants import Vec3
 
@@ -66,19 +65,6 @@ class DemoEvent:
     t: float
     victim: str
     attacker: str | None = None
-
-
-@dataclass(frozen=True)
-class KickoffEvent:
-    """Kickoff event with player analysis."""
-
-    phase: str  # "INITIAL" or "OT"
-    t_start: float  # Cars released; the ball reset if frames show no countdown
-    players: list[dict[str, Any]]  # Player kickoff analysis
-    outcome: str = "NEUTRAL"  # Simplified outcome
-    first_touch_player: str | None = None
-    time_to_first_touch: float | None = None
-    source: str = "inferred"
 
 
 @dataclass(frozen=True)

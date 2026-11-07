@@ -11,40 +11,17 @@ These follow Ballchasing's definitions, which the parity test checks:
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from itertools import groupby, pairwise
 from typing import Any
 
+from ..events.kickoffs import is_held_for_kickoff
 from ..events.types import BoostPickupEvent
-from ..parser.types import Frame, Vec3
+from ..parser.types import Frame
 from .tracks import PAUSE_GAP_S, Track
 
 COUNTDOWN_S = 3.0  # Of each kickoff countdown, what Ballchasing leaves out
 COUNTDOWN_MIN_S = 2.0  # Real countdowns hold for 3.1 s or more, other stops under 1
-STILL_UU_S = 50.0  # Ball and cars move slower than this while held
-SPOT_REACH = 120.0  # Ball this close to the centre spot across the field
-SPOT_HEIGHT = 93.15
-SPOT_HEIGHT_REACH = 60.0  # The ball drops onto the spot after a reset
-
-
-def is_held_for_kickoff(frame: Frame) -> bool:
-    """The ball waits on the centre spot and every car is held still."""
-    ball = frame.ball
-    return (
-        abs(ball.position.x) <= SPOT_REACH
-        and abs(ball.position.y) <= SPOT_REACH
-        and abs(ball.position.z - SPOT_HEIGHT) <= SPOT_HEIGHT_REACH
-        and _speed(ball.velocity) < STILL_UU_S
-        and bool(frame.players)
-        and all(_speed(car.velocity) < STILL_UU_S for car in frame.players)
-    )
-
-
-def _speed(velocity: Vec3) -> float:
-    return math.sqrt(
-        velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z
-    )
 
 
 def active_play_seconds(frames: list[Frame], held: list[bool]) -> float:

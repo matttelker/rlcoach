@@ -81,7 +81,7 @@ def test_missing_header_fields_fall_back():
 
 
 def _kickoff(phase):
-    return KickoffEvent(phase=phase, t_start=0.0, players=[])
+    return KickoffEvent(t_start=0.0, phase=phase)
 
 
 def test_an_overtime_kickoff_means_overtime():

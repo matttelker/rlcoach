@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from rlcoach.analysis.boost import active_play_seconds, boost_stats, is_held_for_kickoff
+from rlcoach.analysis.boost import active_play_seconds, boost_stats
 from rlcoach.analysis.tracks import player_tracks
+from rlcoach.events.kickoffs import is_held_for_kickoff
 from rlcoach.events.types import BoostPickupEvent
 from rlcoach.field_constants import Vec3
 from tests.fixtures.builders import (
@@ -112,12 +113,3 @@ def test_a_short_stop_on_the_spot_is_not_a_countdown():
     held = [is_held_for_kickoff(f) for f in frames]
     assert sum(held) == 3
     assert active_play_seconds(frames, held) == frames[-1].timestamp
-
-
-def test_a_ball_off_the_spot_or_a_moving_car_is_not_held():
-    car = create_test_player("me", 0)
-    assert is_held_for_kickoff(create_test_frame(0.0, [car]))
-    assert not is_held_for_kickoff(create_test_frame(0.0, [car], ball=OFF_SPOT))
-    moving = create_test_player("me", 0, velocity=MOVING)
-    assert not is_held_for_kickoff(create_test_frame(0.0, [car, moving]))
-    assert not is_held_for_kickoff(create_test_frame(0.0, []))

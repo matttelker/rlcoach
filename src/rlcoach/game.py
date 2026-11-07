@@ -11,20 +11,18 @@ from pathlib import Path
 from typing import Any
 
 from .events import (
-    detect_boost_pickups,
-    detect_challenges,
-    detect_demos,
-    detect_goals,
-    detect_kickoffs,
-    detect_touches,
-)
-from .events.types import (
     BoostPickupEvent,
     ChallengeEvent,
     DemoEvent,
     GoalEvent,
     KickoffEvent,
     TouchEvent,
+    detect_boost_pickups,
+    detect_challenges,
+    detect_demos,
+    detect_goals,
+    detect_kickoffs,
+    detect_touches,
 )
 from .normalize import build_timeline
 from .parser import read_header, read_network
@@ -64,16 +62,17 @@ class Game:
 
 def game_from_frames(path: Path, header: Header, frames: list[Frame]) -> Game:
     """Find the events in normalized frames."""
+    goals = detect_goals(frames, header)
     touches = detect_touches(frames)
     return Game(
         path=path,
         header=header,
         frames=frames,
-        goals=detect_goals(frames, header),
+        goals=goals,
         touches=touches,
         challenges=detect_challenges(frames, touches),
         demos=detect_demos(frames),
-        kickoffs=detect_kickoffs(frames, header),
+        kickoffs=detect_kickoffs(frames, goals),
         boost_pickups=detect_boost_pickups(frames),
     )
 
