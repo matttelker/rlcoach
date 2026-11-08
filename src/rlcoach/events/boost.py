@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 
-from ..field_constants import FIELD, BoostPad, Vec3
+from ..field_constants import BOOST_PADS, BoostPad, Vec3
 from ..parser.types import Frame
 from .types import distance
 
@@ -36,7 +36,7 @@ BIG_REACH_UU = 1120.0
 
 @dataclass(frozen=True)
 class BoostPickupEvent:
-    """One pad taken. `pad_id` indexes `FIELD.BOOST_PADS`."""
+    """One pad taken. `pad_id` indexes `BOOST_PADS`."""
 
     t: float
     player_id: str
@@ -99,10 +99,10 @@ def _from_pad_events(frames: list[Frame]) -> list[BoostPickupEvent]:
             if (
                 event.status != "COLLECTED"
                 or event.player_id is None
-                or not 0 <= event.pad_id < len(FIELD.BOOST_PADS)
+                or not 0 <= event.pad_id < len(BOOST_PADS)
             ):
                 continue
-            pad = FIELD.BOOST_PADS[event.pad_id]
+            pad = BOOST_PADS[event.pad_id]
             t = frame.timestamp if event.timestamp is None else event.timestamp
             respawn = BIG_RESPAWN_S if pad.is_big else SMALL_RESPAWN_S
             last = taken_at.get(pad.pad_id)
@@ -149,7 +149,7 @@ def _nearest_pad(
     return min(
         (
             (pad, min(distance(position, pad.position) for position in positions))
-            for pad in FIELD.BOOST_PADS
+            for pad in BOOST_PADS
             if big is None or pad.is_big == big
         ),
         key=lambda item: item[1],

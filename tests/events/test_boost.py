@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from rlcoach.events.boost import detect_boost_pickups, is_stolen
-from rlcoach.field_constants import FIELD, Vec3
+from rlcoach.field_constants import BOOST_PADS, Vec3
 from rlcoach.parser.types import BoostPadEventFrame
 from tests.fixtures.builders import create_test_frame, create_test_player
 
@@ -13,7 +13,7 @@ STEP = 1 / 30
 
 
 def _pad(x, y):
-    return next(p for p in FIELD.BOOST_PADS if (p.position.x, p.position.y) == (x, y))
+    return next(p for p in BOOST_PADS if (p.position.x, p.position.y) == (x, y))
 
 
 BLUE_CORNER = _pad(-3072.0, -4096.0)  # Big, on blue's half
@@ -118,7 +118,7 @@ def test_pickups_come_in_the_order_the_events_happened():
 
 def test_events_without_a_car_a_known_pad_or_a_pickup_are_skipped():
     unknown_pad = BoostPadEventFrame(
-        pad_id=len(FIELD.BOOST_PADS), status="COLLECTED", is_big=False, player_id="me"
+        pad_id=len(BOOST_PADS), status="COLLECTED", is_big=False, player_id="me"
     )
     events = {
         1: [

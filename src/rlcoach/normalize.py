@@ -14,7 +14,7 @@ import statistics
 from dataclasses import replace
 from typing import Any
 
-from .field_constants import FIELD, Vec3
+from .field_constants import BACK_WALL_Y, CEILING_Z, SIDE_WALL_X, Vec3
 from .identity import (
     build_alias_lookup,
     build_player_identities,
@@ -119,9 +119,9 @@ def to_field_coords(vec: Any) -> Vec3:
         z_norm = float(z)
 
         # Clamp to field boundaries with some tolerance
-        x_norm = max(-FIELD.SIDE_WALL_X * 1.1, min(FIELD.SIDE_WALL_X * 1.1, x_norm))
-        y_norm = max(-FIELD.BACK_WALL_Y * 1.1, min(FIELD.BACK_WALL_Y * 1.1, y_norm))
-        z_norm = max(-100.0, min(FIELD.CEILING_Z * 2.0, z_norm))
+        x_norm = max(-SIDE_WALL_X * 1.1, min(SIDE_WALL_X * 1.1, x_norm))
+        y_norm = max(-BACK_WALL_Y * 1.1, min(BACK_WALL_Y * 1.1, y_norm))
+        z_norm = max(-100.0, min(CEILING_Z * 2.0, z_norm))
 
         return Vec3(x_norm, y_norm, z_norm)
     except ValueError, TypeError:

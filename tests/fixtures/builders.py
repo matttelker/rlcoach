@@ -18,7 +18,6 @@ from rlcoach.parser.types import (
     Quaternion,
     Rotation,
 )
-from rlcoach.physics_constants import SUPERSONIC_SPEED_SQUARED
 
 
 def create_test_player(
@@ -80,10 +79,6 @@ def create_test_player(
             quaternion=quaternion,
         )
 
-    # Calculate is_supersonic from velocity
-    speed_sq = velocity.x**2 + velocity.y**2 + velocity.z**2
-    is_supersonic = speed_sq > SUPERSONIC_SPEED_SQUARED
-
     return PlayerFrame(
         player_id=player_id,
         team=team,
@@ -102,7 +97,6 @@ def create_test_player(
         boost_active_raw=boost_active_raw,
         boost_amount_raw=boost_amount_raw,
         boost_grant_count=boost_grant_count,
-        is_supersonic=is_supersonic,
         is_on_ground=is_on_ground,
         is_demolished=is_demolished,
         is_jumping=is_jumping,

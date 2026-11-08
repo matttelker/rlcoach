@@ -48,7 +48,6 @@ def test_create_test_player_accepts_parser_signals() -> None:
     assert player.boost_active_raw == 3
     assert player.boost_amount_raw == 200
     assert player.boost_grant_count == 4
-    assert player.is_supersonic is True
     assert player.is_jumping is True
     assert player.is_dodging is False
     assert player.is_double_jumping is True

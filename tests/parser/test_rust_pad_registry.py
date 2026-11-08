@@ -62,7 +62,7 @@ def test_rust_pad_registry_event_completeness():
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
 def test_rust_pad_registry_survives_checkpoints():
     """Pad actors re-spawn about every 10s and re-send their last state."""
-    from rlcoach.field_constants import FIELD
+    from rlcoach.field_constants import BOOST_PADS
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
@@ -79,7 +79,7 @@ def test_rust_pad_registry_survives_checkpoints():
     last_state: dict[int, int] = {}
     for event in pad_events:
         pad_id = event["pad_id"]
-        assert event["is_big"] == FIELD.BOOST_PADS[pad_id].is_big
+        assert event["is_big"] == BOOST_PADS[pad_id].is_big
         assert last_state.get(pad_id) != event["raw_state"], f"pad {pad_id} re-sent"
         last_state[pad_id] = event["raw_state"]
 

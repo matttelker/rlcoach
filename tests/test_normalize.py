@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from rlcoach.field_constants import FIELD, Vec3
+from rlcoach.field_constants import BACK_WALL_Y, CEILING_Z, SIDE_WALL_X, Vec3
 from rlcoach.normalize import (
     build_timeline,
     measure_frame_rate,
@@ -153,18 +153,18 @@ class TestCoordinateTransformation:
         """Coordinates clamped to field boundaries with tolerance."""
         # Test X boundary
         over_x = to_field_coords((10000, 0, 0))
-        assert over_x.x <= FIELD.SIDE_WALL_X * 1.1
+        assert over_x.x <= SIDE_WALL_X * 1.1
 
         under_x = to_field_coords((-10000, 0, 0))
-        assert under_x.x >= -FIELD.SIDE_WALL_X * 1.1
+        assert under_x.x >= -SIDE_WALL_X * 1.1
 
         # Test Y boundary
         over_y = to_field_coords((0, 10000, 0))
-        assert over_y.y <= FIELD.BACK_WALL_Y * 1.1
+        assert over_y.y <= BACK_WALL_Y * 1.1
 
         # Test Z boundary
         over_z = to_field_coords((0, 0, 10000))
-        assert over_z.z <= FIELD.CEILING_Z * 2.0
+        assert over_z.z <= CEILING_Z * 2.0
 
         under_z = to_field_coords((0, 0, -1000))
         assert under_z.z >= -100.0

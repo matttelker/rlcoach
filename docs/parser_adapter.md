@@ -73,7 +73,8 @@ game's own `TAGame.PRI_TA:BoostPickups` counter to within one pickup per replay.
   is back. A goal reset goes to 255 without advancing it, so the next collection can
   repeat the previous value. A repeated value counts only if the car is at the pad.
 - Pads never replicate a position, so each is identified from the instigating car at
-  pickup, using the tolerances in `schemas/boost_pad_tables.json`.
+  pickup, using the pad table and snap distance in
+  `parsers/rlreplay_rust/src/arena_tables.rs`.
 - Hoops, Dropshot and Rumble have no verified pad table. Pickups there are replicated
   but emit no events, so boost detection uses boost deltas instead.
 - A collection whose car has no player binding (about 0.3%) is emitted without

@@ -19,18 +19,20 @@ from pathlib import Path
 from typing import Any
 
 from ..events.types import ChallengeEvent, GoalEvent, team_name
-from ..field_constants import FieldConstants
+from ..field_constants import (
+    BACK_WALL_Y,
+    CEILING_Z,
+    GOAL_HEIGHT,
+    GOAL_WIDTH,
+    SIDE_WALL_X,
+)
 from ..game import Game, read_game
 from ..identity import build_player_identities
 from ..modes import mode_of
 from ..parser.types import BallFrame, Frame, PlayerFrame
 from ..physics_constants import BALL_RADIUS_UU
 
-GOAL_LINE_Y = FieldConstants.BACK_WALL_Y
-GOAL_WIDTH = FieldConstants.GOAL_WIDTH
-GOAL_HEIGHT = FieldConstants.GOAL_HEIGHT
-SIDE_WALL_X = FieldConstants.SIDE_WALL_X
-CEILING_Z = FieldConstants.CEILING_Z
+GOAL_LINE_Y = BACK_WALL_Y
 
 GAME_LENGTH_S = 300.0
 GRAVITY_UU_S2 = 650.0
