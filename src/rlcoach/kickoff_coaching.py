@@ -210,7 +210,9 @@ def _lost_share(going: dict[str, Any], timing: str) -> str:
     return f"{group['lost']} of {group['count']} ({share}%)"
 
 
-def _ladder(going: dict[str, Any], support: dict[str, Any]) -> list[dict[str, Any]]:
+def _ladder(
+    going: dict[str, Any], kickoffs: int, double_commits: int
+) -> list[dict[str, Any]]:
     """The steps in order, each with your measure and whether it's solid."""
     went = going["went"]
     flips = going["flips"]
@@ -253,17 +255,15 @@ def _ladder(going: dict[str, Any], support: dict[str, Any]) -> list[dict[str, An
             "key": "one_goes",
             "title": "One goes, the rest support",
             "level": "Platinum to Diamond",
-            "measure": "Kickoffs you supported without going too",
-            "count": support["count"] - support["double_commits"],
-            "of": support["count"],
-            "value": _share(
-                support["count"] - support["double_commits"], support["count"]
-            ),
+            "measure": "Kickoffs where only one of you went",
+            "count": kickoffs - double_commits,
+            "of": kickoffs,
+            "value": _share(kickoffs - double_commits, kickoffs),
             "target": 0.95,
             "why": (
                 "Two cars on the ball leave nobody for where it goes next. You "
-                f"went with a teammate on {support['double_commits']} of "
-                f"{support['count']} kickoffs you weren't taking."
+                f"and a teammate both went on {double_commits} of {kickoffs} "
+                "kickoffs."
             ),
             "how": INSTEAD["kickoff_double_commit"],
         },
@@ -315,13 +315,14 @@ def summarize_kickoffs(games: list[GameKickoffs]) -> dict[str, Any]:
     going = [k for k in seen if k.going]
     support = [k for k in seen if not k.going]
     going_summary = _going_summary(going)
-    support_summary = _support_summary(support)
+    double_commits = sum(1 for k in seen if k.double_commit)
     days = sorted({k.play_date for k in seen})
     return {
         "games": len(games),
         "count": len(seen),
+        "double_commits": double_commits,
         "going": going_summary,
-        "support": support_summary,
+        "support": _support_summary(support),
         "sessions": [
             {
                 "play_date": day.isoformat(),
@@ -330,10 +331,10 @@ def summarize_kickoffs(games: list[GameKickoffs]) -> dict[str, Any]:
                     1 for k in going if k.play_date == day and k.flip == "ON_TIME"
                 ),
                 "double_commits": sum(
-                    1 for k in support if k.play_date == day and k.double_commit
+                    1 for k in seen if k.play_date == day and k.double_commit
                 ),
             }
             for day in days
         ],
-        "ladder": _ladder(going_summary, support_summary),
+        "ladder": _ladder(going_summary, len(seen), double_commits),
     }

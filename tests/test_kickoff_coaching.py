@@ -187,11 +187,43 @@ def test_the_first_step_you_havent_got_is_the_focus():
     assert ladder["speedflip"]["status"] == "later"
 
 
+def _going_with_a_teammate(t):
+    return _kickoff(
+        _car(role="BACK", approach="STANDARD_BOOST", spot="BACK"),
+        _car(MATE),
+        _car(OPP, team=ORANGE),
+        t=t,
+    )
+
+
 def test_a_step_with_too_few_kickoffs_is_unknown_and_doesnt_block():
+    # Too few GO kickoffs to judge the flip, but enough kickoffs in all
+    ladder = _ladder(
+        *[_going(0.1, t=float(n)) for n in range(MIN_KICKOFFS - 1)],
+        *[_going_with_a_teammate(10.0 + n) for n in range(3)],
+    )
+    assert ladder["flip_in"]["status"] == "unknown"
+    assert ladder["on_time"]["status"] == "unknown"
+    assert ladder["one_goes"]["status"] == "focus"
+    assert (ladder["one_goes"]["count"], ladder["one_goes"]["of"]) == (4, 7)
+    assert ladder["speedflip"]["status"] == "unknown"
+
+
+def test_the_speedflip_step_says_what_one_is():
     ladder = _ladder(*[_going(0.1, t=float(n)) for n in range(MIN_KICKOFFS)])
-    assert ladder["one_goes"]["status"] == "unknown"
     assert ladder["speedflip"]["status"] == "focus"
     assert "speedflip is a kickoff" in ladder["speedflip"]["why"]
+
+
+def test_a_double_commit_from_level_spawns_counts_for_one_goes():
+    level = _kickoff(
+        _car(flip_lead=0.1),
+        _car(MATE, "WING", "STANDARD_BOOST"),
+        _car(OPP, team=ORANGE),
+    )
+    summary = summarize_kickoffs([_game(level)])
+    assert summary["double_commits"] == 1
+    assert summary["support"]["double_commits"] == 0
 
 
 def test_the_why_quotes_your_own_kickoffs():
