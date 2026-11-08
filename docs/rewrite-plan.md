@@ -77,7 +77,9 @@ Keeping them is small. One game has about 160 touches, 20 challenges, 4 demos an
 
 One use: "Do you lose more 50/50s in your own half when you're last back, and is that getting better?" Each challenge already has its location, depth, both players and the winner, so with them stored this is one query over every game, which Claude can answer in chat and the Coach page could chart.
 
-Phase 3 has rewritten `events/` and left every event as it was, so the definitions are settled. The review still finds contacts its own way (`find_contacts` in `mistakes.py`), apart from the touches. Kickoffs now keep how each car played them, which kickoff coaching would want stored the same way.
+Phase 3 has rewritten `events/` and left every event as it was, so the definitions are settled. The review still finds contacts its own way (`find_contacts` in `mistakes.py`), apart from the touches.
+
+Kickoffs are stored since kickoff coaching (2026-11-07): `review_kickoffs` and `review_kickoff_cars` hold every car's kickoffs with each review, and `rlcoach reviews --redo` fills them in. They went with the review rather than the game because `ingest` skips a stored game, so only the review could fill in the games already loaded. The other kinds could follow the same way.
 
 ## Phase 3: the core the mistake detector stands on (done 2026-11-07)
 
