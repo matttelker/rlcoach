@@ -432,16 +432,8 @@ class RustAdapter:
         frames: list[dict[str, Any]],
         player_metadata: dict[int, dict[str, Any]] | None = None,
     ) -> NetworkFrames:
-        # Measure sample rate from timestamps if available.
-        try:
-            from ..normalize import measure_frame_rate
-
-            hz = float(measure_frame_rate(frames))
-        except Exception:
-            hz = 30.0
         return NetworkFrames(
             frame_count=len(frames),
-            sample_rate=hz,
             frames=frames,
             player_metadata=player_metadata or {},
         )

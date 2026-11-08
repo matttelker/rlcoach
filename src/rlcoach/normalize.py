@@ -1,25 +1,19 @@
-"""Normalization layer for converting parser outputs to standardized timeline format.
+"""Turn the parser's frames into the Frames that events and stats read.
 
-This module transforms raw parser data into normalized structures with:
-- Measured frame rates
-- Standard RLBot coordinate system
-- Unified player identity mapping
-- Consistent timeline format
+Each car gets its player's id from the header, positions are held to the field,
+and times count from the first frame. Only what something downstream reads is
+kept: where the ball and cars are and how they move, each car's boost, team and
+whether it's demolished, and the parser's touch, first-touch, demo, dodge and
+boost pad events.
 """
 
 from __future__ import annotations
 
-import re
-import statistics
-from dataclasses import replace
+from collections.abc import Callable
 from typing import Any
 
 from .field_constants import BACK_WALL_Y, CEILING_Z, SIDE_WALL_X, Vec3
-from .identity import (
-    build_alias_lookup,
-    build_player_identities,
-    sanitize_display_name,
-)
+from .identity import build_alias_lookup, build_player_identities
 from .parser.types import (
     BallFrame,
     BoostPadEventFrame,
@@ -27,1110 +21,153 @@ from .parser.types import (
     Header,
     ParserComponentEvent,
     ParserDemoEvent,
-    ParserKickoffMarker,
-    ParserStatEvent,
-    ParserTickmarkEvent,
     ParserTouchEvent,
     PlayerFrame,
     Quaternion,
     Rotation,
 )
 
-# Default frame rate when unable to measure from replay data
-DEFAULT_FRAME_RATE = 30.0
+# How far past the walls a position may read. Cars and the ball go inside the
+# goals, past the back wall
+X_LIMIT = SIDE_WALL_X * 1.1
+Y_LIMIT = BACK_WALL_Y * 1.1
+Z_RANGE = (-100.0, CEILING_Z * 2.0)
 
-# The parser's own player ids. One past the header rows is a player who left before
-# the end, so it must not be matched to a header player by position.
-PARSER_PLAYER_ID = re.compile(r"player_\d+")
+Raw = dict[str, Any]
 
 
-def measure_frame_rate(frames: list[Any]) -> float:
-    """Measure actual frame rate from frame timestamps.
+def build_timeline(header: Header, raw_frames: list[Raw]) -> list[Frame]:
+    """The parser's frames, which must not be empty, in time order from 0.
 
-    Args:
-        frames: List of frame data with timestamp information
-
-    Returns:
-        Measured frame rate in Hz (defaults to DEFAULT_FRAME_RATE if unmeasurable)
+    The parser calls cars player_<n> after their row in the header. Someone who
+    left before the end has no row, and keeps the parser's id.
     """
-    if not frames or len(frames) < 2:
-        return DEFAULT_FRAME_RATE
-
-    timestamps = []
-    for frame in frames:
-        try:
-            if hasattr(frame, "timestamp"):
-                timestamps.append(float(frame.timestamp))
-            elif hasattr(frame, "time"):
-                timestamps.append(float(frame.time))
-            elif isinstance(frame, dict) and "timestamp" in frame:
-                timestamps.append(float(frame["timestamp"]))
-            elif isinstance(frame, dict) and "time" in frame:
-                timestamps.append(float(frame["time"]))
-        except ValueError, TypeError:
-            continue  # Skip frames with invalid timestamps
-
-    if len(timestamps) < 2:
-        return DEFAULT_FRAME_RATE
-
-    deltas = []
-    for i in range(1, len(timestamps)):
-        delta = timestamps[i] - timestamps[i - 1]
-        if delta > 0:  # Only positive deltas
-            deltas.append(delta)
-
-    if not deltas:
-        return DEFAULT_FRAME_RATE
-
-    # Use median delta to avoid outliers from frame drops
-    median_delta = statistics.median(deltas)
-    if median_delta <= 0:
-        return DEFAULT_FRAME_RATE
-
-    fps = 1.0 / median_delta
-    return max(1.0, min(240.0, fps))
-
-
-def to_field_coords(vec: Any) -> Vec3:
-    """Transform vector to standard RLBot coordinate system.
-
-    Args:
-        vec: Input vector (Vec3, tuple, list, or dict)
-
-    Returns:
-        Vec3 in RLBot coordinate system (x=±4096, y=±5120, z≈2044)
-    """
-    if isinstance(vec, Vec3):
-        return vec
-    elif hasattr(vec, "x") and hasattr(vec, "y") and hasattr(vec, "z"):
-        x, y, z = vec.x, vec.y, vec.z
-    elif isinstance(vec, (tuple, list)) and len(vec) >= 3:
-        x, y, z = vec[0], vec[1], vec[2]
-    elif isinstance(vec, dict):
-        x = vec.get("x", 0.0)
-        y = vec.get("y", 0.0)
-        z = vec.get("z", 0.0)
-    else:
-        return Vec3(0.0, 0.0, 0.0)
-
-    try:
-        x_norm = float(x)
-        y_norm = float(y)
-        z_norm = float(z)
-
-        # Clamp to field boundaries with some tolerance
-        x_norm = max(-SIDE_WALL_X * 1.1, min(SIDE_WALL_X * 1.1, x_norm))
-        y_norm = max(-BACK_WALL_Y * 1.1, min(BACK_WALL_Y * 1.1, y_norm))
-        z_norm = max(-100.0, min(CEILING_Z * 2.0, z_norm))
-
-        return Vec3(x_norm, y_norm, z_norm)
-    except ValueError, TypeError:
-        return Vec3(0.0, 0.0, 0.0)
-
-
-def to_vec3(vec: Any) -> Vec3:
-    """Convert parser vector data without applying field-position bounds."""
-    if isinstance(vec, Vec3):
-        return vec
-    elif hasattr(vec, "x") and hasattr(vec, "y") and hasattr(vec, "z"):
-        x, y, z = vec.x, vec.y, vec.z
-    elif isinstance(vec, (tuple, list)) and len(vec) >= 3:
-        x, y, z = vec[0], vec[1], vec[2]
-    elif isinstance(vec, dict):
-        x = vec.get("x", 0.0)
-        y = vec.get("y", 0.0)
-        z = vec.get("z", 0.0)
-    else:
-        return Vec3(0.0, 0.0, 0.0)
-
-    try:
-        return Vec3(float(x), float(y), float(z))
-    except ValueError, TypeError:
-        return Vec3(0.0, 0.0, 0.0)
-
-
-def _parse_rotation(rot_data: Any) -> Rotation | Vec3:
-    """Parse rotation data from parser output.
-
-    Handles both new format (pitch/yaw/roll + optional quaternion) and legacy
-    format (x/y/z where x=pitch, y=yaw, z=roll).
-
-    Args:
-        rot_data: Rotation data dict or object
-
-    Returns:
-        Rotation dataclass with euler angles and optional quaternion, or Vec3 for legacy
-    """
-    if rot_data is None:
-        return Rotation(0.0, 0.0, 0.0)
-
-    # Already a Rotation object
-    if isinstance(rot_data, Rotation):
-        return rot_data
-
-    if isinstance(rot_data, dict):
-        # New format: has pitch/yaw/roll keys
-        if "pitch" in rot_data or "yaw" in rot_data or "roll" in rot_data:
-            pitch = float(rot_data.get("pitch", 0.0))
-            yaw = float(rot_data.get("yaw", 0.0))
-            roll = float(rot_data.get("roll", 0.0))
-
-            # Parse quaternion if present
-            quat = None
-            quat_data = rot_data.get("quaternion")
-            if quat_data is not None and isinstance(quat_data, dict):
-                quat = Quaternion(
-                    x=float(quat_data.get("x", 0.0)),
-                    y=float(quat_data.get("y", 0.0)),
-                    z=float(quat_data.get("z", 0.0)),
-                    w=float(quat_data.get("w", 1.0)),
-                )
-
-            return Rotation(pitch=pitch, yaw=yaw, roll=roll, quaternion=quat)
-
-        # Legacy format: has x/y/z keys (x=pitch, y=yaw, z=roll)
-        elif "x" in rot_data or "y" in rot_data or "z" in rot_data:
-            return Vec3(
-                x=float(rot_data.get("x", 0.0)),
-                y=float(rot_data.get("y", 0.0)),
-                z=float(rot_data.get("z", 0.0)),
-            )
-
-    # For non-dict objects, check for x/y/z FIRST (legacy format), before
-    # pitch/yaw/roll. This is important because Mock objects have implicit
-    # attributes.
-    if hasattr(rot_data, "x") and hasattr(rot_data, "y") and hasattr(rot_data, "z"):
-        # Try to get x/y/z as numbers - this distinguishes real attributes from
-        # Mock implicit ones.
-        try:
-            x_val = rot_data.x
-            y_val = rot_data.y
-            z_val = rot_data.z
-            # Verify they are actual numeric values
-            if (
-                isinstance(x_val, (int, float))
-                and isinstance(y_val, (int, float))
-                and isinstance(z_val, (int, float))
-            ):
-                return Vec3(x=float(x_val), y=float(y_val), z=float(z_val))
-        except TypeError, ValueError:
-            pass
-
-    pitch_val = getattr(rot_data, "pitch", None)
-    yaw_val = getattr(rot_data, "yaw", None)
-    roll_val = getattr(rot_data, "roll", None)
-
-    has_real_pitch = isinstance(pitch_val, (int, float))
-    has_real_yaw = isinstance(yaw_val, (int, float))
-    has_real_roll = isinstance(roll_val, (int, float))
-
-    if has_real_pitch or has_real_yaw or has_real_roll:
-        pitch = float(pitch_val) if has_real_pitch else 0.0
-        yaw = float(yaw_val) if has_real_yaw else 0.0
-        roll = float(roll_val) if has_real_roll else 0.0
-
-        quat = None
-        quat_data = getattr(rot_data, "quaternion", None)
-        if quat_data is not None:
-            if isinstance(quat_data, dict):
-                quat = Quaternion(
-                    x=float(quat_data.get("x", 0.0)),
-                    y=float(quat_data.get("y", 0.0)),
-                    z=float(quat_data.get("z", 0.0)),
-                    w=float(quat_data.get("w", 1.0)),
-                )
-            elif hasattr(quat_data, "x"):
-                qx = getattr(quat_data, "x", 0.0)
-                qy = getattr(quat_data, "y", 0.0)
-                qz = getattr(quat_data, "z", 0.0)
-                qw = getattr(quat_data, "w", 1.0)
-                if all(isinstance(v, (int, float)) for v in [qx, qy, qz, qw]):
-                    quat = Quaternion(
-                        x=float(qx), y=float(qy), z=float(qz), w=float(qw)
-                    )
-
-        return Rotation(pitch=pitch, yaw=yaw, roll=roll, quaternion=quat)
-
-    return Rotation(0.0, 0.0, 0.0)
-
-
-def _extract_optional_bool_flag(source: Any, field: str) -> tuple[bool, bool | None]:
-    """Extract optional bool flags from dict/object inputs.
-
-    Returns:
-        (present, value) where value is bool | None.
-        If present=False, the field was unavailable.
-    """
-    raw_value: Any
-    if isinstance(source, dict):
-        if field not in source:
-            return (False, None)
-        raw_value = source[field]
-    else:
-        if not hasattr(source, field):
-            return (False, None)
-        raw_value = getattr(source, field)
-
-    if raw_value is None:
-        return (True, None)
-    if isinstance(raw_value, bool):
-        return (True, raw_value)
-    if isinstance(raw_value, (int, float)):
-        return (True, bool(raw_value))
-    if isinstance(raw_value, str):
-        normalized = raw_value.strip().lower()
-        if normalized in {"true", "1"}:
-            return (True, True)
-        if normalized in {"false", "0"}:
-            return (True, False)
-        return (False, None)
-
-    # Treat non-primitive placeholders (e.g. unittest.Mock missing attrs) as absent.
-    return (False, None)
-
-
-def _extract_optional_float(source: Any, field: str) -> float | None:
-    raw = (
-        source.get(field) if isinstance(source, dict) else getattr(source, field, None)
-    )
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except TypeError, ValueError:
-        return None
-
-
-def _extract_optional_int(source: Any, field: str) -> int | None:
-    raw = (
-        source.get(field) if isinstance(source, dict) else getattr(source, field, None)
-    )
-    if isinstance(raw, bool) or raw is None:
-        return None
-    try:
-        return int(raw)
-    except TypeError, ValueError:
-        return None
-
-
-def _extract_event_field(item: Any, field: str) -> Any:
-    if isinstance(item, dict):
-        return item.get(field)
-    return getattr(item, field, None)
-
-
-def _extract_raw_event_list(frame_data: Any, key: str) -> list[Any]:
-    """Extract a list field from frame data, handling both dict and object formats."""
-    if hasattr(frame_data, key):
-        candidate = getattr(frame_data, key)
-        return candidate if isinstance(candidate, list) else []
-    if isinstance(frame_data, dict) and key in frame_data:
-        value = frame_data.get(key, [])
-        return value if isinstance(value, list) else []
-    return []
-
-
-def _parse_frame_index(item: Any) -> int | None:
-    """Extract optional frame_index as int from a raw event item."""
-    raw = _extract_event_field(item, "frame_index")
-    return int(raw) if isinstance(raw, (int, float)) else None
-
-
-def _convert_touch_event(
-    item: Any, alias_lookup: dict[str, str] | None = None
-) -> ParserTouchEvent | None:
-    ts = _extract_event_field(item, "timestamp")
-    raw_player_id = _extract_event_field(item, "player_id")
-    team = _extract_event_field(item, "team")
-    if ts is None or raw_player_id is None or team is None:
-        return None
-    raw_player_id_str = str(raw_player_id)
-    if alias_lookup:
-        player_id = alias_lookup.get(raw_player_id_str, raw_player_id_str)
-    else:
-        player_id = raw_player_id_str
-    return ParserTouchEvent(
-        timestamp=float(ts),
-        player_id=player_id,
-        team=int(team),
-        frame_index=_parse_frame_index(item),
-        source=str(_extract_event_field(item, "source") or "parser"),
-    )
-
-
-def _convert_demo_event(
-    item: Any, alias_lookup: dict[str, str] | None = None
-) -> ParserDemoEvent | None:
-    ts = _extract_event_field(item, "timestamp")
-    raw_victim_id = _extract_event_field(item, "victim_id")
-    if ts is None or raw_victim_id is None:
-        return None
-    raw_victim_id_str = str(raw_victim_id)
-    if alias_lookup:
-        victim_id = alias_lookup.get(raw_victim_id_str, raw_victim_id_str)
-    else:
-        victim_id = raw_victim_id_str
-
-    attacker_id_raw = _extract_event_field(item, "attacker_id")
-    if attacker_id_raw and alias_lookup:
-        attacker_id_str = str(attacker_id_raw)
-        attacker_id = alias_lookup.get(attacker_id_str, attacker_id_str)
-    else:
-        attacker_id = (
-            str(attacker_id_raw)
-            if isinstance(attacker_id_raw, str) and attacker_id_raw
-            else None
-        )
-
-    victim_team = _extract_event_field(item, "victim_team")
-    attacker_team = _extract_event_field(item, "attacker_team")
-    return ParserDemoEvent(
-        timestamp=float(ts),
-        victim_id=victim_id,
-        attacker_id=attacker_id,
-        victim_team=int(victim_team) if isinstance(victim_team, (int, float)) else None,
-        attacker_team=(
-            int(attacker_team) if isinstance(attacker_team, (int, float)) else None
-        ),
-        frame_index=_parse_frame_index(item),
-        source=str(_extract_event_field(item, "source") or "parser"),
-    )
-
-
-def _convert_component_event(
-    item: Any, alias_lookup: dict[str, str] | None = None
-) -> ParserComponentEvent | None:
-    ts = _extract_event_field(item, "timestamp")
-    kind = _extract_event_field(item, "kind")
-    component = _extract_event_field(item, "component")
-    if ts is None or kind is None or component is None:
-        return None
-
-    raw_player_id = _extract_event_field(item, "player_id")
-    player_id = None
-    if raw_player_id is not None:
-        raw_player_id_str = str(raw_player_id)
-        player_id = (
-            alias_lookup.get(raw_player_id_str, raw_player_id_str)
-            if alias_lookup
-            else raw_player_id_str
-        )
-
-    vector_raw = _extract_event_field(item, "vector")
-    team = _extract_event_field(item, "team")
-    actor_id = _extract_event_field(item, "actor_id")
-    raw_value = _extract_event_field(item, "raw_value")
-    active = _extract_event_field(item, "active")
-    return ParserComponentEvent(
-        timestamp=float(ts),
-        kind=str(kind),
-        component=str(component),
-        player_id=player_id,
-        team=int(team) if isinstance(team, (int, float)) else None,
-        actor_id=int(actor_id) if isinstance(actor_id, (int, float)) else None,
-        frame_index=_parse_frame_index(item),
-        vector=to_vec3(vector_raw) if vector_raw is not None else None,
-        raw_value=int(raw_value) if isinstance(raw_value, (int, float)) else None,
-        active=active if isinstance(active, bool) else None,
-        source=str(_extract_event_field(item, "source") or "parser"),
-    )
-
-
-def _convert_stat_event(item: Any) -> ParserStatEvent | None:
-    ts = _extract_event_field(item, "timestamp")
-    object_id = _extract_event_field(item, "object_id")
-    if ts is None or object_id is None:
-        return None
-    object_name = _extract_event_field(item, "object_name")
-    unknown1 = _extract_event_field(item, "unknown1")
-    return ParserStatEvent(
-        timestamp=float(ts),
-        object_id=int(object_id),
-        object_name=str(object_name) if object_name is not None else None,
-        unknown1=unknown1 if isinstance(unknown1, bool) else None,
-        frame_index=_parse_frame_index(item),
-        source=str(_extract_event_field(item, "source") or "parser"),
-    )
-
-
-def _convert_tickmark_event(item: Any) -> ParserTickmarkEvent | None:
-    ts = _extract_event_field(item, "timestamp")
-    kind = _extract_event_field(item, "kind")
-    if ts is None or kind is None:
-        return None
-    payload = _extract_event_field(item, "payload")
-    return ParserTickmarkEvent(
-        timestamp=float(ts),
-        kind=str(kind),
-        frame_index=_parse_frame_index(item),
-        payload=payload if isinstance(payload, dict) else None,
-        source=str(_extract_event_field(item, "source") or "parser"),
-    )
-
-
-def _convert_kickoff_marker(item: Any) -> ParserKickoffMarker | None:
-    ts = _extract_event_field(item, "timestamp")
-    phase = _extract_event_field(item, "phase")
-    if ts is None or phase is None:
-        return None
-    return ParserKickoffMarker(
-        timestamp=float(ts),
-        phase=str(phase),
-        frame_index=_parse_frame_index(item),
-        source=str(_extract_event_field(item, "source") or "parser"),
-    )
-
-
-def _parse_events(
-    frame_data: Any,
-    key: str,
-    converter: Any,
-    alias_lookup: dict[str, str] | None = None,
-) -> list:
-    """Extract and convert a list of parser events from frame data."""
-    result = []
-    for item in _extract_raw_event_list(frame_data, key):
-        try:
-            if alias_lookup is not None:
-                event = converter(item, alias_lookup)
-            else:
-                event = converter(item)
-            if event is not None:
-                result.append(event)
-        except TypeError, ValueError:
-            continue
-    return result
-
-
-def _shift_event_timestamps(events: list, start_time: float) -> list:
-    """Shift timestamps in parser events to be relative to start_time."""
-    shifted = []
-    for event in events:
-        event_time = getattr(event, "timestamp", None)
-        if event_time is None:
-            continue
-        try:
-            new_time = float(event_time) - start_time
-        except TypeError, ValueError:
-            continue
-        if abs(new_time) < 1e-6:
-            new_time = 0.0
-        shifted.append(replace(event, timestamp=new_time))
-    return shifted
-
-
-def _apply_component_state_flags(player_frame: PlayerFrame, source: Any) -> PlayerFrame:
-    """Copy optional authoritative component flags when PlayerFrame supports them."""
-    dataclass_fields = getattr(player_frame, "__dataclass_fields__", {})
-    updates: dict[str, bool | None] = {}
-
-    for field_name in ("is_jumping", "is_dodging", "is_double_jumping"):
-        present, value = _extract_optional_bool_flag(source, field_name)
-        if present and field_name in dataclass_fields:
-            updates[field_name] = value
-
-    if not updates:
-        return player_frame
-
-    return replace(player_frame, **updates)
-
-
-def normalize_players(
-    header: Header | None, frames: list[Any]
-) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    """Create unified player identity mapping across header and frame data."""
-
-    if header is None or not getattr(header, "players", None):
-        return {}, {}
-
     identities = build_player_identities(header.players)
-    alias_lookup = build_alias_lookup(identities)
+    ids = build_alias_lookup(identities)
+    # The header's orange stands. Otherwise each frame says, and someone the
+    # header misses takes orange from the first frame they're in
+    orange = {i.canonical_id: i.team == "ORANGE" for i in identities}
+    ordered = sorted(raw_frames, key=lambda raw: float(raw["timestamp"]))
+    start = float(ordered[0]["timestamp"])
 
-    players_index: dict[str, dict[str, Any]] = {}
-    for identity in identities:
-        team_index = (
-            0 if identity.team == "BLUE" else 1 if identity.team == "ORANGE" else 0
-        )
-        players_index[identity.canonical_id] = {
-            "name": identity.display_name,
-            "team_index": team_index,
-            "team_name": identity.team,
-            "platform_ids": identity.platform_ids,
-            "header_index": identity.header_index,
-            "aliases": identity.aliases,
-            "slug": identity.slug,
-        }
+    def player(raw_id: Any) -> str | None:
+        return ids.get(raw_id, raw_id) if raw_id else None
 
-    if frames:
-        header_ids = [identity.canonical_id for identity in identities]
-        sampled_ids: list[str] = []
-        for frame in frames[:10]:
-            try:
-                players = []
-                if hasattr(frame, "players"):
-                    players = frame.players  # type: ignore[assignment]
-                elif isinstance(frame, dict):
-                    players = frame.get("players", [])
-                for player in players:
-                    raw_id = None
-                    if hasattr(player, "player_id"):
-                        raw_id = player.player_id
-                    elif isinstance(player, dict):
-                        raw_id = player.get("player_id")
-                    if raw_id is None:
-                        continue
-                    raw_id_str = str(raw_id)
-                    if raw_id_str and raw_id_str not in sampled_ids:
-                        sampled_ids.append(raw_id_str)
-            except AttributeError, TypeError:
-                continue
-
-        for idx, raw_id in enumerate(sampled_ids):
-            if raw_id in alias_lookup or PARSER_PLAYER_ID.fullmatch(raw_id):
-                continue
-            if idx < len(header_ids):
-                alias_lookup[raw_id] = header_ids[idx]
-
-    return players_index, alias_lookup
+    return [_frame(raw, start, player, orange) for raw in ordered]
 
 
-def build_timeline(header: Header, frames: list[Any]) -> list[Frame]:
-    """Build normalized timeline from header and network frame data.
+def _since(timestamp: Any, start: float) -> float:
+    shifted = float(timestamp) - start
+    return 0.0 if abs(shifted) < 1e-6 else shifted
 
-    Args:
-        header: Parsed header information
-        frames: Network frame data (may be empty for header-only)
 
-    Returns:
-        List of normalized Frame objects
-    """
-    if not frames:
-        # Header-only mode - create minimal timeline
-        return [
-            Frame(
-                timestamp=0.0,
-                ball=BallFrame(
-                    position=Vec3(0.0, 0.0, 93.15),  # Ball spawn height
-                    velocity=Vec3(0.0, 0.0, 0.0),
-                    angular_velocity=Vec3(0.0, 0.0, 0.0),
-                ),
-                players=[],
-                boost_pad_events=[],
-                component_events=[],
-                parser_touch_events=[],
-                parser_demo_events=[],
-                parser_stat_events=[],
-                parser_tickmarks=[],
-                parser_kickoff_markers=[],
-                parser_first_touch_events=[],
-            )
-        ]
+def _vec(raw: Raw) -> Vec3:
+    return Vec3(float(raw["x"]), float(raw["y"]), float(raw["z"]))
 
-    players_index, alias_lookup = normalize_players(header, frames)
 
-    player_prev_position: dict[str, Vec3] = {}
-    player_prev_timestamp: dict[str, float] = {}
-
-    normalized_frames = []
-
-    for frame_data in frames:
-        try:
-            timestamp = 0.0
-            if hasattr(frame_data, "timestamp"):
-                timestamp = float(frame_data.timestamp)
-            elif hasattr(frame_data, "time"):
-                timestamp = float(frame_data.time)
-            elif isinstance(frame_data, dict) and "timestamp" in frame_data:
-                timestamp = float(frame_data["timestamp"])
-            elif isinstance(frame_data, dict) and "time" in frame_data:
-                timestamp = float(frame_data["time"])
-
-            delta = _extract_optional_float(frame_data, "delta")
-
-            ball_pos = Vec3(0.0, 0.0, 93.15)
-            ball_vel = Vec3(0.0, 0.0, 0.0)
-            ball_ang_vel = Vec3(0.0, 0.0, 0.0)
-            ball_sleeping = False
-
-            if hasattr(frame_data, "ball"):
-                ball_pos = to_field_coords(frame_data.ball.position)
-                ball_vel = to_vec3(frame_data.ball.velocity)
-                if hasattr(frame_data.ball, "angular_velocity"):
-                    ball_ang_vel = to_vec3(frame_data.ball.angular_velocity)
-                if hasattr(frame_data.ball, "sleeping"):
-                    ball_sleeping = bool(frame_data.ball.sleeping)
-            elif isinstance(frame_data, dict) and "ball" in frame_data:
-                ball = frame_data["ball"]
-                if isinstance(ball, dict):
-                    ball_pos = to_field_coords(ball.get("position", {}))
-                    ball_vel = to_vec3(ball.get("velocity", {}))
-                    ball_ang_vel = to_vec3(ball.get("angular_velocity", {}))
-                    ball_sleeping = bool(ball.get("sleeping", False))
-
-            ball_frame = BallFrame(
-                position=ball_pos,
-                velocity=ball_vel,
-                angular_velocity=ball_ang_vel,
-                sleeping=ball_sleeping,
-            )
-
-            # Collect latest player state per player_id to avoid duplicates
-            player_frames_map: dict[str, PlayerFrame] = {}
-            players_data = []
-
-            if hasattr(frame_data, "players"):
-                players_data = frame_data.players
-            elif isinstance(frame_data, dict) and "players" in frame_data:
-                players_data = frame_data["players"]
-
-            for player_data in players_data:
-                try:
-                    player_id = "unknown"
-                    if hasattr(player_data, "player_id"):
-                        player_id = str(player_data.player_id)
-                    elif isinstance(player_data, dict) and "player_id" in player_data:
-                        player_id = str(player_data["player_id"])
-
-                    canonical_id = alias_lookup.get(player_id, player_id)
-                    if canonical_id != player_id:
-                        alias_lookup.setdefault(player_id, canonical_id)
-                    if canonical_id not in players_index and player_id in players_index:
-                        canonical_id = player_id
-
-                    team = 0
-                    index_entry = players_index.get(canonical_id)
-                    if index_entry and index_entry.get("team_index") is not None:
-                        team = int(index_entry["team_index"])
-
-                    # If no team from index, try frame data
-                    if team == 0:  # Only override if still default
-                        if (
-                            hasattr(player_data, "team")
-                            and player_data.team is not None
-                        ):
-                            team = int(player_data.team)
-                        elif isinstance(player_data, dict) and "team" in player_data:
-                            team = int(player_data["team"])
-
-                    position = Vec3(0.0, 0.0, 17.0)  # Car height
-                    velocity = Vec3(0.0, 0.0, 0.0)
-                    angular_velocity: Vec3 | None = None
-                    rotation: Rotation | Vec3 = Rotation(0.0, 0.0, 0.0)
-                    boost_amount = 33  # Starting boost
-
-                    if hasattr(player_data, "position"):
-                        position = to_field_coords(player_data.position)
-                    elif isinstance(player_data, dict) and "position" in player_data:
-                        position = to_field_coords(player_data["position"])
-
-                    if hasattr(player_data, "velocity"):
-                        velocity = to_vec3(player_data.velocity)
-                    elif isinstance(player_data, dict) and "velocity" in player_data:
-                        velocity = to_vec3(player_data["velocity"])
-
-                    if hasattr(player_data, "angular_velocity"):
-                        angular_velocity = to_vec3(player_data.angular_velocity)
-                    elif (
-                        isinstance(player_data, dict)
-                        and "angular_velocity" in player_data
-                    ):
-                        angular_velocity = to_vec3(player_data["angular_velocity"])
-
-                    # Extract rotation - handle both new format (pitch/yaw/roll
-                    # + quaternion) and legacy format (x/y/z).
-                    if hasattr(player_data, "rotation"):
-                        rotation = _parse_rotation(player_data.rotation)
-                    elif isinstance(player_data, dict) and "rotation" in player_data:
-                        rotation = _parse_rotation(player_data["rotation"])
-
-                    if hasattr(player_data, "boost_amount"):
-                        boost_amount = max(0, min(100, int(player_data.boost_amount)))
-                    elif isinstance(player_data, dict):
-                        # Accept both 'boost_amount' (Rust shape) and shorter 'boost'
-                        if "boost_amount" in player_data:
-                            boost_amount = max(
-                                0, min(100, int(player_data["boost_amount"]))
-                            )
-                        elif "boost" in player_data:
-                            boost_amount = max(0, min(100, int(player_data["boost"])))
-
-                    raw_supersonic_flag = False
-                    sleeping = False
-                    is_on_ground = True
-                    is_demolished = False
-                    throttle = _extract_optional_float(player_data, "throttle")
-                    steer = _extract_optional_float(player_data, "steer")
-                    throttle_raw = _extract_optional_int(player_data, "throttle_raw")
-                    steer_raw = _extract_optional_int(player_data, "steer_raw")
-                    boost_active_raw = _extract_optional_int(
-                        player_data, "boost_active_raw"
-                    )
-                    boost_amount_raw = _extract_optional_int(
-                        player_data, "boost_amount_raw"
-                    )
-                    boost_grant_count = _extract_optional_int(
-                        player_data, "boost_grant_count"
-                    )
-                    jump_active_raw = _extract_optional_int(
-                        player_data, "jump_active_raw"
-                    )
-                    dodge_active_raw = _extract_optional_int(
-                        player_data, "dodge_active_raw"
-                    )
-                    double_jump_active_raw = _extract_optional_int(
-                        player_data, "double_jump_active_raw"
-                    )
-                    _, handbrake = _extract_optional_bool_flag(player_data, "handbrake")
-                    _, boost_active = _extract_optional_bool_flag(
-                        player_data, "boost_active"
-                    )
-
-                    if hasattr(player_data, "sleeping"):
-                        sleeping = bool(player_data.sleeping)
-                    elif isinstance(player_data, dict) and "sleeping" in player_data:
-                        sleeping = bool(player_data["sleeping"])
-
-                    if hasattr(player_data, "is_supersonic"):
-                        raw_supersonic_flag = bool(player_data.is_supersonic)
-                    elif (
-                        isinstance(player_data, dict) and "is_supersonic" in player_data
-                    ):
-                        raw_supersonic_flag = bool(player_data["is_supersonic"])
-
-                    if hasattr(player_data, "is_on_ground"):
-                        is_on_ground = bool(player_data.is_on_ground)
-                    elif (
-                        isinstance(player_data, dict) and "is_on_ground" in player_data
-                    ):
-                        is_on_ground = bool(player_data["is_on_ground"])
-
-                    if hasattr(player_data, "is_demolished"):
-                        is_demolished = bool(player_data.is_demolished)
-                    elif (
-                        isinstance(player_data, dict) and "is_demolished" in player_data
-                    ):
-                        is_demolished = bool(player_data["is_demolished"])
-
-                    player_frame = PlayerFrame(
-                        player_id=canonical_id,
-                        team=team,
-                        position=position,
-                        velocity=velocity,
-                        rotation=rotation,
-                        boost_amount=boost_amount,
-                        angular_velocity=angular_velocity,
-                        sleeping=sleeping,
-                        throttle=throttle,
-                        steer=steer,
-                        handbrake=handbrake,
-                        throttle_raw=throttle_raw,
-                        steer_raw=steer_raw,
-                        boost_active=boost_active,
-                        boost_active_raw=boost_active_raw,
-                        boost_amount_raw=boost_amount_raw,
-                        boost_grant_count=boost_grant_count,
-                        jump_active_raw=jump_active_raw,
-                        dodge_active_raw=dodge_active_raw,
-                        double_jump_active_raw=double_jump_active_raw,
-                        is_supersonic=raw_supersonic_flag,
-                        is_on_ground=is_on_ground or sleeping,
-                        is_demolished=is_demolished,
-                    )
-                    player_frame = _apply_component_state_flags(
-                        player_frame, player_data
-                    )
-
-                    # Keep the latest state seen in this frame for each unique player ID
-                    player_frames_map[canonical_id] = player_frame
-
-                    if canonical_id not in players_index:
-                        players_index[canonical_id] = {
-                            "name": sanitize_display_name(
-                                getattr(player_data, "name", canonical_id)
-                            ),
-                            "team_index": team,
-                            "team_name": "BLUE" if team == 0 else "ORANGE",
-                            "platform_ids": {},
-                            "header_index": -1,
-                            "aliases": tuple(sorted({canonical_id, player_id})),
-                            "slug": canonical_id,
-                        }
-                    alias_lookup.setdefault(player_id, canonical_id)
-
-                    player_prev_position[canonical_id] = position
-                    player_prev_timestamp[canonical_id] = timestamp
-
-                except ValueError, TypeError, AttributeError:
-                    # Skip malformed player data
-                    continue
-
-            pad_events: list[BoostPadEventFrame] = []
-            raw_pad_events: list[Any] = []
-            if hasattr(frame_data, "boost_pad_events"):
-                candidate = frame_data.boost_pad_events
-                if isinstance(candidate, list):
-                    raw_pad_events = candidate
-                elif isinstance(candidate, tuple):
-                    raw_pad_events = list(candidate)
-                elif candidate is None:
-                    raw_pad_events = []
-            elif isinstance(frame_data, dict) and "boost_pad_events" in frame_data:
-                raw_value = frame_data.get("boost_pad_events", [])
-                if isinstance(raw_value, list):
-                    raw_pad_events = raw_value
-
-            for raw_event in raw_pad_events:
-                if not isinstance(raw_event, dict):
-                    continue
-                pad_id_raw = raw_event.get("pad_id")
-                if pad_id_raw is None:
-                    continue
-                try:
-                    pad_id = int(pad_id_raw)
-                except TypeError, ValueError:
-                    continue
-
-                status = str(raw_event.get("status", "UNKNOWN")).upper()
-                if status not in {"COLLECTED", "RESPAWNED"}:
-                    status = "COLLECTED" if "COLLECT" in status else status
-                is_big = bool(raw_event.get("is_big", False))
-
-                player_id_value = raw_event.get("player_id")
-                player_index_value = raw_event.get("player_index")
-                canonical_player_id: str | None = None
-                if isinstance(player_id_value, str) and player_id_value:
-                    canonical_player_id = alias_lookup.get(
-                        player_id_value, player_id_value
-                    )
-                    alias_lookup.setdefault(player_id_value, canonical_player_id)
-                elif player_index_value is not None:
-                    try:
-                        idx_value = int(player_index_value)
-                    except TypeError, ValueError:
-                        idx_value = None
-                    if idx_value is not None:
-                        candidate = f"player_{idx_value}"
-                        canonical_player_id = alias_lookup.get(candidate, candidate)
-                        alias_lookup.setdefault(candidate, canonical_player_id)
-                player_team_value = raw_event.get("player_team")
-                try:
-                    player_team = (
-                        int(player_team_value)
-                        if player_team_value is not None
-                        else None
-                    )
-                except TypeError, ValueError:
-                    player_team = None
-
-                actor_id_value = raw_event.get("actor_id")
-                try:
-                    actor_id = (
-                        int(actor_id_value) if actor_id_value is not None else None
-                    )
-                except TypeError, ValueError:
-                    actor_id = None
-
-                instigator_value = raw_event.get("instigator_actor_id")
-                try:
-                    instigator_actor_id = (
-                        int(instigator_value) if instigator_value is not None else None
-                    )
-                except TypeError, ValueError:
-                    instigator_actor_id = None
-
-                raw_state_value = raw_event.get("raw_state")
-                try:
-                    raw_state = (
-                        int(raw_state_value) if raw_state_value is not None else None
-                    )
-                except TypeError, ValueError:
-                    raw_state = None
-
-                position_value = raw_event.get("position")
-                position = to_field_coords(position_value) if position_value else None
-
-                event_timestamp = raw_event.get("timestamp")
-                try:
-                    event_time = (
-                        float(event_timestamp) if event_timestamp is not None else None
-                    )
-                except TypeError, ValueError:
-                    event_time = None
-
-                object_name = raw_event.get("object_name")
-                object_name_str = (
-                    str(object_name)
-                    if isinstance(object_name, str) and object_name
-                    else None
-                )
-
-                pad_events.append(
-                    BoostPadEventFrame(
-                        pad_id=pad_id,
-                        status=status,
-                        is_big=is_big,
-                        player_id=canonical_player_id,
-                        player_team=player_team,
-                        player_index=(
-                            int(player_index_value)
-                            if isinstance(player_index_value, (int, float))
-                            else None
-                        ),
-                        actor_id=actor_id,
-                        instigator_actor_id=instigator_actor_id,
-                        raw_state=raw_state,
-                        position=position,
-                        timestamp=event_time,
-                        object_name=object_name_str,
-                    )
-                )
-
-            parser_touch_events = _parse_events(
-                frame_data, "parser_touch_events", _convert_touch_event, alias_lookup
-            )
-            # The parser emits same-frame touches in hash map order, which changes
-            # between parses, and that order decides who touched the ball first
-            parser_touch_events.sort(key=lambda event: event.player_id)
-            parser_demo_events = _parse_events(
-                frame_data, "parser_demo_events", _convert_demo_event, alias_lookup
-            )
-            component_events = _parse_events(
-                frame_data, "component_events", _convert_component_event, alias_lookup
-            )
-            parser_stat_events = _parse_events(
-                frame_data, "parser_stat_events", _convert_stat_event
-            )
-            parser_tickmarks = _parse_events(
-                frame_data, "parser_tickmarks", _convert_tickmark_event
-            )
-            parser_kickoff_markers = _parse_events(
-                frame_data, "parser_kickoff_markers", _convert_kickoff_marker
-            )
-            parser_first_touch_events = _parse_events(
-                frame_data,
-                "parser_first_touch_events",
-                _convert_touch_event,
-                alias_lookup,
-            )
-
-            normalized_frame = Frame(
-                timestamp=timestamp,
-                ball=ball_frame,
-                players=list(player_frames_map.values()),
-                boost_pad_events=pad_events,
-                component_events=component_events,
-                parser_touch_events=parser_touch_events,
-                parser_demo_events=parser_demo_events,
-                parser_stat_events=parser_stat_events,
-                parser_tickmarks=parser_tickmarks,
-                parser_kickoff_markers=parser_kickoff_markers,
-                parser_first_touch_events=parser_first_touch_events,
-                delta=delta,
-            )
-
-            normalized_frames.append(normalized_frame)
-
-        except ValueError, TypeError, AttributeError:
-            # Skip malformed frames
-            continue
-
-    normalized_frames.sort(key=lambda f: f.timestamp)
-
-    # Align timestamps so the first frame is at 0
-    normalized_frames = _align_match_clock(normalized_frames)
-
-    return (
-        normalized_frames
-        if normalized_frames
-        else [
-            Frame(
-                timestamp=0.0,
-                ball=BallFrame(
-                    position=Vec3(0.0, 0.0, 93.15),
-                    velocity=Vec3(0.0, 0.0, 0.0),
-                    angular_velocity=Vec3(0.0, 0.0, 0.0),
-                ),
-                players=[],
-                boost_pad_events=[],
-                component_events=[],
-                parser_touch_events=[],
-                parser_demo_events=[],
-                parser_stat_events=[],
-                parser_tickmarks=[],
-                parser_kickoff_markers=[],
-                parser_first_touch_events=[],
-            )
-        ]
+def _on_field(raw: Raw) -> Vec3:
+    x, y, z = _vec(raw)
+    return Vec3(
+        max(-X_LIMIT, min(X_LIMIT, x)),
+        max(-Y_LIMIT, min(Y_LIMIT, y)),
+        max(Z_RANGE[0], min(Z_RANGE[1], z)),
     )
 
 
-def _align_match_clock(frames: list[Frame]) -> list[Frame]:
-    """Shift frame timestamps so the first frame starts at 0.
+def _rotation(raw: Raw) -> Rotation:
+    quaternion = raw.get("quaternion")
+    return Rotation(
+        pitch=float(raw["pitch"]),
+        yaw=float(raw["yaw"]),
+        roll=float(raw["roll"]),
+        quaternion=(
+            Quaternion(*map(float, (quaternion[k] for k in "xyzw")))
+            if quaternion
+            else None
+        ),
+    )
 
-    Every frame is kept, because the header has no usable end of match. Its
-    `match_length` is NumFrames / RecordFPS, which falls short of the last frame
-    since the recording pauses after each goal and runs below RecordFPS. Goals
-    don't mark the end either: a game can run on long after the last one.
-    """
 
-    if not frames:
-        return frames
+def _car(raw: Raw, player: Callable, orange: dict[str, bool]) -> PlayerFrame:
+    player_id = player(raw["player_id"])
+    team = int(raw["team"])
+    return PlayerFrame(
+        player_id=player_id,
+        team=1 if orange.setdefault(player_id, team == 1) else team,
+        position=_on_field(raw["position"]),
+        velocity=_vec(raw["velocity"]),
+        rotation=_rotation(raw["rotation"]),
+        boost_amount=max(0, min(100, int(raw["boost_amount"]))),
+        angular_velocity=_vec(raw["angular_velocity"]),
+        is_demolished=bool(raw.get("is_demolished", False)),
+    )
 
-    start_time = frames[0].timestamp
 
-    adjusted: list[Frame] = []
-    for frame in frames:
-        t = frame.timestamp
-        if t < start_time - 1e-3:
-            continue
-        shifted = t - start_time
-        if abs(shifted) < 1e-6:
-            shifted = 0.0
-        normalized_events: list[BoostPadEventFrame] = []
-        for event in getattr(frame, "boost_pad_events", []) or []:
-            event_time = getattr(event, "timestamp", None)
-            new_time: float | None
-            if event_time is None:
-                new_time = None
-            else:
-                try:
-                    new_time = float(event_time) - start_time
-                except TypeError, ValueError:
-                    new_time = None
-            if new_time is not None and abs(new_time) < 1e-6:
-                new_time = 0.0
-            normalized_events.append(replace(event, timestamp=new_time))
+def _touch(event: Raw, start: float, player: Callable) -> ParserTouchEvent:
+    return ParserTouchEvent(
+        timestamp=_since(event["timestamp"], start),
+        player_id=player(event["player_id"]),
+        team=int(event["team"]),
+    )
 
-        adjusted.append(
-            replace(
-                frame,
-                timestamp=shifted,
-                boost_pad_events=normalized_events,
-                component_events=_shift_event_timestamps(
-                    frame.component_events, start_time
-                ),
-                parser_touch_events=_shift_event_timestamps(
-                    frame.parser_touch_events, start_time
-                ),
-                parser_demo_events=_shift_event_timestamps(
-                    frame.parser_demo_events, start_time
-                ),
-                parser_stat_events=_shift_event_timestamps(
-                    frame.parser_stat_events, start_time
-                ),
-                parser_tickmarks=_shift_event_timestamps(
-                    frame.parser_tickmarks, start_time
-                ),
-                parser_kickoff_markers=_shift_event_timestamps(
-                    frame.parser_kickoff_markers, start_time
-                ),
-                parser_first_touch_events=_shift_event_timestamps(
-                    frame.parser_first_touch_events, start_time
-                ),
+
+def _pad_event(event: Raw, start: float, player: Callable) -> BoostPadEventFrame:
+    raw_id = event.get("player_id")
+    if not raw_id and event.get("player_index") is not None:
+        raw_id = f"player_{int(event['player_index'])}"
+    timestamp = event.get("timestamp")
+    return BoostPadEventFrame(
+        pad_id=int(event["pad_id"]),
+        status=str(event["status"]).upper(),
+        is_big=bool(event["is_big"]),
+        player_id=player(raw_id),
+        player_team=event.get("player_team"),
+        timestamp=None if timestamp is None else _since(timestamp, start),
+    )
+
+
+def _frame(raw: Raw, start: float, player: Callable, orange: dict[str, bool]) -> Frame:
+    cars: dict[str, PlayerFrame] = {}
+    for raw_car in raw["players"]:
+        car = _car(raw_car, player, orange)
+        cars[car.player_id] = car  # A car listed twice keeps its last state
+    ball = raw["ball"]
+    return Frame(
+        timestamp=_since(raw["timestamp"], start),
+        ball=BallFrame(
+            position=_on_field(ball["position"]),
+            velocity=_vec(ball["velocity"]),
+            angular_velocity=_vec(ball["angular_velocity"]),
+        ),
+        players=list(cars.values()),
+        boost_pad_events=[
+            _pad_event(event, start, player) for event in raw["boost_pad_events"]
+        ],
+        component_events=[
+            ParserComponentEvent(
+                timestamp=_since(event["timestamp"], start),
+                kind=event["kind"],
+                component=event["component"],
+                player_id=player(event.get("player_id")),
+                vector=_vec(event["vector"]) if event.get("vector") else None,
             )
-        )
-
-    if not adjusted:
-        adjusted.append(replace(frames[0], timestamp=0.0))
-
-    return adjusted
+            for event in raw["component_events"]
+        ],
+        # The parser lists one frame's touches in hash map order, which changes
+        # between parses and would change who touched first
+        parser_touch_events=sorted(
+            (_touch(event, start, player) for event in raw["parser_touch_events"]),
+            key=lambda event: event.player_id,
+        ),
+        parser_first_touch_events=[
+            _touch(event, start, player) for event in raw["parser_first_touch_events"]
+        ],
+        parser_demo_events=[
+            ParserDemoEvent(
+                timestamp=_since(event["timestamp"], start),
+                victim_id=player(event["victim_id"]),
+                attacker_id=player(event.get("attacker_id")),
+            )
+            for event in raw["parser_demo_events"]
+        ],
+    )

@@ -1,921 +1,210 @@
-"""Tests for the normalization layer."""
+"""Tests for turning the parser's frames into Frames."""
 
-from dataclasses import dataclass
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock
+from __future__ import annotations
 
 import pytest
 
-from rlcoach.field_constants import BACK_WALL_Y, CEILING_Z, SIDE_WALL_X, Vec3
-from rlcoach.normalize import (
-    build_timeline,
-    measure_frame_rate,
-    normalize_players,
-    to_field_coords,
-    to_vec3,
+from rlcoach.field_constants import Vec3
+from rlcoach.normalize import X_LIMIT, Y_LIMIT, Z_RANGE, build_timeline
+from rlcoach.parser.types import Header, PlayerInfo, Quaternion
+
+HEADER = Header(
+    players=[
+        PlayerInfo(name="Me", platform_id="Epic|me", team=0),
+        PlayerInfo(name="Them", platform_id="Steam|1", team=1),
+    ]
 )
-from rlcoach.parser import RustAdapter
-from rlcoach.parser.types import GoalHeader, Header, PlayerInfo
-
-PARITY_REPLAY_PATH = Path(__file__).resolve().parents[1] / "Replay_files/0925.replay"
+ME, THEM = "epic:me", "steam:1"
 
 
-def _make_frame(ts: float):
-    ball = Mock()
-    ball.position = Mock(x=0, y=0, z=93.15)
-    ball.velocity = Mock(x=0, y=0, z=0)
-    ball.angular_velocity = Mock(x=0, y=0, z=0)
-    frame = Mock()
-    frame.timestamp = ts
-    frame.ball = ball
-    frame.players = []
+def _xyz(x=0.0, y=0.0, z=0.0):
+    return {"x": x, "y": y, "z": z}
+
+
+def _car(player_id="player_0", team=0, **fields):
+    return {
+        "player_id": player_id,
+        "team": team,
+        "position": _xyz(z=17.0),
+        "velocity": _xyz(),
+        "angular_velocity": _xyz(),
+        "rotation": {
+            "pitch": 0.0,
+            "yaw": 0.0,
+            "roll": 0.0,
+            "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+        },
+        "boost_amount": 33,
+        **fields,
+    }
+
+
+def _frame(t, cars=(), ball=None, **events):
+    return {
+        "timestamp": t,
+        "ball": ball
+        or {
+            "position": _xyz(z=93.15),
+            "velocity": _xyz(),
+            "angular_velocity": _xyz(),
+        },
+        "players": list(cars),
+        "boost_pad_events": [],
+        "component_events": [],
+        "parser_touch_events": [],
+        "parser_first_touch_events": [],
+        "parser_demo_events": [],
+        **events,
+    }
+
+
+def _one(*cars, header=HEADER, **events):
+    [frame] = build_timeline(header, [_frame(5.0, cars, **events)])
     return frame
 
 
-class TestFrameRateMeasurement:
-    """Test frame rate calculation from timestamps."""
-
-    def test_empty_frames_returns_default(self):
-        """Empty frame list returns default 30 FPS."""
-        assert measure_frame_rate([]) == 30.0
-
-    def test_single_frame_returns_default(self):
-        """Single frame returns default 30 FPS."""
-        frame = Mock()
-        frame.timestamp = 1.0
-        assert measure_frame_rate([frame]) == 30.0
-
-    def test_consistent_30fps(self):
-        """Consistent 30 FPS timestamps."""
-        frames = []
-        for i in range(10):
-            frame = Mock()
-            frame.timestamp = i / 30.0  # 30 FPS
-            frames.append(frame)
-
-        fps = measure_frame_rate(frames)
-        assert 29.5 <= fps <= 30.5  # Allow small tolerance
-
-    def test_consistent_60fps(self):
-        """Consistent 60 FPS timestamps."""
-        frames = []
-        for i in range(10):
-            frame = Mock()
-            frame.timestamp = i / 60.0  # 60 FPS
-            frames.append(frame)
-
-        fps = measure_frame_rate(frames)
-        assert 59.0 <= fps <= 61.0
-
-    def test_variable_sampling_uses_median(self):
-        """Variable frame timing uses median delta."""
-        frames = [
-            Mock(timestamp=0.0),
-            Mock(timestamp=1 / 30),  # Normal frame
-            Mock(timestamp=2 / 30),  # Normal frame
-            Mock(timestamp=5 / 30),  # Dropped frames (large gap)
-            Mock(timestamp=6 / 30),  # Back to normal
-            Mock(timestamp=7 / 30),  # Normal frame
-        ]
-
-        fps = measure_frame_rate(frames)
-        assert 29.0 <= fps <= 31.0  # Should use median ~30 FPS
-
-    def test_dict_format_timestamps(self):
-        """Handle dict format with timestamp key."""
-        frames = [
-            {"timestamp": 0.0},
-            {"timestamp": 1 / 30},
-            {"timestamp": 2 / 30},
-        ]
-
-        fps = measure_frame_rate(frames)
-        assert 29.0 <= fps <= 31.0
-
-    def test_time_key_format(self):
-        """Handle frames with 'time' key instead of 'timestamp'."""
-        frames = [
-            Mock(time=0.0),
-            Mock(time=1 / 30),
-            Mock(time=2 / 30),
-        ]
-
-        fps = measure_frame_rate(frames)
-        assert 29.0 <= fps <= 31.0
-
-    def test_fps_clamping(self):
-        """FPS is clamped to reasonable range."""
-        # Test very low FPS
-        frames = [Mock(timestamp=0.0), Mock(timestamp=10.0)]
-        fps = measure_frame_rate(frames)
-        assert fps >= 1.0
-
-        # Test very high FPS
-        frames = [Mock(timestamp=0.0), Mock(timestamp=0.001)]
-        fps = measure_frame_rate(frames)
-        assert fps <= 240.0
-
-
-class TestCoordinateTransformation:
-    """Test coordinate system transformation."""
-
-    def test_vec3_passthrough(self):
-        """Vec3 objects passed through unchanged."""
-        vec = Vec3(100.0, 200.0, 300.0)
-        result = to_field_coords(vec)
-        assert result == vec
-
-    def test_object_with_xyz_attrs(self):
-        """Objects with x,y,z attributes."""
-        obj = Mock(x=100.0, y=200.0, z=300.0)
-        result = to_field_coords(obj)
-        assert result == Vec3(100.0, 200.0, 300.0)
-
-    def test_tuple_list_conversion(self):
-        """Tuples and lists converted to Vec3."""
-        assert to_field_coords((100, 200, 300)) == Vec3(100.0, 200.0, 300.0)
-        assert to_field_coords([100, 200, 300]) == Vec3(100.0, 200.0, 300.0)
-
-    def test_dict_conversion(self):
-        """Dict format converted to Vec3."""
-        coord_dict = {"x": 100, "y": 200, "z": 300}
-        result = to_field_coords(coord_dict)
-        assert result == Vec3(100.0, 200.0, 300.0)
-
-    def test_missing_dict_keys_default_zero(self):
-        """Missing dict keys default to 0."""
-        coord_dict = {"x": 100}  # Missing y, z
-        result = to_field_coords(coord_dict)
-        assert result == Vec3(100.0, 0.0, 0.0)
-
-    def test_field_boundary_clamping(self):
-        """Coordinates clamped to field boundaries with tolerance."""
-        # Test X boundary
-        over_x = to_field_coords((10000, 0, 0))
-        assert over_x.x <= SIDE_WALL_X * 1.1
-
-        under_x = to_field_coords((-10000, 0, 0))
-        assert under_x.x >= -SIDE_WALL_X * 1.1
-
-        # Test Y boundary
-        over_y = to_field_coords((0, 10000, 0))
-        assert over_y.y <= BACK_WALL_Y * 1.1
-
-        # Test Z boundary
-        over_z = to_field_coords((0, 0, 10000))
-        assert over_z.z <= CEILING_Z * 2.0
-
-        under_z = to_field_coords((0, 0, -1000))
-        assert under_z.z >= -100.0
-
-    def test_invalid_input_returns_origin(self):
-        """Invalid input returns origin."""
-        assert to_field_coords("invalid") == Vec3(0.0, 0.0, 0.0)
-        assert to_field_coords(None) == Vec3(0.0, 0.0, 0.0)
-        assert to_field_coords(123) == Vec3(0.0, 0.0, 0.0)
-
-    def test_non_numeric_values_return_origin(self):
-        """Non-numeric coordinate values return origin."""
-        bad_dict = {"x": "not_a_number", "y": 200, "z": 300}
-        result = to_field_coords(bad_dict)
-        assert result == Vec3(0.0, 0.0, 0.0)
-
-    def test_to_vec3_does_not_clamp_velocity_components(self):
-        """Velocity/angular vectors may exceed field bounds and remain meaningful."""
-        assert to_vec3({"x": 6000, "y": -7000, "z": -2000}) == Vec3(
-            6000.0, -7000.0, -2000.0
-        )
-
-
-class TestPlayerNormalization:
-    """Test player identity mapping."""
-
-    def test_header_only_players(self):
-        """Player mapping from header only."""
-        header = Header(
-            players=[
-                PlayerInfo(
-                    name="Player1", platform_ids={"steam": "123"}, team=0, score=100
-                ),
-                PlayerInfo(
-                    name="Player2", platform_ids={"epic": "456"}, team=1, score=200
-                ),
-            ]
-        )
-
-        players_index, aliases = normalize_players(header, [])
-
-        assert "steam:123" in players_index
-        assert players_index["steam:123"]["name"] == "Player1"
-        assert players_index["steam:123"]["team_index"] == 0
-        assert aliases["player_0"] == "steam:123"
-
-        assert "epic:456" in players_index
-        assert players_index["epic:456"]["name"] == "Player2"
-        assert players_index["epic:456"]["team_index"] == 1
-        assert aliases["player_1"] == "epic:456"
-
-    def test_players_without_platform_id(self):
-        """Players without platform_id get slug-based IDs."""
-        header = Header(
-            players=[
-                PlayerInfo(name="Player One", team=0),
-                PlayerInfo(name="Player Two", team=1),
-            ]
-        )
-
-        players_index, aliases = normalize_players(header, [])
-
-        assert "slug:player-one" in players_index
-        assert players_index["slug:player-one"]["name"] == "Player One"
-        assert aliases["player_0"] == "slug:player-one"
-
-        assert "slug:player-two" in players_index
-        assert players_index["slug:player-two"]["name"] == "Player Two"
-        assert aliases["player_1"] == "slug:player-two"
-
-    def test_empty_header_players(self):
-        """Empty player list handled gracefully."""
-        header = Header(players=[])
-        result = normalize_players(header, [])
-        assert result == ({}, {})
-
-    def test_frame_player_augmentation(self):
-        """Frame data augments header information."""
-        header = Header(
-            players=[
-                PlayerInfo(name="Player1", team=0),
-                PlayerInfo(name="Player2", team=1),
-            ]
-        )
-
-        # Mock frame with different player IDs
-        frame = Mock()
-        frame.players = [
-            Mock(player_id="frame_player_0"),
-            Mock(player_id="frame_player_1"),
-        ]
-
-        players_index, aliases = normalize_players(header, [frame])
-
-        # Should map frame IDs back to canonical header IDs
-        assert "slug:player1" in players_index
-        assert aliases["frame_player_0"] == "slug:player1"
-        assert aliases["player_0"] == "slug:player1"
-
-        assert "slug:player2" in players_index
-        assert aliases["frame_player_1"] == "slug:player2"
-        assert aliases["player_1"] == "slug:player2"
-
-    def test_parser_id_past_header_is_not_matched_by_position(self):
-        """A player who left has a parser id past the header rows, and stays apart."""
-        header = Header(
-            players=[
-                PlayerInfo(name="Stayed1", team=0),
-                PlayerInfo(name="Stayed2", team=1),
-            ]
-        )
-
-        # The leaver's car is sampled second, where position would say Stayed2.
-        frame = Mock()
-        frame.players = [Mock(player_id="player_0"), Mock(player_id="player_2")]
-
-        _, aliases = normalize_players(header, [frame])
-
-        assert aliases["player_0"] == "slug:stayed1"
-        assert "player_2" not in aliases
-
-
-class TestTimelineBuilding:
-    """Test normalized timeline construction."""
-
-    def test_header_only_timeline(self):
-        """Header-only creates minimal timeline."""
-        header = Header(
-            team_size=2,
-            match_length=300.0,
-            players=[
-                PlayerInfo(name="Player1", team=0),
-                PlayerInfo(name="Player2", team=1),
-            ],
-        )
-
-        timeline = build_timeline(header, [])
-
-        assert len(timeline) == 1
-        frame = timeline[0]
-        assert frame.timestamp == 0.0
-        assert frame.ball.position.z == 93.15  # Ball spawn height
-        assert len(frame.players) == 0  # No frame data
-
-    def test_single_frame_timeline(self):
-        """Single frame creates valid timeline."""
-        header = Header(players=[PlayerInfo(name="Player1", team=0)])
-
-        # Mock frame data
-        frame_data = Mock()
-        frame_data.timestamp = 1.5
-        frame_data.ball = Mock()
-        frame_data.ball.position = Mock(x=100, y=200, z=300)
-        frame_data.ball.velocity = Mock(x=10, y=20, z=30)
-        frame_data.ball.angular_velocity = Mock(x=1, y=2, z=3)
-        frame_data.players = []
-
-        timeline = build_timeline(header, [frame_data])
-
-        assert len(timeline) == 1
-        frame = timeline[0]
-        assert frame.timestamp == 0.0
-        assert frame.ball.position == Vec3(100.0, 200.0, 300.0)
-        assert frame.ball.velocity == Vec3(10.0, 20.0, 30.0)
-
-    def test_velocity_and_angular_velocity_are_not_position_clamped(self):
-        """Mechanics depend on raw velocity magnitudes and negative z velocity."""
-        raw = [
-            {
-                "timestamp": 0.0,
-                "delta": 0.033333335,
-                "ball": {
-                    "position": {"x": 0, "y": 0, "z": 93.15},
-                    "velocity": {"x": 6000, "y": -7000, "z": -2000},
-                    "angular_velocity": {"x": 10_000, "y": -10_000, "z": -500},
-                    "sleeping": True,
-                },
-                "players": [
-                    {
-                        "player_id": "player_0",
-                        "team": 0,
-                        "position": {"x": 0, "y": 0, "z": 17},
-                        "velocity": {"x": -6000, "y": 7000, "z": -1500},
-                        "angular_velocity": {"x": 1.0, "y": 2.0, "z": 3.0},
-                        "rotation": {"pitch": 0, "yaw": 0, "roll": 0},
-                        "boost_amount": 33,
-                        "sleeping": True,
-                        "is_on_ground": False,
-                        "throttle": 0.5,
-                        "steer": -0.25,
-                        "handbrake": True,
-                        "throttle_raw": 192,
-                        "steer_raw": 96,
-                        "boost_active": True,
-                        "boost_active_raw": 3,
-                        "boost_amount_raw": 200,
-                        "boost_grant_count": 4,
-                        "jump_active_raw": 1,
-                        "dodge_active_raw": 2,
-                        "double_jump_active_raw": 0,
-                    }
-                ],
-                "component_events": [
-                    {
-                        "timestamp": 0.0,
-                        "kind": "dodge_torque",
-                        "component": "dodge",
-                        "player_id": "player_0",
-                        "team": 0,
-                        "actor_id": 7,
-                        "vector": {"x": 1, "y": 2, "z": 3},
-                    }
-                ],
-                "parser_stat_events": [
-                    {
-                        "timestamp": 0.0,
-                        "object_id": 12,
-                        "object_name": "StatEvents.Events.Save",
-                        "unknown1": True,
-                    }
-                ],
-            }
-        ]
-
-        frame = build_timeline(Header(players=[]), raw)[0]
-
-        assert frame.delta == 0.033333335
-        assert frame.ball.velocity == Vec3(6000.0, -7000.0, -2000.0)
-        assert frame.ball.angular_velocity == Vec3(10_000.0, -10_000.0, -500.0)
-        assert frame.ball.sleeping is True
-        assert frame.players[0].velocity == Vec3(-6000.0, 7000.0, -1500.0)
-        assert frame.players[0].angular_velocity == Vec3(1.0, 2.0, 3.0)
-        assert frame.players[0].sleeping is True
-        assert frame.players[0].is_on_ground is True
-        assert frame.players[0].throttle == 0.5
-        assert frame.players[0].steer == -0.25
-        assert frame.players[0].handbrake is True
-        assert frame.players[0].throttle_raw == 192
-        assert frame.players[0].steer_raw == 96
-        assert frame.players[0].boost_active is True
-        assert frame.players[0].boost_active_raw == 3
-        assert frame.players[0].boost_amount_raw == 200
-        assert frame.players[0].boost_grant_count == 4
-        assert frame.players[0].jump_active_raw == 1
-        assert frame.players[0].dodge_active_raw == 2
-        assert frame.players[0].double_jump_active_raw == 0
-        assert frame.component_events[0].player_id == "player_0"
-        assert frame.component_events[0].vector == Vec3(1.0, 2.0, 3.0)
-        assert frame.parser_stat_events[0].object_name == "StatEvents.Events.Save"
-
-    def test_multiple_frames_sorted_by_timestamp(self):
-        """Multiple frames sorted chronologically."""
-        header = Header()
-
-        frame1 = Mock(timestamp=2.0, ball=Mock(), players=[])
-        frame1.ball.position = Mock(x=0, y=0, z=93.15)
-        frame1.ball.velocity = Mock(x=0, y=0, z=0)
-        frame1.ball.angular_velocity = Mock(x=0, y=0, z=0)
-
-        frame2 = Mock(timestamp=1.0, ball=Mock(), players=[])
-        frame2.ball.position = Mock(x=0, y=0, z=93.15)
-        frame2.ball.velocity = Mock(x=0, y=0, z=0)
-        frame2.ball.angular_velocity = Mock(x=0, y=0, z=0)
-
-        timeline = build_timeline(header, [frame1, frame2])
-
-        assert len(timeline) == 2
-        assert timeline[0].timestamp == 0.0  # Earlier frame becomes t=0
-        assert timeline[1].timestamp == 1.0
-
-    def test_player_frame_extraction(self):
-        """Player data extracted correctly from frames."""
-        header = Header(
-            players=[
-                PlayerInfo(name="TestPlayer", platform_ids={"steam": "123"}, team=0)
-            ]
-        )
-
-        # Mock frame with player data
-        frame_data = Mock()
-        frame_data.timestamp = 1.0
-        frame_data.ball = Mock()
-        frame_data.ball.position = Mock(x=0, y=0, z=93.15)
-        frame_data.ball.velocity = Mock(x=0, y=0, z=0)
-        frame_data.ball.angular_velocity = Mock(x=0, y=0, z=0)
-
-        player_data = Mock()
-        player_data.player_id = "steam:123"
-        player_data.team = 0
-        player_data.position = Mock(x=1000, y=2000, z=17)
-        player_data.velocity = Mock(x=500, y=0, z=0)
-        player_data.rotation = Mock(x=0, y=1.57, z=0)
-        player_data.boost_amount = 75
-        player_data.is_supersonic = True
-        player_data.is_on_ground = True
-        player_data.is_demolished = False
-
-        frame_data.players = [player_data]
-
-        timeline = build_timeline(header, [frame_data])
-
-        assert len(timeline) == 1
-        frame = timeline[0]
-        assert len(frame.players) == 1
-
-        player_frame = frame.players[0]
-        assert player_frame.player_id == "steam:123"
-        assert player_frame.team == 0
-        assert player_frame.position == Vec3(1000.0, 2000.0, 17.0)
-        assert player_frame.velocity == Vec3(500.0, 0.0, 0.0)
-        assert player_frame.boost_amount == 75
-        assert player_frame.is_supersonic is True
-
-    def test_supersonic_flag_is_not_derived_from_velocity(self):
-        """Normalize preserves parser flags; movement analysis owns speed thresholds."""
-        header = Header(
-            players=[
-                PlayerInfo(name="TestPlayer", platform_ids={"steam": "123"}, team=0)
-            ]
-        )
-        frame_data = {
-            "timestamp": 1.0,
-            "ball": {
-                "position": {"x": 0, "y": 0, "z": 93.15},
-                "velocity": {"x": 0, "y": 0, "z": 0},
-                "angular_velocity": {"x": 0, "y": 0, "z": 0},
-            },
-            "players": [
-                {
-                    "player_id": "steam:123",
-                    "team": 0,
-                    "position": {"x": 0, "y": 0, "z": 17},
-                    "velocity": {"x": 2500, "y": 0, "z": 0},
-                    "rotation": {"x": 0, "y": 0, "z": 0},
-                    "boost_amount": 75,
-                    "is_supersonic": False,
-                    "is_on_ground": True,
-                    "is_demolished": False,
-                }
-            ],
-        }
-
-        timeline = build_timeline(header, [frame_data])
-
-        assert timeline[0].players[0].is_supersonic is False
-
-    def test_normalize_preserves_component_state_flags_when_supported(
-        self, monkeypatch
-    ):
-        """Optional authoritative component flags are passed through unchanged."""
-        import rlcoach.normalize as normalize_module
-
-        @dataclass(frozen=True)
-        class PlayerFrameWithFlags:
-            player_id: str
-            team: int
-            position: Vec3
-            velocity: Vec3
-            rotation: object
-            boost_amount: int
-            angular_velocity: Vec3 | None = None
-            sleeping: bool = False
-            throttle: float | None = None
-            steer: float | None = None
-            handbrake: bool | None = None
-            throttle_raw: int | None = None
-            steer_raw: int | None = None
-            boost_active: bool | None = None
-            boost_active_raw: int | None = None
-            boost_amount_raw: int | None = None
-            boost_grant_count: int | None = None
-            jump_active_raw: int | None = None
-            dodge_active_raw: int | None = None
-            double_jump_active_raw: int | None = None
-            is_supersonic: bool = False
-            is_on_ground: bool = True
-            is_demolished: bool = False
-            is_jumping: bool | None = None
-            is_dodging: bool | None = None
-            is_double_jumping: bool | None = None
-
-        monkeypatch.setattr(normalize_module, "PlayerFrame", PlayerFrameWithFlags)
-
-        object_player = SimpleNamespace(
-            player_id="object_player",
-            team=1,
-            position=SimpleNamespace(x=50, y=100, z=17),
-            velocity=SimpleNamespace(x=0, y=10, z=0),
-            rotation={"pitch": 0.0, "yaw": 0.0, "roll": 0.0},
-            boost_amount=44,
-            is_jumping=False,
-            is_dodging=True,
-            is_double_jumping=None,
-        )
-        frame_dict = {
-            "timestamp": 1.5,
-            "ball": {
-                "position": {"x": 0, "y": 0, "z": 93.15},
-                "velocity": {"x": 0, "y": 0, "z": 0},
-                "angular_velocity": {"x": 0, "y": 0, "z": 0},
-            },
-            "players": [
-                {
-                    "player_id": "dict_player",
-                    "team": 0,
-                    "position": {"x": -50, "y": -100, "z": 17},
-                    "velocity": {"x": 0, "y": -10, "z": 0},
-                    "rotation": {"pitch": 0.0, "yaw": 0.0, "roll": 0.0},
-                    "boost_amount": 55,
-                    "is_jumping": True,
-                    "is_dodging": False,
-                    "is_double_jumping": True,
-                },
-                object_player,
-            ],
-        }
-
-        timeline = build_timeline(Header(), [frame_dict])
-        players = {p.player_id: p for p in timeline[0].players}
-
-        assert players["dict_player"].is_jumping is True
-        assert players["dict_player"].is_dodging is False
-        assert players["dict_player"].is_double_jumping is True
-
-        assert players["object_player"].is_jumping is False
-        assert players["object_player"].is_dodging is True
-        assert players["object_player"].is_double_jumping is None
-
-    def test_malformed_frame_skipped(self):
-        """Malformed frames are skipped gracefully."""
-        header = Header()
-
-        # Mix of good and bad frames
-        good_frame = Mock()
-        good_frame.timestamp = 1.0
-        good_frame.ball = Mock(
-            position=Mock(x=0, y=0, z=93.15), velocity=Mock(x=0, y=0, z=0)
-        )
-        good_frame.ball.angular_velocity = Mock(x=0, y=0, z=0)
-        good_frame.players = []
-
-        bad_frame = Mock()
-        bad_frame.timestamp = "not_a_number"  # Invalid timestamp
-
-        timeline = build_timeline(header, [good_frame, bad_frame])
-
-        assert len(timeline) == 1  # Only good frame
-        assert timeline[0].timestamp == 0.0
-
-    def test_frames_past_header_length_are_kept(self):
-        """Header match length does not end the timeline."""
-        header = Header(match_length=1.0)
-        frames = [_make_frame(5.0), _make_frame(5.5), _make_frame(7.0)]
-
-        timeline = build_timeline(header, frames)
-
-        assert [frame.timestamp for frame in timeline] == [0.0, 0.5, 2.0]
-
-    def test_timestamp_gap_does_not_shorten_timeline(self):
-        """A pause after a goal leaves the replay longer than NumFrames / 30."""
-        frames = [_make_frame(i / 30.0) for i in range(300)]
-        frames += [_make_frame(19.0 + i / 30.0) for i in range(300)]
-        header = Header(
-            match_length=len(frames) / 30.0,
-            goals=[GoalHeader(frame=299, player_name="Player", player_team=0)],
-        )
-
-        timeline = build_timeline(header, frames)
-
-        assert len(timeline) == len(frames)
-        assert timeline[-1].timestamp == pytest.approx(19.0 + 299 / 30.0)
-
-    def test_frames_long_after_last_goal_are_kept(self):
-        """A game that ends on time can run on long after its last goal."""
-        frames = [_make_frame(10.0 + i / 30.0) for i in range(600)]
-        header = Header(
-            goals=[GoalHeader(frame=30, player_name="Player", player_team=0)]
-        )
-
-        timeline = build_timeline(header, frames)
-
-        assert len(timeline) == len(frames)
-        assert timeline[-1].timestamp == pytest.approx(599 / 30.0)
-
-    @pytest.mark.skipif(
-        not PARITY_REPLAY_PATH.exists(), reason="replay fixture missing"
+def test_times_count_from_the_first_frame_in_time_order():
+    frames = build_timeline(HEADER, [_frame(12.5, [_car()]), _frame(10.0, [_car()])])
+    assert [f.timestamp for f in frames] == [0.0, 2.5]
+    # A clock a hair off the first frame reads 0
+    frames = build_timeline(HEADER, [_frame(10.0), _frame(10.0000001)])
+    assert [f.timestamp for f in frames] == [0.0, 0.0]
+
+
+def test_cars_take_their_header_players_ids_and_leavers_keep_the_parsers():
+    frame = _one(_car("player_0"), _car("player_1", team=1), _car("player_7"))
+    assert [car.player_id for car in frame.players] == [ME, THEM, "player_7"]
+
+
+def test_a_car_listed_twice_keeps_its_last_state():
+    frame = _one(_car(boost_amount=10), _car("player_1", 1), _car(boost_amount=40))
+    assert [(c.player_id, c.boost_amount) for c in frame.players] == [
+        (ME, 40),
+        (THEM, 33),
+    ]
+
+
+def test_the_headers_orange_stands_and_otherwise_the_frame_says():
+    frames = build_timeline(
+        HEADER,
+        [
+            _frame(0.0, [_car("player_0", 1), _car("player_1", 0)]),
+            _frame(1.0, [_car("player_0", 0), _car("player_1", 0)]),
+        ],
     )
-    def test_real_replay_keeps_every_frame(self):
-        """Regression: 0925 used to stop at 304.88 s, before its 320.11 s goal."""
-        pytest.importorskip("rlreplay_rust")
-        adapter = RustAdapter()
-        header = adapter.parse_header(PARITY_REPLAY_PATH)
-        raw_frames = adapter.parse_network(PARITY_REPLAY_PATH).frames
-
-        timeline = build_timeline(header, raw_frames)
-
-        assert len(timeline) == len(raw_frames)
-        assert timeline[-1].timestamp == pytest.approx(323.09, abs=0.01)
-        last_goal_frame = max(goal.frame for goal in header.goals)
-        assert timeline[last_goal_frame].timestamp == pytest.approx(320.11, abs=0.01)
-
-    def test_dict_format_frames(self):
-        """Dict format frames handled correctly."""
-        header = Header()
-
-        frame_dict = {
-            "timestamp": 1.5,
-            "ball": {
-                "position": {"x": 100, "y": 200, "z": 300},
-                "velocity": {"x": 10, "y": 20, "z": 30},
-                "angular_velocity": {"x": 1, "y": 2, "z": 3},
-            },
-            "players": [],
-        }
-
-        timeline = build_timeline(header, [frame_dict])
-
-        assert len(timeline) == 1
-        frame = timeline[0]
-        assert frame.timestamp == 0.0
-        assert frame.ball.position == Vec3(100.0, 200.0, 300.0)
-        assert frame.ball.velocity == Vec3(10.0, 20.0, 30.0)
-
-    def test_parser_event_lists_are_preserved_in_normalized_frames(self):
-        """Parser event carriers pass through normalization with aligned timestamps."""
-        header = Header()
-
-        frame_dict = {
-            "timestamp": 12.0,
-            "ball": {
-                "position": {"x": 0, "y": 0, "z": 93.15},
-                "velocity": {"x": 0, "y": 0, "z": 0},
-                "angular_velocity": {"x": 0, "y": 0, "z": 0},
-            },
-            "players": [],
-            "parser_touch_events": [
-                {"timestamp": 12.0, "player_id": "player_0", "team": 0}
-            ],
-            "parser_demo_events": [
-                {"timestamp": 12.0, "victim_id": "player_1", "victim_team": 1}
-            ],
-            "parser_tickmarks": [{"timestamp": 12.0, "kind": "goal_hint"}],
-            "parser_kickoff_markers": [{"timestamp": 12.0, "phase": "INITIAL"}],
-            "parser_first_touch_events": [
-                {"timestamp": 12.0, "player_id": "player_1", "team": 1}
-            ],
-        }
-
-        timeline = build_timeline(header, [frame_dict])
-        frame = timeline[0]
-
-        assert len(frame.parser_first_touch_events) == 1
-        assert frame.parser_first_touch_events[0].player_id == "player_1"
-        assert frame.parser_first_touch_events[0].team == 1
-        assert frame.parser_first_touch_events[0].timestamp == 0.0
-
-        assert len(frame.parser_touch_events) == 1
-        assert frame.parser_touch_events[0].player_id == "player_0"
-        assert frame.parser_touch_events[0].timestamp == 0.0
-
-        assert len(frame.parser_demo_events) == 1
-        assert frame.parser_demo_events[0].victim_id == "player_1"
-        assert frame.parser_demo_events[0].timestamp == 0.0
-
-        assert len(frame.parser_tickmarks) == 1
-        assert frame.parser_tickmarks[0].kind == "goal_hint"
-        assert frame.parser_tickmarks[0].timestamp == 0.0
-
-        assert len(frame.parser_kickoff_markers) == 1
-        assert frame.parser_kickoff_markers[0].phase == "INITIAL"
-        assert frame.parser_kickoff_markers[0].timestamp == 0.0
-
-    def test_same_frame_parser_touches_have_a_fixed_order(self):
-        """Regression: the parser emits same-frame touches in random order."""
-        touches = [
-            {"timestamp": 12.0, "player_id": "player_1", "team": 1, "frame_index": 0},
-            {"timestamp": 12.0, "player_id": "player_0", "team": 0, "frame_index": 0},
-        ]
-
-        def make_frame(parser_touch_events):
-            return {
-                "timestamp": 12.0,
-                "ball": {
-                    "position": {"x": 0, "y": 0, "z": 93.15},
-                    "velocity": {"x": 0, "y": 0, "z": 0},
-                    "angular_velocity": {"x": 0, "y": 0, "z": 0},
-                },
-                "players": [],
-                "parser_touch_events": parser_touch_events,
-            }
-
-        forward = build_timeline(Header(), [make_frame(touches)])
-        backward = build_timeline(Header(), [make_frame(touches[::-1])])
-
-        assert forward[0].parser_touch_events == backward[0].parser_touch_events
-
-    def test_parser_event_player_ids_follow_alias_lookup(self):
-        """Parser touch/demo IDs are canonicalized alongside player frames."""
-        header = Header(
-            players=[
-                PlayerInfo(name="Blue", platform_ids={"steam": "123"}, team=0),
-                PlayerInfo(name="Orange", platform_ids={"epic": "456"}, team=1),
-            ]
-        )
-
-        frame_dict = {
-            "timestamp": 12.0,
-            "ball": {
-                "position": {"x": 0, "y": 0, "z": 93.15},
-                "velocity": {"x": 0, "y": 0, "z": 0},
-                "angular_velocity": {"x": 0, "y": 0, "z": 0},
-            },
-            "players": [
-                {
-                    "player_id": "player_0",
-                    "team": 0,
-                    "position": {"x": 0, "y": -1000, "z": 17},
-                    "velocity": {"x": 0, "y": 0, "z": 0},
-                    "rotation": {"x": 0, "y": 0, "z": 0},
-                    "boost_amount": 33,
-                    "is_supersonic": False,
-                    "is_on_ground": True,
-                    "is_demolished": False,
-                },
-                {
-                    "player_id": "player_1",
-                    "team": 1,
-                    "position": {"x": 0, "y": 1000, "z": 17},
-                    "velocity": {"x": 0, "y": 0, "z": 0},
-                    "rotation": {"x": 0, "y": 0, "z": 0},
-                    "boost_amount": 33,
-                    "is_supersonic": False,
-                    "is_on_ground": True,
-                    "is_demolished": False,
-                },
-            ],
-            "parser_touch_events": [
-                {"timestamp": 12.0, "player_id": "player_0", "team": 0}
-            ],
-            "parser_demo_events": [
-                {
-                    "timestamp": 12.0,
-                    "victim_id": "player_1",
-                    "attacker_id": "player_0",
-                    "victim_team": 1,
-                    "attacker_team": 0,
-                }
-            ],
-            "parser_first_touch_events": [
-                {"timestamp": 12.0, "player_id": "player_1", "team": 1}
-            ],
-        }
-
-        timeline = build_timeline(header, [frame_dict])
-        frame = timeline[0]
-
-        assert frame.parser_touch_events[0].player_id == "steam:123"
-        assert frame.parser_demo_events[0].victim_id == "epic:456"
-        assert frame.parser_first_touch_events[0].player_id == "epic:456"
-        assert frame.parser_demo_events[0].attacker_id == "steam:123"
-        assert frame.parser_demo_events[0].timestamp == 0.0
+    assert [[c.team for c in f.players] for f in frames] == [[1, 1], [0, 1]]
 
 
-class TestIntegration:
-    """Integration tests combining multiple normalization functions."""
+def test_someone_the_header_misses_keeps_orange_from_their_first_frame():
+    frames = build_timeline(
+        HEADER,
+        [
+            _frame(0.0, [_car("player_7", 1), _car("player_8", 0)]),
+            _frame(1.0, [_car("player_7", 0), _car("player_8", 1)]),
+        ],
+    )
+    assert [[c.team for c in f.players] for f in frames] == [[1, 0], [1, 1]]
 
-    def test_full_normalization_pipeline(self):
-        """Full pipeline from raw data to normalized timeline."""
-        header = Header(
-            playlist_id="STANDARD",
-            map_name="DFH Stadium",
-            team_size=3,
-            team0_score=2,
-            team1_score=1,
-            match_length=300.0,
-            players=[
-                PlayerInfo(
-                    name="Player1", platform_ids={"steam": "123"}, team=0, score=250
-                ),
-                PlayerInfo(
-                    name="Player2", platform_ids={"epic": "456"}, team=1, score=100
-                ),
-            ],
-        )
 
-        frames = []
-        for i in range(5):
-            timestamp = i / 30.0  # 30 FPS
+def test_positions_are_held_to_the_field_but_speeds_are_not():
+    far = _xyz(9000.0, -9000.0, 9000.0)
+    car = _one(_car(position=far, velocity=far)).players[0]
+    assert car.position == Vec3(X_LIMIT, -Y_LIMIT, Z_RANGE[1])
+    assert car.velocity == Vec3(9000.0, -9000.0, 9000.0)
+    low = _one(_car(position=_xyz(-9000.0, 9000.0, -500.0))).players[0]
+    assert low.position == Vec3(-X_LIMIT, Y_LIMIT, Z_RANGE[0])
+    ball = {"position": far, "velocity": far, "angular_velocity": _xyz(1.0, 2.0, 3.0)}
+    frame = _one(ball=ball)
+    assert frame.ball.position == Vec3(X_LIMIT, -Y_LIMIT, Z_RANGE[1])
+    assert frame.ball.velocity == Vec3(9000.0, -9000.0, 9000.0)
+    assert frame.ball.angular_velocity == Vec3(1.0, 2.0, 3.0)
 
-            frame = Mock()
-            frame.timestamp = timestamp
 
-            # Ball data
-            frame.ball = Mock()
-            frame.ball.position = Mock(x=i * 100, y=i * 50, z=93.15 + i * 10)
-            frame.ball.velocity = Mock(x=100, y=50, z=10)
-            frame.ball.angular_velocity = Mock(x=0.1, y=0.2, z=0.3)
+def test_boost_is_a_whole_number_from_0_to_100():
+    boosts = [
+        _one(_car(boost_amount=raw)).players[0].boost_amount for raw in (-5, 33.9, 250)
+    ]
+    assert boosts == [0, 33, 100]
 
-            # Player data
-            player1 = Mock()
-            player1.player_id = "steam:123"
-            player1.team = 0
-            player1.position = Mock(x=-1000 + i * 100, y=-2000 + i * 200, z=17)
-            player1.velocity = Mock(x=800, y=0, z=0)
-            player1.rotation = Mock(x=0, y=0, z=0)
-            player1.boost_amount = 100 - i * 10
 
-            player2 = Mock()
-            player2.player_id = "epic:456"
-            player2.team = 1
-            player2.position = Mock(x=1000 - i * 100, y=2000 - i * 200, z=17)
-            player2.velocity = Mock(x=-600, y=100, z=0)
-            player2.rotation = Mock(x=0, y=3.14, z=0)
-            player2.boost_amount = 50 + i * 5
+def test_a_car_keeps_its_spin_and_orientation_and_whether_its_demolished():
+    car = _one(_car(angular_velocity=_xyz(1.0, -2.0, 3.0), is_demolished=True)).players[
+        0
+    ]
+    assert car.angular_velocity == Vec3(1.0, -2.0, 3.0)
+    assert car.rotation.quaternion == Quaternion(0.0, 0.0, 0.0, 1.0)
+    assert car.is_demolished
+    rotation = {"pitch": 0.1, "yaw": 0.2, "roll": 0.3}
+    plain = _one(_car(rotation=rotation)).players[0]
+    assert (plain.rotation.yaw, plain.rotation.quaternion) == (0.2, None)
+    assert not plain.is_demolished
 
-            frame.players = [player1, player2]
-            frames.append(frame)
 
-        # Test full pipeline
-        fps = measure_frame_rate(frames)
-        assert 29.0 <= fps <= 31.0
+def _touch(player_id, t=5.5, team=0):
+    return {"timestamp": t, "player_id": player_id, "team": team}
 
-        players_index, aliases = normalize_players(header, frames)
-        assert "steam:123" in players_index
-        assert "epic:456" in players_index
-        assert aliases["player_0"] == "steam:123"
-        assert aliases["player_1"] == "epic:456"
 
-        timeline = build_timeline(header, frames)
-        assert len(timeline) == 5
+def test_touches_on_one_frame_come_in_player_order_at_shifted_times():
+    frame = _one(
+        parser_touch_events=[_touch("player_1", team=1), _touch("player_0")],
+        parser_first_touch_events=[_touch("player_0", t=6.0)],
+    )
+    assert [(e.player_id, e.timestamp) for e in frame.parser_touch_events] == [
+        (ME, 0.5),
+        (THEM, 0.5),
+    ]
+    [first] = frame.parser_first_touch_events
+    assert (first.player_id, first.timestamp, first.team) == (ME, 1.0, 0)
 
-        # Verify first frame
-        first_frame = timeline[0]
-        assert first_frame.timestamp == 0.0
-        assert len(first_frame.players) == 2
 
-        # Verify progression
-        last_frame = timeline[-1]
-        assert last_frame.timestamp == 4 / 30.0
-        assert last_frame.ball.position.x == 400.0  # 4*100
+def test_demos_name_their_players_and_may_have_no_attacker():
+    demos = [
+        {"timestamp": 6.0, "victim_id": "player_0", "attacker_id": "player_1"},
+        {"timestamp": 7.0, "victim_id": "player_1", "attacker_id": None},
+    ]
+    frame = _one(parser_demo_events=demos)
+    assert [
+        (e.timestamp, e.victim_id, e.attacker_id) for e in frame.parser_demo_events
+    ] == [(1.0, ME, THEM), (2.0, THEM, None)]
 
-        # Verify player data
-        player1_frame = last_frame.get_player_by_id("steam:123")
-        assert player1_frame is not None
-        assert player1_frame.team == 0
-        assert player1_frame.boost_amount == 60  # 100 - 4*10
 
-        # Test team filtering
-        team0_players = last_frame.get_players_by_team(0)
-        team1_players = last_frame.get_players_by_team(1)
-        assert len(team0_players) == 1
-        assert len(team1_players) == 1
-        assert team0_players[0].player_id == "steam:123"
-        assert team1_players[0].player_id == "epic:456"
+def test_dodges_keep_their_torque_and_player():
+    events = [
+        {
+            "timestamp": 5.5,
+            "kind": "dodge_torque",
+            "component": "dodge",
+            "player_id": "player_1",
+            "vector": _xyz(0.0, 1.0, 0.0),
+        },
+        {"timestamp": 5.5, "kind": "active", "component": "jump"},
+    ]
+    torque, jump = _one(component_events=events).component_events
+    assert (torque.player_id, torque.vector, torque.timestamp) == (
+        THEM,
+        Vec3(0.0, 1.0, 0.0),
+        0.5,
+    )
+    assert (jump.kind, jump.component, jump.player_id, jump.vector) == (
+        "active",
+        "jump",
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("named", "player_id"),
+    [
+        ({"player_id": "player_1"}, THEM),
+        ({"player_index": 0}, ME),
+        ({}, None),
+    ],
+)
+def test_pad_events_name_the_player_by_id_or_by_row(named, player_id):
+    event = {"pad_id": 3, "status": "collected", "is_big": True, **named}
+    [pad] = _one(boost_pad_events=[{**event, "timestamp": 5.25}]).boost_pad_events
+    assert (pad.pad_id, pad.status, pad.is_big) == (3, "COLLECTED", True)
+    assert (pad.player_id, pad.timestamp) == (player_id, 0.25)
+    [untimed] = _one(boost_pad_events=[event]).boost_pad_events
+    assert untimed.timestamp is None
