@@ -3,6 +3,7 @@ import { getReplayReview, setGrade } from '../api/client';
 import { Card, CardHeader, CardContent } from '../components';
 import type { Grade, GradeRequest, ReplayReview } from '../types/api';
 import { REGULATION_SECONDS, applyGrade, groupByCategory, timelineX } from './coachTransforms';
+import { KickoffList } from './KickoffCoach';
 
 export function GameReview({ replayId }: { replayId: string }) {
   const queryClient = useQueryClient();
@@ -157,6 +158,8 @@ export function GameReviewBody({
           </CardContent>
         </Card>
       </div>
+
+      {review.kickoffs && review.kickoffs.length > 0 && <KickoffList kickoffs={review.kickoffs} />}
     </div>
   );
 }

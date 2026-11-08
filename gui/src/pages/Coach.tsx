@@ -13,6 +13,7 @@ import {
   SelectField,
 } from '../components';
 import type { CategorySummary, CoachResponse, CoachSession, Highlight, RuleGrades } from '../types/api';
+import { KickoffCoach } from './KickoffCoach';
 import {
   COACH_PLAYLISTS,
   PERIOD_OPTIONS,
@@ -163,6 +164,16 @@ export function CoachBody({ data }: { data: CoachResponse }) {
           </>
         )}
       </section>
+
+      {data.kickoffs && (
+        <section>
+          <SectionTitle
+            title="Kickoffs"
+            note="The steps a coach takes you through, in order. The targets are a judgment of when each step is solid"
+          />
+          <KickoffCoach summary={data.kickoffs} />
+        </section>
+      )}
 
       {data.session && <SessionBlock session={data.session} mixed={mixed} />}
 

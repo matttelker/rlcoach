@@ -1,15 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CategorySummary, ReplayReview, ReviewMistake } from '../../types/api';
+import type { CategorySummary, LadderStep, ReplayReview, ReviewMistake } from '../../types/api';
 import {
   applyGrade,
+  approachLabel,
   categoryTrend,
+  flipText,
+  focusStep,
+  goalAfterText,
   gradeAccuracy,
   groupByCategory,
   headline,
   isMixedPlaylist,
+  kickoffSeat,
+  percent,
   prettyMap,
   sessionTitle,
+  shareOf,
   teamSizeLabel,
   timelineX,
 } from '../coachTransforms';
@@ -137,5 +144,58 @@ describe('labels', () => {
     expect(sessionTitle('2026-11-05', now)).toBe('Today');
     expect(sessionTitle('2026-11-04', now)).toBe('Yesterday');
     expect(sessionTitle('2026-10-31', now)).toContain('Oct');
+  });
+});
+
+describe('kickoff labels', () => {
+  it('names each approach in words', () => {
+    expect(approachLabel('SPEEDFLIP')).toBe('Speedflip');
+    expect(approachLabel('STANDARD_BOOST')).toBe('Boosted in');
+    expect(approachLabel('SUPPORT_CHEAT')).toBe('Cheated up');
+    expect(approachLabel('SOMETHING_NEW')).toBe('Something new');
+  });
+
+  it('says whether you went or supported, and from where', () => {
+    expect(kickoffSeat({ role: 'GO', spot: 'DIAGONAL' })).toBe('You went from the diagonal');
+    expect(kickoffSeat({ role: 'BACK', spot: 'OFF_CENTRE' })).toBe('Support from the off-centre');
+    expect(kickoffSeat({ role: 'WING', spot: null })).toBe('Support');
+  });
+
+  it('times the flip into the ball against the contact', () => {
+    expect(flipText('ON_TIME', 0.12)).toBe('Flip on time, 0.12 s before contact');
+    expect(flipText('LATE', -0.08)).toBe('Flip late, 0.08 s after contact');
+    expect(flipText('NONE', null)).toBe('No flip into the ball');
+    expect(flipText(null, null)).toBe('');
+  });
+
+  it('names the goal that followed', () => {
+    expect(goalAfterText({ goal_after: 'against', goal_after_s: 4.4 })).toBe('They scored 4 s later');
+    expect(goalAfterText({ goal_after: 'for', goal_after_s: 7 })).toBe('Your team scored 7 s later');
+    expect(goalAfterText({ goal_after: null, goal_after_s: null })).toBe('');
+  });
+
+  it('writes shares as whole percents, with a dash for nothing', () => {
+    expect(percent(0.787)).toBe('79%');
+    expect(percent(null)).toBe('–');
+    expect(shareOf(12, 61)).toBe('20%');
+    expect(shareOf(0, 0)).toBe('–');
+  });
+
+  it('finds the step to work on', () => {
+    const step = (key: string, status: LadderStep['status']): LadderStep => ({
+      key,
+      title: key,
+      level: '',
+      measure: '',
+      count: 0,
+      of: 0,
+      value: null,
+      target: 0.9,
+      why: '',
+      how: '',
+      status,
+    });
+    expect(focusStep([step('a', 'solid'), step('b', 'focus'), step('c', 'later')])?.key).toBe('b');
+    expect(focusStep([step('a', 'solid'), step('b', 'unknown')])).toBeUndefined();
   });
 });

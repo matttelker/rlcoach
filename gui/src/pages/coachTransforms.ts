@@ -1,4 +1,15 @@
-import type { CategorySummary, GradeRequest, ReplayReview, ReviewMistake, RuleGrades } from '../types/api';
+import type {
+  CategorySummary,
+  FlipTiming,
+  GradeRequest,
+  KickoffResult,
+  LadderStatus,
+  LadderStep,
+  ReplayReview,
+  ReviewKickoff,
+  ReviewMistake,
+  RuleGrades,
+} from '../types/api';
 import { parseLocalDate } from './dataTransforms';
 
 export const PERIOD_OPTIONS = [
@@ -126,4 +137,74 @@ export function timelineX(secondsLeft: number, overtimeSeconds: number, width: n
   const total = REGULATION_SECONDS + overtimeSeconds;
   const elapsed = REGULATION_SECONDS - secondsLeft;
   return Math.min(Math.max(elapsed / total, 0), 1) * width;
+}
+
+// Kickoffs
+
+const APPROACHES: Record<string, string> = {
+  SPEEDFLIP: 'Speedflip',
+  STANDARD_FRONTFLIP: 'Front flip',
+  STANDARD_DIAGONAL: 'Diagonal flip',
+  STANDARD_BOOST: 'Boosted in',
+  STANDARD: 'Drove in',
+  FAKE_HALFFLIP: 'Faked, half-flip',
+  FAKE_STATIONARY: 'Faked, stayed put',
+  FAKE_AGGRESSIVE: 'Faked, drove off',
+  SUPPORT_CHEAT: 'Cheated up',
+  SUPPORT_HOLD: 'Held back',
+  UNKNOWN: "Didn't move",
+};
+
+export function approachLabel(approach: string): string {
+  return APPROACHES[approach] ?? kindLabel(approach.toLowerCase());
+}
+
+const SPOTS: Record<string, string> = { DIAGONAL: 'diagonal', OFF_CENTRE: 'off-centre', BACK: 'back' };
+
+/** "You went from the diagonal" or "Support from the back" */
+export function kickoffSeat(kickoff: Pick<ReviewKickoff, 'role' | 'spot'>): string {
+  const spot = kickoff.spot ? SPOTS[kickoff.spot] ?? kickoff.spot.toLowerCase() : null;
+  const from = spot ? ` from the ${spot}` : '';
+  return kickoff.role === 'GO' ? `You went${from}` : `Support${from}`;
+}
+
+export function flipText(flip: FlipTiming | null, lead: number | null): string {
+  if (flip === 'ON_TIME') return lead === null ? 'Flip on time' : `Flip on time, ${lead.toFixed(2)} s before contact`;
+  if (flip === 'LATE') return lead === null ? 'Flip late' : `Flip late, ${(-lead).toFixed(2)} s after contact`;
+  if (flip === 'NONE') return 'No flip into the ball';
+  return '';
+}
+
+export const RESULT_LABELS: Record<KickoffResult, string> = {
+  WON: 'Went your way',
+  EVEN: 'Even',
+  LOST: 'Came back at you',
+};
+
+export function goalAfterText(kickoff: Pick<ReviewKickoff, 'goal_after' | 'goal_after_s'>): string {
+  if (!kickoff.goal_after) return '';
+  const when = kickoff.goal_after_s === null ? '' : ` ${Math.round(kickoff.goal_after_s)} s later`;
+  return kickoff.goal_after === 'for' ? `Your team scored${when}` : `They scored${when}`;
+}
+
+/** A share of 0 to 1 as a whole percent, or a dash */
+export function percent(value: number | null): string {
+  return value === null ? '–' : `${Math.round(value * 100)}%`;
+}
+
+/** Whole percent of a count, or a dash when there's nothing to divide */
+export function shareOf(part: number, whole: number): string {
+  return whole === 0 ? '–' : `${Math.round((100 * part) / whole)}%`;
+}
+
+export const STEP_STATUS: Record<LadderStatus, string> = {
+  solid: 'Solid',
+  focus: 'Work on this now',
+  later: 'Later',
+  unknown: 'Not enough kickoffs yet',
+};
+
+/** The step to work on: the focus, or nothing when every judged step is solid. */
+export function focusStep(ladder: LadderStep[]): LadderStep | undefined {
+  return ladder.find((step) => step.status === 'focus');
 }

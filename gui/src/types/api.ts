@@ -200,6 +200,105 @@ export interface CoachResponse {
   targets: CategorySummary[];
   categories: CategorySummary[];
   highlights: Highlight[];
+  /** Missing from an API older than kickoff coaching */
+  kickoffs?: KickoffSummary;
+}
+
+// Kickoff coaching
+export type FlipTiming = 'ON_TIME' | 'LATE' | 'NONE';
+export type KickoffResult = 'WON' | 'EVEN' | 'LOST';
+
+export interface KickoffResults {
+  won: number;
+  even: number;
+  lost: number;
+}
+
+export interface KickoffFlipGroup extends KickoffResults {
+  flip: FlipTiming;
+  count: number;
+}
+
+export interface KickoffGoing {
+  /** Kickoffs where you were the one to go */
+  count: number;
+  /** Of those, the ones you went for rather than faked */
+  went: number;
+  fakes: number;
+  results: KickoffResults;
+  flips: { on_time: number; late: number; none: number };
+  by_flip: KickoffFlipGroup[];
+  speedflips: number;
+  race: { compared: number; sooner: number; later: number; median_gap: number | null };
+  median_speed: number | null;
+  goals_for: number;
+  goals_against: number;
+}
+
+export interface KickoffSupport {
+  count: number;
+  results: KickoffResults;
+  double_commits: number;
+  cheat: number;
+  hold: number;
+  goals_for: number;
+  goals_against: number;
+}
+
+export interface KickoffDay {
+  play_date: string;
+  went: number;
+  on_time: number;
+  double_commits: number;
+}
+
+export type LadderStatus = 'solid' | 'focus' | 'later' | 'unknown';
+
+export interface LadderStep {
+  key: string;
+  title: string;
+  /** The ranks this step takes you between */
+  level: string;
+  measure: string;
+  count: number;
+  of: number;
+  /** null until there are enough kickoffs to judge */
+  value: number | null;
+  target: number;
+  why: string;
+  how: string;
+  status: LadderStatus;
+}
+
+export interface KickoffSummary {
+  games: number;
+  count: number;
+  double_commits: number;
+  going: KickoffGoing;
+  support: KickoffSupport;
+  sessions: KickoffDay[];
+  ladder: LadderStep[];
+}
+
+export interface ReviewKickoff {
+  t: number;
+  seconds_left: number;
+  clock: string;
+  score: string;
+  phase: 'INITIAL' | 'OT';
+  role: string;
+  spot: string | null;
+  approach: string;
+  flip: FlipTiming | null;
+  flip_lead: number | null;
+  result: KickoffResult | null;
+  first_touch: 'you' | 'teammate' | 'opponent' | null;
+  race_gap: number | null;
+  speed_at_contact: number | null;
+  boost_used: number;
+  double_commit: boolean;
+  goal_after: 'for' | 'against' | null;
+  goal_after_s: number | null;
 }
 
 export interface ReviewMistake {
@@ -266,4 +365,6 @@ export interface ReplayReview {
   clears_given_back: number;
   mistakes: ReviewMistake[];
   goals: ReviewGoal[];
+  /** Missing from an API older than kickoff coaching */
+  kickoffs?: ReviewKickoff[];
 }

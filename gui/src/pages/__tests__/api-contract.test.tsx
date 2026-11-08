@@ -11,6 +11,7 @@ import { GameReviewBody } from '../GameReview';
 import type {
   CategorySummary,
   CoachResponse,
+  KickoffSummary,
   GradesResponse,
   PatternsResponse,
   ReplayDetail,
@@ -52,6 +53,97 @@ const GOALKEEPING: CategorySummary = {
   top_kind: null,
   cue: null,
   clean_streak: 10,
+};
+
+// Shaped like the API's kickoffs section on 41 real games
+const KICKOFFS: KickoffSummary = {
+  games: 41,
+  count: 270,
+  double_commits: 19,
+  going: {
+    count: 97,
+    went: 94,
+    fakes: 3,
+    results: { won: 28, even: 39, lost: 30 },
+    flips: { on_time: 61, late: 13, none: 20 },
+    by_flip: [
+      { flip: 'ON_TIME', count: 61, won: 19, even: 30, lost: 12 },
+      { flip: 'LATE', count: 13, won: 3, even: 2, lost: 8 },
+      { flip: 'NONE', count: 20, won: 5, even: 6, lost: 9 },
+    ],
+    speedflips: 0,
+    race: { compared: 90, sooner: 16, later: 32, median_gap: 0.007 },
+    median_speed: 2010,
+    goals_for: 5,
+    goals_against: 10,
+  },
+  support: {
+    count: 173,
+    results: { won: 60, even: 38, lost: 75 },
+    double_commits: 16,
+    cheat: 71,
+    hold: 84,
+    goals_for: 10,
+    goals_against: 8,
+  },
+  sessions: [
+    { play_date: '2026-11-05', went: 16, on_time: 11, double_commits: 1 },
+    { play_date: '2026-11-06', went: 36, on_time: 18, double_commits: 1 },
+  ],
+  ladder: [
+    {
+      key: 'flip_in',
+      title: 'Flip into the ball every time',
+      level: 'Gold to Platinum',
+      measure: 'Kickoffs you went for with a flip into the ball',
+      count: 74,
+      of: 94,
+      value: 0.787,
+      target: 0.9,
+      why: 'Without a flip your bumper meets their flip.',
+      how: "Flip into the ball when you're about two car lengths from it.",
+      status: 'focus',
+    },
+    {
+      key: 'on_time',
+      title: 'Flip on time',
+      level: 'Platinum',
+      measure: 'Kickoffs you went for with the flip on time',
+      count: 61,
+      of: 94,
+      value: 0.649,
+      target: 0.85,
+      why: 'A flip that starts as you reach the ball has no power left for the hit.',
+      how: 'Start your flip a moment sooner.',
+      status: 'later',
+    },
+    {
+      key: 'one_goes',
+      title: 'One goes, the rest support',
+      level: 'Platinum to Diamond',
+      measure: 'Kickoffs where only one of you went',
+      count: 251,
+      of: 270,
+      value: 0.93,
+      target: 0.95,
+      why: 'Two cars on the ball leave nobody for where it goes next.',
+      how: 'Only one of you goes.',
+      status: 'later',
+    },
+    {
+      key: 'speedflip',
+      title: 'Learn the speedflip',
+      level: 'Diamond to Champion',
+      measure: 'Kickoffs you went for with a speedflip',
+      count: 0,
+      of: 94,
+      value: 0,
+      target: 0.5,
+      why: 'A speedflip is a kickoff where you boost, flip diagonally and cancel the flip straight away.',
+      how: 'Learn the motion in Free Play from a speedflip tutorial.',
+      status: 'later',
+    },
+  ],
 };
 
 const COACH: CoachResponse = {
@@ -110,6 +202,7 @@ const COACH: CoachResponse = {
       replay_id: 'abc',
     },
   ],
+  kickoffs: KICKOFFS,
 };
 
 const REVIEW: ReplayReview = {
@@ -168,6 +261,48 @@ const REVIEW: ReplayReview = {
       summary: 'You were the last one back.',
       lines: ['You were beaten by the shot (12 boost)'],
       grade: null,
+    },
+  ],
+  kickoffs: [
+    {
+      t: 4.1,
+      seconds_left: 300,
+      clock: '5:00',
+      score: '0-0',
+      phase: 'INITIAL',
+      role: 'GO',
+      spot: 'DIAGONAL',
+      approach: 'STANDARD_BOOST',
+      flip: 'NONE',
+      flip_lead: null,
+      result: 'LOST',
+      first_touch: 'opponent',
+      race_gap: 0.04,
+      speed_at_contact: 1980,
+      boost_used: 33,
+      double_commit: false,
+      goal_after: 'against',
+      goal_after_s: 4.4,
+    },
+    {
+      t: 110.3,
+      seconds_left: 210,
+      clock: '3:30',
+      score: '1-0',
+      phase: 'INITIAL',
+      role: 'BACK',
+      spot: 'BACK',
+      approach: 'STANDARD_FRONTFLIP',
+      flip: 'ON_TIME',
+      flip_lead: 0.12,
+      result: 'WON',
+      first_touch: 'you',
+      race_gap: null,
+      speed_at_contact: 2200,
+      boost_used: 30,
+      double_commit: true,
+      goal_after: null,
+      goal_after_s: null,
     },
   ],
 };
@@ -270,6 +405,39 @@ describe('Coach', () => {
   it('leaves out the grades tally until you grade something', () => {
     expect(html).not.toContain('How its calls hold up');
   });
+
+  it('leads the kickoffs with the step to work on and what to practise', () => {
+    expect(html).toContain('Flip into the ball every time');
+    expect(html).toContain('Work on this now');
+    expect(html).toContain('74 of 94');
+    expect(html).toContain('79%, your target 90%');
+    expect(html).toContain('two car lengths');
+  });
+
+  it('says what a speedflip is, even before it is the step to work on', () => {
+    expect(html).toContain('A speedflip is a kickoff');
+  });
+
+  it('splits your go kickoffs by how you flipped', () => {
+    expect(html).toContain('No flip into the ball');
+    expect(html).toContain('There first in 16, second in 32 of 90');
+    expect(html).toContain('72 km/h');
+  });
+
+  it('shows on-time flips by day', () => {
+    expect(html).toContain('Flips on time, by day');
+    expect(html).toContain('18 of 36');
+  });
+});
+
+describe('Coach from an API without kickoffs', () => {
+  const older: CoachResponse = { ...COACH, kickoffs: undefined };
+  const html = renderWithCache([[['coach', undefined, '30d'], older]], '/', <Coach />);
+
+  it('leaves the kickoffs out', () => {
+    expect(html).not.toContain('When you go');
+    expect(html).toContain('Training targets');
+  });
 });
 
 
@@ -342,6 +510,17 @@ describe('GameReviewBody', () => {
   it('disables the buttons when there is nowhere to send a grade', () => {
     const html = renderToStaticMarkup(<GameReviewBody review={REVIEW} />);
     expect(html).toContain('disabled=""');
+  });
+
+  it('lists every kickoff on the clock with how you played it', () => {
+    const html = renderToStaticMarkup(<GameReviewBody review={REVIEW} />);
+    expect(html).toContain('You went from the diagonal.');
+    expect(html).toContain('Boosted in');
+    expect(html).toContain('no flip into the ball');
+    expect(html).toContain('Came back at you');
+    expect(html).toContain('They scored 4 s later.');
+    expect(html).toContain('You and a teammate both went.');
+    expect(html).toContain('flip on time, 0.12 s before contact');
   });
 
   it('explains a missing review instead of showing an empty timeline', () => {
