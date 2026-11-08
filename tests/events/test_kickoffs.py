@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 import pytest
@@ -346,6 +347,111 @@ def test_support_cars_hold_or_cheat_up():
     found = _one(frames)
     assert _player(found, "holds").approach == "SUPPORT_HOLD"
     assert _player(found, "cheats").approach == "SUPPORT_CHEAT"
+
+
+# How each car went for the ball
+
+
+def test_each_car_names_its_spawn():
+    back = Vec3(0.0, -4608.0, 17.0)
+    frames, _ = kickoff(
+        [
+            ("diagonal", 0, DIAGONAL, drive(DIAGONAL, BESIDE_BALL)),
+            ("off_centre", 0, OFFSET, stay(OFFSET)),
+            ("back", 0, back, stay(back)),
+            ("orange", 1, ORANGE_DIAGONAL, stay(ORANGE_DIAGONAL)),
+        ]
+    )
+    spots = {p.player_id: p.spot for p in _one(frames).players}
+    assert spots == {
+        "diagonal": "DIAGONAL",
+        "off_centre": "OFF_CENTRE",
+        "back": "BACK",
+        "orange": "DIAGONAL",
+    }
+
+
+def _flip_lead(dodge_at, path=None, **options):
+    frames, release = _go_against(path or drive(DIAGONAL, BESIDE_BALL), **options)
+    frames = with_flip_at(frames, release + dodge_at, "blue", Vec3(0.0, 2.24, 0.0))
+    return _player(_one(frames), "blue")
+
+
+def test_a_flip_into_the_ball_leads_the_contact_by_its_time():
+    # The ball is played 2 s after the release
+    assert _flip_lead(1.85).flip_lead == pytest.approx(0.15)
+
+
+def test_a_flip_just_after_the_ball_was_played_came_late():
+    blue = _flip_lead(2.1)
+    assert blue.flip_lead == pytest.approx(-0.1)
+    # The approach is read up to the contact, so it had no flip
+    assert blue.approach == "STANDARD"
+
+
+def test_the_last_flip_before_the_ball_is_the_one_into_it():
+    frames, release = _go_against(drive(DIAGONAL, BESIDE_BALL))
+    for at in (0.5, 1.9):
+        frames = with_flip_at(frames, release + at, "blue", Vec3(0.0, 2.24, 0.0))
+    assert _player(_one(frames), "blue").flip_lead == pytest.approx(0.1)
+
+
+def test_no_flip_into_the_ball_has_no_lead():
+    assert _flip_lead(2.3).flip_lead is None  # Well after the contact
+    assert (
+        _player(_one(_go_against(drive(DIAGONAL, BESIDE_BALL))[0]), "blue").flip_lead
+        is None
+    )
+    # A car that never went for the ball
+    frames, release = _go_against(drive(DIAGONAL, BESIDE_BALL))
+    frames = with_flip_at(frames, release + 1.0, "orange", Vec3(0.0, 2.24, 0.0))
+    assert _player(_one(frames), "orange").flip_lead is None
+
+
+def _updated_every(path, every):
+    """A path whose position only refreshes every `every` seconds."""
+    return lambda elapsed: path(math.floor(elapsed / every + 1e-9) * every)
+
+
+def test_the_race_to_the_ball_is_timed_between_position_updates():
+    # Straight at the ball from 3000 uu at 1400 uu/s: 1000 uu out at 1.4286 s
+    start, end = Vec3(0.0, -3000.0, 17.0), Vec3(0.0, -200.0, 17.0)
+    path = _updated_every(drive(start, end), 0.1)
+    frames, _ = kickoff(
+        [
+            ("blue", 0, start, path),
+            ("orange", 1, ORANGE_DIAGONAL, stay(ORANGE_DIAGONAL)),
+        ]
+    )
+    found = _one(frames)
+    assert _player(found, "blue").reach_time == pytest.approx(1.4286, abs=0.002)
+    assert _player(found, "orange").reach_time is None
+
+
+def test_a_car_going_for_the_ball_keeps_its_speed_as_the_ball_is_played():
+    # Still 0.1 s short of its spot beside the ball, and in reach
+    blue = _player(
+        _one(_go_against(drive(DIAGONAL, BESIDE_BALL, arrive_s=2.1))[0]), "blue"
+    )
+    expected = math.hypot(BESIDE_BALL.x - DIAGONAL.x, BESIDE_BALL.y - DIAGONAL.y) / 2.1
+    assert blue.speed_at_contact == pytest.approx(expected, abs=0.1)
+    orange = _player(_one(_go_against(drive(DIAGONAL, BESIDE_BALL))[0]), "orange")
+    assert orange.speed_at_contact is None
+
+
+def test_the_ball_is_followed_for_a_second_after_the_hit():
+    # Hit toward orange at 600 uu/s, one frame on from the spot
+    frames, _ = _go_against(drive(DIAGONAL, BESIDE_BALL), play_s=3.5)
+    assert _one(frames).ball_y_after == pytest.approx(630.0)
+    # The recording stops before a second has passed
+    frames, _ = _go_against(drive(DIAGONAL, BESIDE_BALL), play_s=2.5)
+    assert _one(frames).ball_y_after is None
+
+
+def test_a_kickoff_nobody_plays_has_no_ball_result():
+    wandering = drive(DIAGONAL, Vec3(-3000.0, -3000.0, 17.0), arrive_s=10.0)
+    frames, _ = _go_against(wandering, hit_s=None, play_s=7.0)
+    assert _one(frames).ball_y_after is None
 
 
 # Overtime

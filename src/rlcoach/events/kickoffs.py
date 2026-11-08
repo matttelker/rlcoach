@@ -5,11 +5,15 @@ For each car it records:
 - its role. The car nearest the centre spot on each team goes (GO), and the
   rest are WING, CHEAT or BACK by where they spawned. Teammates on level spawns
   agree between them who goes, so GO moves to the one that got nearer the ball.
+- its spawn: diagonal, off-centre or back
 - how it played the kickoff, read from its own dodges and movement
 - the boost it used, and how soon it reached the ball
-And for the kickoff, who touched the ball first and when. The game's own
-first-touch counter names the player where the replay has one. Otherwise it's
-the car the ball leaves away from, which in a 50/50 is the one that won it.
+- for a car that went for the ball, when its flip into it began, how soon it
+  got within 1000 uu, and how fast it was going as the ball was played
+And for the kickoff, who touched the ball first and when, and where the ball
+was a second later. The game's own first-touch counter names the player where
+the replay has one. Otherwise it's the car the ball leaves away from, which in
+a 50/50 is the one that won it.
 
 What real replays show, measured on 17 to 19 of them:
 - The ball resets, drops onto the spot, and the cars are released about 4 s
@@ -22,12 +26,22 @@ What real replays show, measured on 17 to 19 of them:
   takes the pitch out of that spin while the roll carries on, so the roof comes
   round with the nose level. Some cars' rotation replicates 0.2 s late, so the
   spin is judged by its median.
+- On 42 of one player's games (540 GO cars), the flips into the ball that won
+  the first touch began a median 0.11 s before the ball was played. One that
+  shows up to 0.15 s after it was the flip into the ball, too late.
+- The car that got within 1000 uu first won the first touch 91% of the time.
+  Where the ball went is another matter. A second after the hit it had come
+  back past 500 uu toward the car's own goal 28% of the time with a flip on
+  time, 31% when it came late, 50% with no flip, and 60% when the last flip
+  was long before contact. Getting there first made no difference to that.
 """
 
 from __future__ import annotations
 
+import bisect
 import math
 import statistics
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from itertools import groupby
 
@@ -57,6 +71,12 @@ STATIONARY_BOOST = 5.0
 BOOST_APPROACH = 10.0  # A car that used more boost reached the ball on it
 MOVED_UU = 150.0
 
+LATE_FLIP_S = 0.15  # A dodge this soon after the ball was played was into it
+REACH_UU = 1000.0  # How near the ball, across the field, a car has got there
+RESULT_AFTER_S = 1.0  # Where the ball is this long after the hit
+DIAGONAL_DEPTH = 3200.0  # Spawns nearer their goal line than this are diagonal
+OFF_CENTRE_DEPTH = 4200.0  # And nearer than this off-centre, behind it back
+
 FRONTFLIP_MAX_DEG = 15.0  # A dodge this close to straight ahead
 PITCH_TORQUE_MIN = 0.4  # Weaker pitch torque than this can't show a cancel
 SPIN_RATE = 5.5  # Rad/s about the dodge torque
@@ -77,6 +97,12 @@ class KickoffPlayer:
     approach: str
     boost_used: float
     time_to_ball: float | None  # Seconds from the release, if it got there
+    spot: str | None = None  # Its spawn: DIAGONAL, OFF_CENTRE or BACK
+    # For a car that went for the ball: seconds before the ball was played that
+    # its flip into it began, below 0 if after. None if it didn't flip into it.
+    flip_lead: float | None = None
+    reach_time: float | None = None  # Seconds from the release to REACH_UU
+    speed_at_contact: float | None = None  # uu/s as the ball was played
 
 
 @dataclass(frozen=True)
@@ -89,6 +115,8 @@ class KickoffEvent:
     first_touch_player: str | None = None
     time_to_first_touch: float | None = None  # From the release
     first_touch_team: str | None = None  # "BLUE" or "ORANGE"
+    # The ball's y a second after it was played. Blue attacks toward +y.
+    ball_y_after: float | None = None
 
 
 def ball_on_spot(ball: BallFrame) -> bool:
@@ -173,6 +201,17 @@ def _departure(car: PlayerFrame, ball: BallFrame) -> float:
     return sum(o * v for o, v in zip(offset, ball.velocity, strict=True)) / scale
 
 
+def _across(a: Vec3, b: Vec3) -> float:
+    return math.hypot(a.x - b.x, a.y - b.y)
+
+
+def _spot(spawn: Vec3) -> str:
+    depth = abs(spawn.y)
+    if depth < DIAGONAL_DEPTH:
+        return "DIAGONAL"
+    return "OFF_CENTRE" if depth < OFF_CENTRE_DEPTH else "BACK"
+
+
 def _role(spawn: Vec3, order: int) -> str:
     if order == 0:
         return "GO"
@@ -199,11 +238,45 @@ class _Car:
     contact: float | None = None  # In reach as the ball was played
     arrival: float = math.inf  # Seconds out as the ball was played
     dodges: list[tuple[float, float, float]] = field(default_factory=list)
+    late_dodges: list[float] = field(default_factory=list)  # After the play
     spins: list[tuple[float, float, float]] = field(default_factory=list)
+    reach_time: float | None = None
+    # (seconds out, distance across the field) at its last position update
+    fresh: tuple[float, float] | None = None
+    speed_at_contact: float | None = None
 
     @property
     def boost_used(self) -> float:
         return max(0.0, self.start_boost - self.least_boost)
+
+    def track_reach(self, now: float, position: Vec3, ball: Vec3) -> None:
+        """Time the car crossing REACH_UU, between its position updates.
+
+        Positions refresh every 2 or 3 frames and repeat in between, so a
+        repeated position is no update.
+        """
+        if self.reach_time is not None or position == self.last:
+            return
+        gap = _across(position, ball)
+        if gap <= REACH_UU:
+            if self.fresh is None or self.fresh[1] <= REACH_UU:
+                self.reach_time = now
+            else:
+                then, before = self.fresh
+                share = (before - REACH_UU) / (before - gap)
+                self.reach_time = then + (now - then) * share
+        self.fresh = (now, gap)
+
+    def flip_lead(self, contact: float | None) -> float | None:
+        """Seconds before `contact` its flip into the ball began, if it went."""
+        if contact is None or not self.is_contesting():
+            return None
+        into = [
+            at
+            for at in [at for at, _, _ in self.dodges] + self.late_dodges
+            if at - contact <= LATE_FLIP_S
+        ]
+        return round(contact - max(into), 3) if into else None
 
     def is_contesting(self) -> bool:
         """It went for the ball: it was in reach, or as GO, still closing on it.
@@ -267,6 +340,7 @@ class _Kickoff:
                 start_boost=float(car.boost_amount),
                 last=car.position,
                 least_boost=float(car.boost_amount),
+                fresh=(0.0, _across(car.position, release.ball.position)),
             )
             for car in release.players
         }
@@ -287,6 +361,7 @@ class _Kickoff:
             state = self.cars.get(car.player_id)
             if state is None:  # Someone who joined mid-kickoff
                 continue
+            state.track_reach(now, car.position, ball)
             state.last = car.position
             state.least_boost = min(state.least_boost, float(car.boost_amount))
             state.farthest = max(state.farthest, distance(car.position, state.spawn))
@@ -323,6 +398,7 @@ class _Kickoff:
         now = frame.timestamp - self.start
         for car in contesting:
             self.cars[car.player_id].contact = now
+            self.cars[car.player_id].speed_at_contact = round(speed(car.velocity), 1)
         for car in cars:
             self.cars[car.player_id].arrival = _arrival(car, ball)
         toucher = max(contesting, key=lambda car: _departure(car, ball))
@@ -356,12 +432,27 @@ class _Kickoff:
                 go.role, taker.role = taker.role, go.role
 
     def close(
-        self, frame: Frame, counter: list[ParserTouchEvent]
+        self,
+        frame: Frame,
+        counter: list[ParserTouchEvent],
+        after: Sequence[Frame] = (),
     ) -> KickoffEvent | None:
+        """Finish the kickoff on `frame`, given the frames up to a second later.
+
+        Those later frames show a flip into the ball that came too late, and
+        where the ball went.
+        """
         if frame.timestamp - self.start < SHORTEST_S:
             return None
         self._credit_counter(frame, counter)
         self._settle_level_spawns()
+        for later in after:
+            for event in later.component_events:
+                if event.kind == "dodge_torque" and event.player_id in self.cars:
+                    self.cars[event.player_id].late_dodges.append(
+                        later.timestamp - self.start
+                    )
+        toucher, team, at = self.first_touch or (None, None, None)
         players = []
         for player_id, car in self.cars.items():
             reached = car.contact if car.contact is not None else car.touched
@@ -372,15 +463,23 @@ class _Kickoff:
                     approach=car.approach(),
                     boost_used=round(car.boost_used, 2),
                     time_to_ball=None if reached is None else round(reached, 3),
+                    spot=_spot(car.spawn),
+                    flip_lead=car.flip_lead(at),
+                    reach_time=(
+                        None if car.reach_time is None else round(car.reach_time, 3)
+                    ),
+                    speed_at_contact=car.speed_at_contact,
                 )
             )
-        toucher, team, at = self.first_touch or (None, None, None)
+        result_at = frame.timestamp + RESULT_AFTER_S
+        settled = [f for f in after if f.timestamp >= result_at - 1e-6]
         return KickoffEvent(
             t_start=self.start,
             players=tuple(players),
             first_touch_player=toucher,
             time_to_first_touch=None if at is None else round(at, 3),
             first_touch_team=None if team is None else team_name(team),
+            ball_y_after=round(settled[0].ball.position.y, 1) if settled else None,
         )
 
 
@@ -412,6 +511,7 @@ def detect_kickoffs(frames: list[Frame], goals: list[GoalEvent]) -> list[Kickoff
     """
     released = releases(frames)
     counter = [event for frame in frames for event in frame.parser_first_touch_events]
+    times = [frame.timestamp for frame in frames]
     kickoffs = []
     current: _Kickoff | None = None
     for index, frame in enumerate(frames):
@@ -423,7 +523,11 @@ def detect_kickoffs(frames: list[Frame], goals: list[GoalEvent]) -> list[Kickoff
         played = math.hypot(frame.ball.velocity.x, frame.ball.velocity.y) > PLAYED_UU_S
         if played:
             current.played(frame)
-        if played or frame.timestamp - current.start >= LONGEST_S:
+            # Up to and including the first frame a second on
+            end = bisect.bisect_left(times, frame.timestamp + RESULT_AFTER_S - 1e-6)
+            kickoffs.append(current.close(frame, counter, frames[index + 1 : end + 1]))
+            current = None
+        elif frame.timestamp - current.start >= LONGEST_S:
             kickoffs.append(current.close(frame, counter))
             current = None
     if current is not None:
