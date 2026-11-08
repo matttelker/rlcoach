@@ -1,8 +1,9 @@
-"""Store the mistake detector's review of each game.
+"""Store the mistake detector's review of each game, with its kickoffs.
 
 Loading a game reviews it from the frames it already read. `rlcoach reviews`
 fills in games loaded before reviews existed, or redoes them all after the
-detector changes, reading each replay again.
+detector changes, reading each replay again. That also fills in the kickoffs
+of games reviewed before they were stored.
 """
 
 from __future__ import annotations
@@ -13,14 +14,52 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .models import GameReview, Replay, ReviewGoal, ReviewMistake
+from .models import (
+    GameReview,
+    Replay,
+    ReviewGoal,
+    ReviewKickoff,
+    ReviewKickoffCar,
+    ReviewMistake,
+)
 from .session import create_session
 
 if TYPE_CHECKING:
-    from ..analysis.mistakes import MistakeReport
+    from ..analysis.mistakes import KickoffMoment, MistakeReport
     from ..game import Game
 
 logger = logging.getLogger(__name__)
+
+
+def _kickoff_row(moment: KickoffMoment, my_id: str) -> ReviewKickoff:
+    kickoff = moment.kickoff
+    return ReviewKickoff(
+        t=moment.t,
+        seconds_left=moment.seconds_left,
+        clock=moment.clock,
+        score=moment.score,
+        phase=kickoff.phase,
+        first_touch_player=kickoff.first_touch_player,
+        first_touch_team=kickoff.first_touch_team,
+        time_to_first_touch=kickoff.time_to_first_touch,
+        ball_y_after=kickoff.ball_y_after,
+        cars=[
+            ReviewKickoffCar(
+                player_id=car.player_id,
+                team=car.team,
+                is_me=car.player_id == my_id,
+                role=car.role,
+                spot=car.spot,
+                approach=car.approach,
+                boost_used=car.boost_used,
+                time_to_ball=car.time_to_ball,
+                flip_lead=car.flip_lead,
+                reach_time=car.reach_time,
+                speed_at_contact=car.speed_at_contact,
+            )
+            for car in kickoff.players
+        ],
+    )
 
 
 def save_review(
@@ -86,6 +125,9 @@ def save_review(
                     )
                 )
             review.goals = goals
+            review.kickoffs = [
+                _kickoff_row(moment, report.player_id) for moment in report.kickoffs
+            ]
         session.add(review)
         session.commit()
     finally:

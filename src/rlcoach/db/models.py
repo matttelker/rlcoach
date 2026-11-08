@@ -151,6 +151,11 @@ class GameReview(Base):
         cascade="all, delete-orphan",
         order_by="ReviewGoal.t",
     )
+    kickoffs: Mapped[list[ReviewKickoff]] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewKickoff.t",
+    )
 
 
 class ReviewMistake(Base):
@@ -209,6 +214,67 @@ class ReviewGoal(Base):
     review: Mapped[GameReview] = relationship(back_populates="goals")
 
     __table_args__ = (Index("ix_review_goals_replay", "replay_id"),)
+
+
+class ReviewKickoff(Base):
+    """One kickoff in a reviewed game, on the game clock.
+
+    `ball_y_after` is where the ball was a second after the hit, with blue
+    attacking toward +y. `events.kickoffs.kickoff_result` reads it as won, even
+    or lost for a team.
+    """
+
+    __tablename__ = "review_kickoffs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE")
+    )
+    t: Mapped[float]  # When the cars were released
+    seconds_left: Mapped[float]
+    clock: Mapped[str]
+    score: Mapped[str]  # Before the kickoff, your team first
+    phase: Mapped[str]  # "INITIAL", or "OT" for the one that starts overtime
+    first_touch_player: Mapped[str | None]
+    first_touch_team: Mapped[str | None]
+    time_to_first_touch: Mapped[float | None]
+    ball_y_after: Mapped[float | None]
+
+    review: Mapped[GameReview] = relationship(back_populates="kickoffs")
+    cars: Mapped[list[ReviewKickoffCar]] = relationship(
+        back_populates="kickoff", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (Index("ix_review_kickoffs_replay", "replay_id"),)
+
+
+class ReviewKickoffCar(Base):
+    """How one car played one kickoff. See `events.kickoffs.KickoffPlayer`."""
+
+    __tablename__ = "review_kickoff_cars"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    kickoff_id: Mapped[int] = mapped_column(
+        ForeignKey("review_kickoffs.id", ondelete="CASCADE")
+    )
+    player_id: Mapped[str]
+    team: Mapped[int | None]
+    is_me: Mapped[bool]
+    role: Mapped[str]  # GO, CHEAT, WING or BACK
+    spot: Mapped[str | None]  # DIAGONAL, OFF_CENTRE or BACK
+    approach: Mapped[str]
+    boost_used: Mapped[float]
+    time_to_ball: Mapped[float | None]
+    flip_lead: Mapped[float | None]  # Seconds before contact its flip began
+    reach_time: Mapped[float | None]  # Seconds from the release to 1000 uu
+    speed_at_contact: Mapped[float | None]
+
+    kickoff: Mapped[ReviewKickoff] = relationship(back_populates="cars")
+
+    __table_args__ = (
+        Index("ix_review_kickoff_cars_kickoff", "kickoff_id"),
+        Index("ix_review_kickoff_cars_player", "player_id"),
+    )
 
 
 class ReviewGrade(Base):

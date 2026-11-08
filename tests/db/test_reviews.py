@@ -3,14 +3,30 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
 
-from rlcoach.analysis.mistakes import GoalMoment, GoalReview, Mistake, MistakeReport
-from rlcoach.db.models import GameReview, Player, Replay, ReviewGoal, ReviewMistake
+from rlcoach.analysis.mistakes import (
+    GoalMoment,
+    GoalReview,
+    KickoffMoment,
+    Mistake,
+    MistakeReport,
+)
+from rlcoach.db.models import (
+    GameReview,
+    Player,
+    Replay,
+    ReviewGoal,
+    ReviewKickoff,
+    ReviewKickoffCar,
+    ReviewMistake,
+)
 from rlcoach.db.reviews import games_to_review, review_game, save_review
 from rlcoach.db.session import create_session, init_db, reset_engine
+from rlcoach.events.kickoffs import KickoffEvent, KickoffPlayer
 
 
 @pytest.fixture(autouse=True)
@@ -136,4 +152,72 @@ def test_review_game_records_a_failure_instead_of_raising(tmp_path):
     assert status == "error"
     session = create_session()
     assert session.get(GameReview, "r1").status == "error"
+    session.close()
+
+
+def _with_kickoff() -> MistakeReport:
+    me = KickoffPlayer(
+        "epic:me",
+        "GO",
+        "STANDARD_DIAGONAL",
+        33.0,
+        2.1,
+        team=1,
+        spot="DIAGONAL",
+        flip_lead=0.12,
+        reach_time=1.66,
+        speed_at_contact=2080.0,
+    )
+    them = KickoffPlayer("epic:them", "GO", "SPEEDFLIP", 30.0, 2.1, team=0)
+    kickoff = KickoffEvent(
+        t_start=4.1,
+        players=(me, them),
+        first_touch_player="epic:them",
+        time_to_first_touch=2.1,
+        first_touch_team="BLUE",
+        ball_y_after=-900.0,
+    )
+    return replace(
+        _report(), kickoffs=[KickoffMoment(4.1, "5:00", 300.0, "0-0", kickoff)]
+    )
+
+
+def test_save_review_stores_every_car_of_every_kickoff():
+    save_review("r0", "epic:me", _with_kickoff())
+
+    session = create_session()
+    [kickoff] = session.get(GameReview, "r0").kickoffs
+    assert (kickoff.t, kickoff.clock, kickoff.score, kickoff.phase) == (
+        4.1,
+        "5:00",
+        "0-0",
+        "INITIAL",
+    )
+    assert (kickoff.first_touch_team, kickoff.ball_y_after) == ("BLUE", -900.0)
+    cars = {car.player_id: car for car in kickoff.cars}
+    mine = cars["epic:me"]
+    assert mine.is_me and not cars["epic:them"].is_me
+    assert (mine.team, mine.role, mine.spot, mine.approach) == (
+        1,
+        "GO",
+        "DIAGONAL",
+        "STANDARD_DIAGONAL",
+    )
+    assert (mine.flip_lead, mine.reach_time, mine.speed_at_contact) == (
+        0.12,
+        1.66,
+        2080.0,
+    )
+    session.close()
+
+
+def test_saving_again_replaces_the_kickoffs_too():
+    save_review("r0", "epic:me", _with_kickoff())
+    save_review("r0", "epic:me", _with_kickoff())
+    session = create_session()
+    assert session.query(ReviewKickoff).count() == 1
+    assert session.query(ReviewKickoffCar).count() == 2
+    save_review("r0", "epic:me", status="error", error="parser failed")
+    assert session.query(ReviewKickoff).count() == 0
+    assert session.query(ReviewKickoffCar).count() == 0
     session.close()
