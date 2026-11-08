@@ -260,7 +260,7 @@ class ParserComponentEvent:
     (``raw_value % 2 == 1``), not a debounced activation edge. If a
     component activates and deactivates between recorded frames, the raw
     counter advances by an even amount, parity is unchanged, and the
-    activation is invisible in ``active``. On ``Replay_files/0925.replay``,
+    activation is invisible in ``active``. On one 2v2 replay,
     there are 119 ``double_jump_impulse`` vectors but only 43 ``active:true``
     edges; dodge has 378 vector activations vs 268 active edges.
 

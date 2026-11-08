@@ -1,6 +1,8 @@
-from pathlib import Path
+"""The Rust parser's boost pad events on a real replay."""
 
 import pytest
+
+from tests.fixtures import real_replays
 
 
 def _has_rust_core():
@@ -17,7 +19,7 @@ def test_rust_pad_registry_event_completeness():
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
-    frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
+    frames = adapter.parse_network(real_replays.replay(real_replays.REGULATION))
 
     pad_events = []
     for frame in frames.frames:
@@ -47,7 +49,7 @@ def test_rust_pad_registry_event_completeness():
     collected_events = [event for event in pad_events if event["status"] == "COLLECTED"]
     assert collected_events, "expected collected pad events"
     # Pin catches Location-arm dispatch regressions that drop pickup routing.
-    assert len(collected_events) == 569
+    assert len(collected_events) == 285
 
     for event in collected_events:
         assert "actor_id" in event, f"missing actor_id on collected event: {event}"
@@ -66,7 +68,7 @@ def test_rust_pad_registry_survives_checkpoints():
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
-    frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
+    frames = adapter.parse_network(real_replays.replay(real_replays.REGULATION))
     pad_events = [
         event for frame in frames.frames for event in frame.get("boost_pad_events", [])
     ]
@@ -89,7 +91,7 @@ def test_location_component_events_do_not_break_pad_registry():
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
-    frames = adapter.parse_network(Path("Replay_files/testing_replay.replay"))
+    frames = adapter.parse_network(real_replays.replay(real_replays.REGULATION))
 
     pad_events = []
     component_events = []

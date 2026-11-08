@@ -15,8 +15,6 @@ dist/
 
 # Generated reports
 out/
-Replay_files/**/*.json
-Replay_files/**/*.md
 
 # Local
 .env

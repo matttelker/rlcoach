@@ -9,14 +9,12 @@ from pathlib import Path
 import pytest
 
 from rlcoach.parser.rust_adapter import RustAdapter
-
-REPLAY_PATH = Path("Replay_files/4985385d-2a6a-4bea-a312-8e539c7fd098.replay")
-PARITY_REPLAY_PATH = Path("Replay_files/0925.replay")
+from tests.fixtures import real_replays
 
 
-def _load_frames(limit: int | None = 1200):
+def _load_frames(limit: int | None = 1200, name: str = real_replays.REGULATION):
     adapter = RustAdapter()
-    network = adapter.parse_network(REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(name))
     if network is None:
         pytest.skip("Rust adapter failed to parse network frames for fixture replay")
     if not network.frames:
@@ -149,7 +147,7 @@ def test_opening_frames_do_not_mark_every_player_as_actively_jumping():
 
 def test_rust_header_exposes_match_guid_overtime_and_mutators():
     adapter = RustAdapter()
-    header = adapter.parse_header(REPLAY_PATH)
+    header = adapter.parse_header(real_replays.replay(real_replays.REGULATION))
 
     assert hasattr(header, "match_guid")
     assert hasattr(header, "overtime")
@@ -189,8 +187,8 @@ def test_frames_expose_parser_event_carrier_lists():
 
 
 def test_replay_before_the_counter_has_no_first_touch_events():
-    """This replay is net version 10, and ``MatchFirstTouches`` starts at 12."""
-    frames = _load_frames(limit=None)
+    """This 2022 replay is older than the game's ``MatchFirstTouches`` counter."""
+    frames = _load_frames(limit=None, name=real_replays.WITH_LEAVERS)
 
     assert not any(frame.get("parser_first_touch_events") for frame in frames)
 
@@ -209,7 +207,7 @@ def test_real_replay_emits_parser_tickmarks():
 
 
 def test_real_replay_emits_demo_attacker_authority():
-    frames = _load_frames()
+    frames = _load_frames(limit=None)
     demo_events = [
         demo for frame in frames for demo in frame.get("parser_demo_events", [])
     ]
@@ -256,7 +254,7 @@ def test_parse_header_maps_extended_metadata(monkeypatch):
 def test_iter_frames_has_players():
     """Regression: iter_frames must return non-empty players on real replays."""
     adapter = RustAdapter()
-    network = adapter.parse_network(REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(real_replays.REGULATION))
     assert network is not None, "Rust adapter failed to parse network frames"
     frames = network.frames
     total = len(frames)
@@ -267,18 +265,19 @@ def test_iter_frames_has_players():
     )
 
 
-def test_0925_replay_keeps_all_header_players_after_kickoff_resets():
+def test_replay_keeps_all_header_players_after_respawns():
     """Regression: car respawns should preserve all header player slots.
 
-    Replay_files/0925.replay recreates one orange car actor around 148s. The
-    parser used to drop player_2 after that reset because the deleted actor no
-    longer had a decoded team when its player slot was reclaimed.
+    A car comes back from a demolition as a new actor, three times in this game.
+    The parser used to drop a player after a car was recreated, because the
+    deleted actor no longer had a decoded team when its player slot was
+    reclaimed.
     """
     adapter = RustAdapter()
-    network = adapter.parse_network(PARITY_REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(real_replays.OVERTIME))
     assert network is not None, "Rust adapter failed to parse network frames"
     frames = network.frames
-    assert frames, "Rust adapter returned no frames for parity replay"
+    assert frames, "Rust adapter returned no frames for the replay"
 
     player_counts: Counter[str] = Counter()
     last_seen: dict[str, float] = {}
@@ -292,7 +291,7 @@ def test_0925_replay_keeps_all_header_players_after_kickoff_resets():
 
     minimum_expected_frames = int(len(frames) * 0.9)
     final_timestamp = float(frames[-1].get("timestamp", 0.0))
-    for idx in range(4):
+    for idx in range(6):
         player_id = f"player_{idx}"
         assert player_counts[player_id] >= minimum_expected_frames, (
             f"{player_id} only appeared in {player_counts[player_id]}/{len(frames)} "
@@ -309,7 +308,7 @@ def test_parser_touch_events_collected_across_replay():
     same actor are emitted (not suppressed after the first one).
     """
     adapter = RustAdapter()
-    network = adapter.parse_network(REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(real_replays.REGULATION))
     if network is None or not network.frames:
         pytest.skip("Rust adapter failed to parse network frames")
 

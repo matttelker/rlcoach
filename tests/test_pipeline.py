@@ -13,12 +13,14 @@ from rlcoach.config import IdentityConfig, PathsConfig, PreferencesConfig, RLCoa
 from rlcoach.db.models import GameReview, Player, PlayerGameStats, Replay
 from rlcoach.db.session import create_session, init_db, reset_engine
 from rlcoach.game import game_from_frames
+from rlcoach.identity import build_player_identities
+from rlcoach.parser import read_header
 from rlcoach.parser.types import Header, PlayerInfo
 from rlcoach.pipeline import IngestionStatus, process_replay_file
+from tests.fixtures import real_replays
 from tests.fixtures.builders import create_simple_replay_frames
 
-REPLAY = Path("Replay_files/6804bd43-5415-49f4-b7d0-31b168c871ed.replay")
-ME = "steam:76561199836440914"
+ME = "steam:1"
 
 
 def _config(**identity):
@@ -50,15 +52,22 @@ class Counting:
         return self.function(*args, **kwargs)
 
 
-@pytest.mark.skipif(not REPLAY.exists(), reason="replay fixture missing")
-def test_a_real_replay_is_stored_and_reviewed_from_one_parse(db, monkeypatch):
+@pytest.fixture
+def real() -> Path:
+    return real_replays.replay(real_replays.REGULATION)
+
+
+def test_a_real_replay_is_stored_and_reviewed_from_one_parse(db, monkeypatch, real):
+    # Whoever is first in the header plays me
+    me = build_player_identities(read_header(real).players)[0]
+    scores = {"BLUE": 1, "ORANGE": 4}
     header = Counting(pipeline.read_header)
     network = Counting(game_module.read_network)
     monkeypatch.setattr(pipeline, "read_header", header)
     monkeypatch.setattr(game_module, "read_network", network)
-    config = _config(platform_ids=[ME])
+    config = _config(platform_ids=[me.canonical_id])
 
-    result = process_replay_file(REPLAY, config)
+    result = process_replay_file(real, config)
 
     assert result.status == IngestionStatus.SUCCESS, result.error
     assert result.replay_id == result.file_hash
@@ -67,21 +76,27 @@ def test_a_real_replay_is_stored_and_reviewed_from_one_parse(db, monkeypatch):
         replay = session.get(Replay, result.replay_id)
         review = session.get(GameReview, result.replay_id)
         mine = session.query(PlayerGameStats).filter_by(is_me=True).one()
-        me = session.get(Player, ME)
+        player = session.get(Player, me.canonical_id)
     assert (replay.playlist, replay.map, replay.my_team) == (
-        "DOUBLES",
-        "Wasteland_GRS_P",
-        "BLUE",
+        "STANDARD",
+        "street_p",
+        me.team,
     )
-    assert (replay.my_score, replay.opponent_score, replay.result) == (1, 5, "LOSS")
-    assert replay.source_file == str(REPLAY)
-    assert (_count(Player), _count(PlayerGameStats)) == (4, 4)
-    assert (mine.player_id, me.display_name, me.is_me) == (ME, "tlsc.", True)
-    assert (review.status, review.player_id) == ("ok", ME)
+    theirs = "ORANGE" if me.team == "BLUE" else "BLUE"
+    assert (replay.my_score, replay.opponent_score) == (scores[me.team], scores[theirs])
+    assert replay.result == ("WIN" if me.team == "ORANGE" else "LOSS")
+    assert replay.source_file == str(real)
+    assert (_count(Player), _count(PlayerGameStats)) == (6, 6)
+    assert (mine.player_id, player.display_name, player.is_me) == (
+        me.canonical_id,
+        me.display_name,
+        True,
+    )
+    assert (review.status, review.player_id) == ("ok", me.canonical_id)
 
     # Loading it again stops at the hash, before checking or parsing the file
     monkeypatch.setattr(pipeline, "check_replay_file", lambda p: pytest.fail("checked"))
-    again = process_replay_file(REPLAY, config)
+    again = process_replay_file(real, config)
     assert (again.status, again.file_hash) == (
         IngestionStatus.DUPLICATE,
         result.file_hash,
@@ -150,10 +165,9 @@ def test_a_failed_load_is_an_error_with_the_reason(db, fake_replay, monkeypatch)
     assert _count(Replay) == 0
 
 
-@pytest.mark.skipif(not REPLAY.exists(), reason="replay fixture missing")
-def test_a_damaged_replay_is_an_error_before_parsing(db, tmp_path, monkeypatch):
+def test_a_damaged_replay_is_an_error_before_parsing(db, tmp_path, monkeypatch, real):
     damaged = tmp_path / "damaged.replay"
-    shutil.copy(REPLAY, damaged)
+    shutil.copy(real, damaged)
     data = bytearray(damaged.read_bytes())
     data[len(data) // 2] ^= 0xFF
     damaged.write_bytes(bytes(data))

@@ -121,12 +121,14 @@ npm --prefix gui run build
 
 Point `HOME` and `USERPROFILE` at a scratch folder when running pytest, so nothing touches your real `~/.rlcoach`. From Git Bash that leaves a stray `black/` cache folder in the repo; delete it.
 
+The tests that read real replays use your own, which stay out of git. Point `RLCOACH_TEST_REPLAYS` at the folder that holds them, `D:\rlcoach-test-replays` on this PC. Without it those tests skip, as they do in CI. [tests/fixtures/real_replays.py](tests/fixtures/real_replays.py) lists the games and how the files are named.
+
 ## Rules
 
-- Check parser, analysis and report changes against real replays in `Replay_files/`, not only synthetic data. Replay coaching numbers are easy to get plausibly wrong.
-- For any stat the dashboard shows, run `tests/analysis/test_ballchasing_parity.py`, which compares one real replay with Ballchasing's own CSV. Keep its bounds tight.
+- Check parser, analysis and report changes against your real replays, not only synthetic data. Replay coaching numbers are easy to get plausibly wrong.
+- For any stat the dashboard shows, run `tests/analysis/test_ballchasing_parity.py`, which compares three of your games with Ballchasing's own CSVs. Keep its bounds tight.
 - Mirror new source modules with tests under `tests/`. Build synthetic data with `tests/fixtures/builders.py`.
-- `analysis/__init__.py` runs each stat analyzer once per team and once per player. Add a stat only when the dashboard or the coaching will read it.
+- `analysis/__init__.py` computes each player's stats, exactly the columns in `STAT_COLUMNS` in `db/games.py`. Add a stat only when the dashboard or the coaching will read it.
 - Changing database models or analysis means reloading replays, because `~/.rlcoach` holds results from the old code. There are no migrations. New tables are the exception: `init_db` creates them in an existing database.
 - After changing the mistake detector, run `uv run rlcoach reviews --redo` so stored reviews match the new rules.
 - Keep analysis local. Nothing in the parser or analyzers may call the network.

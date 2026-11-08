@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -35,6 +34,7 @@ from rlcoach.events.types import ChallengeEvent, GoalEvent
 from rlcoach.field_constants import Vec3
 from rlcoach.game import read_game
 from rlcoach.parser.types import ParserTouchEvent
+from tests.fixtures import real_replays
 from tests.fixtures.builders import (
     create_test_ball,
     create_test_frame,
@@ -1145,13 +1145,10 @@ def test_standard_arena_is_accepted():
     check_supported_map("UtopiaStadium_Dusk_P")
 
 
-@pytest.mark.skipif(
-    not Path("Replay_files/0925.replay").exists(), reason="replay fixture missing"
-)
 def test_the_review_sees_the_end_of_the_game():
-    """NumFrames/30 seconds, the header's match length, would cut it short."""
-    frames = read_game(Path("Replay_files/0925.replay")).frames
-    assert frames[-1].timestamp == pytest.approx(323.09, abs=0.5)
+    """NumFrames/30 seconds, the header's match length, would cut it at 351 s."""
+    frames = read_game(real_replays.replay(real_replays.OVERTIME)).frames
+    assert frames[-1].timestamp == pytest.approx(396.85, abs=0.5)
 
 
 def test_every_mistake_kind_has_a_category():

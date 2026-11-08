@@ -11,9 +11,8 @@ from rlcoach.events import detect_touches
 from rlcoach.game import NoFramesError, game_from_frames, read_game
 from rlcoach.parser.types import Header, NetworkFrames, PlayerInfo
 from rlcoach.report import _went_to_overtime
+from tests.fixtures import real_replays
 from tests.fixtures.builders import create_simple_replay_frames
-
-REPLAY = Path("Replay_files/testing_replay.replay")
 
 
 class Counting:
@@ -34,18 +33,17 @@ def counted():
         network = Counting(game_module.read_network)
         patch.setattr(game_module, "read_header", header)
         patch.setattr(game_module, "read_network", network)
-        game = read_game(REPLAY)
+        game = read_game(real_replays.replay(real_replays.OVERTIME))
     return game, header.calls, network.calls
 
 
-@pytest.mark.skipif(not REPLAY.exists(), reason="replay fixture missing")
 def test_a_real_replay_is_parsed_once_into_frames_and_events(counted):
     game, header_reads, network_reads = counted
     assert (header_reads, network_reads) == (1, 1)
-    assert game.header.map_name == "EuroStadium_Dusk_P"
+    assert game.header.map_name == "EuroStadium_Rainy_P"
     assert game.frames[0].timestamp == 0.0
-    # 5-4 on the scoreboard
-    assert len(game.goals) == 9
+    # 2-1 on the scoreboard
+    assert len(game.goals) == 3
     assert game.touches and game.kickoffs and game.boost_pickups
 
 
@@ -86,27 +84,21 @@ def test_events_come_from_the_frames_given():
     assert game.goals == [] and game.demos == []
 
 
-TIED = Path("Replay_files/70c0e78e-ea32-4722-a951-937baa40efc9.replay")
-
-
 @pytest.fixture(scope="module")
-def tied():
-    return read_game(TIED)
+def regulation():
+    return read_game(real_replays.replay(real_replays.REGULATION))
 
 
-@pytest.mark.skipif(not TIED.exists(), reason="replay fixture missing")
-def test_touches_are_repeatable_between_parses(tied):
+def test_touches_are_repeatable_between_parses(regulation):
     """Regression: same-frame touches swapped, which changed passing stats."""
-    assert read_game(TIED, tied.header).touches == tied.touches
+    path = real_replays.replay(real_replays.REGULATION)
+    assert read_game(path, regulation.header).touches == regulation.touches
 
 
-@pytest.mark.skipif(
-    not (REPLAY.exists() and TIED.exists()), reason="replay fixture missing"
-)
-def test_real_games_show_whether_they_went_to_overtime(counted, tied):
+def test_real_games_show_whether_they_went_to_overtime(counted, regulation):
     """Regression: current headers carry no overtime flag, so every game said no."""
-    # 5-4, settled by an overtime goal
+    # 2-1, settled by an overtime goal
     game = counted[0]
     assert _went_to_overtime(game.header, game.kickoffs) is True
-    # 3-2, the last goal 3 s before the end of regulation
-    assert _went_to_overtime(tied.header, tied.kickoffs) is False
+    # 1-4 in regulation
+    assert _went_to_overtime(regulation.header, regulation.kickoffs) is False

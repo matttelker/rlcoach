@@ -15,8 +15,12 @@ from rlcoach.replay_file import (
     file_hash,
     replay_crc,
 )
+from tests.fixtures import real_replays
 
-REPLAY = Path("Replay_files/6804bd43-5415-49f4-b7d0-31b168c871ed.replay")
+
+@pytest.fixture
+def real() -> Path:
+    return real_replays.replay(real_replays.REGULATION)
 
 
 def _crc_bit_by_bit(data: bytes) -> int:
@@ -48,19 +52,19 @@ def test_the_fast_checksum_matches_the_definition(data):
     assert replay_crc(data) == _crc_bit_by_bit(data)
 
 
-def test_a_real_replay_passes(tmp_path):
-    check_replay_file(REPLAY)
+def test_a_real_replay_passes(real):
+    check_replay_file(real)
 
 
-def test_a_real_replays_stored_checksums_match_the_definition():
-    data = REPLAY.read_bytes()
+def test_a_real_replays_stored_checksums_match_the_definition(real):
+    data = real.read_bytes()
     length, stored = struct.unpack_from("<iI", data, 0)
     header = data[8 : 8 + length]
     assert replay_crc(header) == _crc_bit_by_bit(header) == stored
 
 
-def test_one_changed_byte_is_caught(tmp_path):
-    data = bytearray(REPLAY.read_bytes())
+def test_one_changed_byte_is_caught(real, tmp_path):
+    data = bytearray(real.read_bytes())
     data[len(data) // 2] ^= 0x01
     damaged = tmp_path / "damaged.replay"
     damaged.write_bytes(bytes(data))
@@ -76,9 +80,9 @@ def test_a_wrong_header_checksum_is_caught(tmp_path):
         check_replay_file(path)
 
 
-def test_a_cut_short_file_is_caught(tmp_path):
+def test_a_cut_short_file_is_caught(real, tmp_path):
     path = tmp_path / "short.replay"
-    path.write_bytes(REPLAY.read_bytes()[:20_000])
+    path.write_bytes(real.read_bytes()[:20_000])
     with pytest.raises(ReplayFileError, match="cut short"):
         check_replay_file(path)
 

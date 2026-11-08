@@ -1,9 +1,12 @@
+"""The Rust parser on real replays."""
+
 import math
 from pathlib import Path
 
 import pytest
 
-PARITY_REPLAY_PATH = Path("Replay_files/0925.replay")
+from tests.fixtures import real_replays
+
 LTM_REPLAY_PATH = Path("replays/A181B28546BBD8AC71E63793B65BABAE.replay")
 
 
@@ -20,7 +23,7 @@ def _has_rust_core():
 def test_rust_header_and_frames_smoke():
     from rlcoach.parser import RustAdapter
 
-    path = Path("Replay_files/testing_replay.replay")
+    path = real_replays.replay(real_replays.REGULATION)
 
     adapter = RustAdapter()
 
@@ -49,7 +52,7 @@ def test_rust_network_parse_returns_diagnostics_shape():
     import rlreplay_rust  # type: ignore
 
     result = rlreplay_rust.parse_network_with_diagnostics(
-        "Replay_files/testing_replay.replay"
+        str(real_replays.replay(real_replays.REGULATION))
     )
 
     assert isinstance(result, dict)
@@ -61,26 +64,20 @@ def test_rust_network_parse_returns_diagnostics_shape():
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
-@pytest.mark.skipif(
-    not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
-)
-def test_0925_header_exposes_declared_record_fps():
+def test_header_exposes_declared_record_fps():
     from rlcoach.parser import RustAdapter
 
-    header = RustAdapter().parse_header(PARITY_REPLAY_PATH)
+    header = RustAdapter().parse_header(real_replays.replay(real_replays.OVERTIME))
 
     assert header.declared_record_fps is not None
     assert 1.0 <= header.declared_record_fps <= 240.0
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
-@pytest.mark.skipif(
-    not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
-)
-def test_0925_replay_exposes_frame_delta():
+def test_replay_exposes_frame_delta():
     from rlcoach.parser import RustAdapter
 
-    network = RustAdapter().parse_network(PARITY_REPLAY_PATH)
+    network = RustAdapter().parse_network(real_replays.replay(real_replays.OVERTIME))
 
     assert network is not None
     assert network.frames
@@ -108,14 +105,11 @@ def test_ltm_replay_reports_parse_reason_not_silent_none():
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
-@pytest.mark.skipif(
-    not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
-)
 def test_rust_network_preserves_header_player_frames_after_respawn():
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
-    network = adapter.parse_network(PARITY_REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(real_replays.OVERTIME))
 
     assert network is not None
     assert network.frames
@@ -130,7 +124,7 @@ def test_rust_network_preserves_header_player_frames_after_respawn():
             player_counts[player_id] = player_counts.get(player_id, 0) + 1
             player_last_timestamp[player_id] = float(frame["timestamp"])
 
-    expected_player_ids = {f"player_{idx}" for idx in range(4)}
+    expected_player_ids = {f"player_{idx}" for idx in range(6)}
     assert expected_player_ids <= player_counts.keys()
 
     total_frames = len(network.frames)
@@ -142,14 +136,11 @@ def test_rust_network_preserves_header_player_frames_after_respawn():
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
-@pytest.mark.skipif(
-    not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
-)
-def test_0925_replay_exposes_car_angular_velocity():
+def test_replay_exposes_car_angular_velocity():
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
-    network = adapter.parse_network(PARITY_REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(real_replays.OVERTIME))
 
     assert network is not None
     assert network.frames
@@ -170,14 +161,11 @@ def test_0925_replay_exposes_car_angular_velocity():
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
-@pytest.mark.skipif(
-    not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
-)
-def test_0925_replay_exposes_rigid_body_sleeping_flags():
+def test_replay_exposes_rigid_body_sleeping_flags():
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
-    network = adapter.parse_network(PARITY_REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(real_replays.OVERTIME))
 
     assert network is not None
     assert network.frames
@@ -196,14 +184,11 @@ def test_0925_replay_exposes_rigid_body_sleeping_flags():
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
-@pytest.mark.skipif(
-    not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
-)
-def test_0925_replay_exposes_driving_inputs():
+def test_replay_exposes_driving_inputs():
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
-    network = adapter.parse_network(PARITY_REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(real_replays.OVERTIME))
 
     assert network is not None
     assert network.frames
@@ -230,14 +215,11 @@ def test_0925_replay_exposes_driving_inputs():
 
 
 @pytest.mark.skipif(not _has_rust_core(), reason="Rust core not available")
-@pytest.mark.skipif(
-    not PARITY_REPLAY_PATH.exists(), reason="0925 parity replay fixture missing"
-)
-def test_0925_replay_exposes_component_state_and_events():
+def test_replay_exposes_component_state_and_events():
     from rlcoach.parser import RustAdapter
 
     adapter = RustAdapter()
-    network = adapter.parse_network(PARITY_REPLAY_PATH)
+    network = adapter.parse_network(real_replays.replay(real_replays.OVERTIME))
 
     assert network is not None
     assert network.frames
