@@ -8,9 +8,14 @@ from dataclasses import replace
 import pytest
 
 from rlcoach.events.kickoffs import (
+    KickoffEvent,
+    KickoffPlayer,
     detect_kickoffs,
+    flip_timing,
     is_held_for_kickoff,
+    kickoff_result,
     releases,
+    went_for_ball,
 )
 from rlcoach.events.types import GoalEvent
 from rlcoach.field_constants import Vec3
@@ -406,6 +411,45 @@ def test_no_flip_into_the_ball_has_no_lead():
     frames, release = _go_against(drive(DIAGONAL, BESIDE_BALL))
     frames = with_flip_at(frames, release + 1.0, "orange", Vec3(0.0, 2.24, 0.0))
     assert _player(_one(frames), "orange").flip_lead is None
+
+
+def test_each_car_keeps_its_team():
+    found = _one(_go_against(drive(DIAGONAL, BESIDE_BALL))[0])
+    assert (_player(found, "blue").team, _player(found, "orange").team) == (0, 1)
+
+
+def _went(approach="STANDARD_DIAGONAL", flip_lead=None):
+    return KickoffPlayer("me", "GO", approach, 30.0, 2.0, flip_lead=flip_lead)
+
+
+@pytest.mark.parametrize(
+    ("lead", "timing"),
+    [(0.1, "ON_TIME"), (0.0, "ON_TIME"), (0.45, "ON_TIME"), (-0.05, "LATE")],
+)
+def test_a_flip_into_the_ball_is_on_time_up_to_its_contact(lead, timing):
+    assert flip_timing(_went(flip_lead=lead)) == timing
+
+
+def test_a_flip_long_before_the_ball_or_none_is_no_flip_into_it():
+    assert flip_timing(_went(flip_lead=0.8)) == "NONE"
+    assert flip_timing(_went("STANDARD_BOOST")) == "NONE"
+
+
+def test_a_car_that_didnt_go_for_the_ball_has_no_flip_timing():
+    for approach in ("FAKE_STATIONARY", "SUPPORT_CHEAT", "SUPPORT_HOLD", "UNKNOWN"):
+        assert flip_timing(_went(approach, flip_lead=0.1)) is None
+        assert not went_for_ball(_went(approach))
+    assert went_for_ball(_went("SPEEDFLIP"))
+
+
+@pytest.mark.parametrize(
+    ("y", "blue", "orange"),
+    [(800.0, "WON", "LOST"), (-800.0, "LOST", "WON"), (300.0, "EVEN", "EVEN")],
+)
+def test_a_kickoff_goes_to_the_team_the_ball_went_toward(y, blue, orange):
+    kickoff = KickoffEvent(t_start=4.0, ball_y_after=y)
+    assert (kickoff_result(kickoff, 0), kickoff_result(kickoff, 1)) == (blue, orange)
+    assert kickoff_result(KickoffEvent(t_start=4.0), 0) is None
 
 
 def _updated_every(path, every):

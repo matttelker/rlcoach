@@ -18,6 +18,13 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from ..events.kickoffs import (
+    KickoffEvent,
+    KickoffPlayer,
+    flip_timing,
+    kickoff_result,
+    went_for_ball,
+)
 from ..events.types import ChallengeEvent, GoalEvent, team_name
 from ..field_constants import (
     BACK_WALL_Y,
@@ -145,6 +152,22 @@ INSTEAD = {
         "When teammates are already challenging, stay in goal. Be the save "
         "behind them, not one more car going for the same ball."
     ),
+    # Flips into the ball that won the kickoff began about 0.1 s before it was
+    # played, which at kickoff speed is about two car lengths out
+    "kickoff_no_flip": (
+        "On a kickoff you go for, boost all the way in and flip into the ball "
+        "when you're about two car lengths from it, so your flip hits the ball, "
+        "not your bumper."
+    ),
+    "kickoff_late_flip": (
+        "Start your flip a moment sooner, about two car lengths from the ball. "
+        "A flip that starts as you reach the ball puts no power into the hit."
+    ),
+    "kickoff_double_commit": (
+        "Only one of you goes. From level spawns the usual rule is the car on "
+        "the left goes, otherwise the nearer car. The other cheats up behind "
+        "them or takes boost, ready for where the ball goes."
+    ),
 }
 
 # Each kind belongs to one habit to train. The dashboard groups by these.
@@ -154,6 +177,7 @@ CATEGORIES = {
     "clearing": "Clearing",
     "goalkeeping": "Goalkeeping",
     "boost": "Boost",
+    "kickoffs": "Kickoffs",
 }
 CATEGORY = {
     "last_back_upfield": "last_back",
@@ -167,6 +191,14 @@ CATEGORY = {
     "no_save_attempt": "goalkeeping",
     "behind_line": "goalkeeping",
     "low_boost_challenge": "boost",
+    "kickoff_no_flip": "kickoffs",
+    "kickoff_late_flip": "kickoffs",
+    "kickoff_double_commit": "kickoffs",
+}
+SPOT_NAMES = {
+    "DIAGONAL": "the diagonal",
+    "OFF_CENTRE": "off-centre",
+    "BACK": "the back",
 }
 
 
@@ -233,6 +265,17 @@ class GoalMoment:
 
 
 @dataclass(frozen=True)
+class KickoffMoment:
+    """One kickoff placed on the game clock, with how every car played it."""
+
+    t: float  # When the cars were released
+    clock: str
+    seconds_left: float
+    score: str  # Before the kickoff, your team first
+    kickoff: KickoffEvent
+
+
+@dataclass(frozen=True)
 class DefenderRole:
     """What one defender did about a goal."""
 
@@ -288,6 +331,7 @@ class MistakeReport:
     clears: dict[str, int]
     player_id: str = ""
     goal_timeline: list[GoalMoment] = field(default_factory=list)
+    kickoffs: list[KickoffMoment] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1167,11 +1211,100 @@ def review_conceded_goals(ctx: Context) -> tuple[list[GoalReview], list[Mistake]
 
 
 # How a goal review names the earlier moment that led to the goal
+def _after_the_kickoff(kickoff: KickoffEvent, team: int) -> str:
+    result = kickoff_result(kickoff, team)
+    if result == "LOST":
+        return " A second later the ball was coming back into your half."
+    if result == "WON":
+        return " The ball still went forward for you, but you can't count on that."
+    return ""
+
+
+def _kickoff_flags(
+    ctx: Context, kickoff: KickoffEvent, me: KickoffPlayer
+) -> list[Mistake]:
+    """The kickoff habits a coach would correct, for one kickoff."""
+    if kickoff.time_to_first_touch is None or not went_for_ball(me):
+        return []
+    index = ctx.index_at(kickoff.t_start + kickoff.time_to_first_touch)
+    after = _after_the_kickoff(kickoff, ctx.team)
+    spot = SPOT_NAMES.get(me.spot or "", "your spawn")
+    flags = []
+    timing = flip_timing(me)
+    if me.role == "GO" and timing == "NONE":
+        flags.append(
+            _flag(
+                ctx,
+                "kickoff_no_flip",
+                index,
+                0.0,
+                f"You went for the kickoff from {spot} and reached the ball "
+                f"without flipping into it.{after}",
+            )
+        )
+    elif me.role == "GO" and timing == "LATE":
+        flags.append(
+            _flag(
+                ctx,
+                "kickoff_late_flip",
+                index,
+                0.0,
+                f"Your flip into the kickoff began {-me.flip_lead:.2f} s after the "
+                f"ball was played, from {spot}.{after}",
+            )
+        )
+    mates = [
+        p
+        for p in kickoff.players
+        if p.team == me.team and p.player_id != me.player_id and went_for_ball(p)
+    ]
+    # A teammate's own mistake isn't yours, unless you spawned level with them
+    mates = [p for p in mates if me.role != "GO" or p.spot == me.spot]
+    if mates:
+        flags.append(
+            _flag(
+                ctx,
+                "kickoff_double_commit",
+                index,
+                0.0,
+                f"You and {ctx.name(mates[0].player_id)} both went for the "
+                f"kickoff.{after}",
+            )
+        )
+    return flags
+
+
+def review_kickoffs(
+    ctx: Context, kickoffs: list[KickoffEvent]
+) -> tuple[list[KickoffMoment], list[Mistake]]:
+    """Place every kickoff on the clock, and flag your kickoff habits."""
+    moments: list[KickoffMoment] = []
+    flags: list[Mistake] = []
+    for kickoff in kickoffs:
+        index = ctx.index_at(kickoff.t_start)
+        moments.append(
+            KickoffMoment(
+                t=round(kickoff.t_start, 2),
+                clock=_clock_at(ctx, index),
+                seconds_left=round(_seconds_left_at(ctx, index), 1),
+                score=_score_at(ctx, kickoff.t_start),
+                kickoff=kickoff,
+            )
+        )
+        me = next((p for p in kickoff.players if p.player_id == ctx.player_id), None)
+        if me is not None:
+            flags.extend(_kickoff_flags(ctx, kickoff, me))
+    return moments, flags
+
+
 LEAD_IN = {
     "clear_given_back": "Your clear went straight back to them",
     "double_commit": "You double committed",
     "caught_upfield": "You were caught upfield",
     "low_boost_challenge": "You lost a 50/50 on low boost",
+    "kickoff_no_flip": "You went for the kickoff without a flip",
+    "kickoff_late_flip": "Your kickoff flip came late",
+    "kickoff_double_commit": "You and a teammate both went for the kickoff",
 }
 
 
@@ -1297,6 +1430,7 @@ def review_player(
 
     reviews, goal_flags = review_conceded_goals(ctx)
     clear_flags, clears = detect_clears_given_back(ctx)
+    kickoffs, kickoff_flags = review_kickoffs(ctx, game.kickoffs)
     reviews, earlier_flags = link_goals_to_moments(
         ctx,
         reviews,
@@ -1305,6 +1439,7 @@ def review_player(
             *detect_caught_upfield(ctx),
             *detect_low_boost_challenges(ctx),
             *clear_flags,
+            *kickoff_flags,
         ],
     )
     mistakes = sorted([*goal_flags, *earlier_flags], key=lambda m: m.t)
@@ -1318,6 +1453,7 @@ def review_player(
         clears=clears,
         player_id=match.canonical_id,
         goal_timeline=goal_timeline(ctx),
+        kickoffs=kickoffs,
     )
 
 
@@ -1354,5 +1490,18 @@ def format_report(report: MistakeReport) -> str:
         lines.append(
             f"Clears: {clears['given_back']} of {clears['clears']} from your half "
             "went to an opponent before leaving your third."
+        )
+    mine = [
+        p
+        for moment in report.kickoffs
+        for p in moment.kickoff.players
+        if p.player_id == report.player_id and p.role == "GO"
+    ]
+    if report.kickoffs:
+        timings = [flip_timing(p) for p in mine]
+        lines.append(
+            f"Kickoffs: {len(report.kickoffs)}, {len(mine)} with you going. "
+            f"Your flip into the ball: {timings.count('ON_TIME')} on time, "
+            f"{timings.count('LATE')} late, {timings.count('NONE')} none."
         )
     return "\n".join(lines)

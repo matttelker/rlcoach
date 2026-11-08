@@ -207,6 +207,7 @@ def test_coach_lists_every_category(client):
         "clearing",
         "goalkeeping",
         "boost",
+        "kickoffs",
     ]
 
 

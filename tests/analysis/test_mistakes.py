@@ -14,6 +14,7 @@ from rlcoach.analysis.mistakes import (
     GOAL_CHANCES,
     INSTEAD,
     LEAD_IN,
+    GoalReview,
     UnsupportedReplayError,
     build_context,
     check_supported_map,
@@ -29,10 +30,14 @@ from rlcoach.analysis.mistakes import (
     live_mask,
     own_depth,
     review_conceded_goals,
+    review_kickoffs,
+    review_player,
 )
+from rlcoach.events.kickoffs import KickoffEvent, KickoffPlayer
 from rlcoach.events.types import ChallengeEvent, GoalEvent
 from rlcoach.field_constants import Vec3
 from rlcoach.game import read_game
+from rlcoach.identity import build_player_identities
 from rlcoach.parser.types import ParserTouchEvent
 from tests.fixtures import real_replays
 from tests.fixtures.builders import (
@@ -1280,3 +1285,142 @@ def test_goal_timeline_has_no_winner_in_a_loss():
 def test_the_first_goal_of_a_one_nil_win_is_the_winner():
     ctx = _scored("ORANGE")
     assert goal_timeline(ctx)[0].winner is True
+
+
+# Kickoffs
+
+
+def _kickoff_ctx(goals=()):
+    def players(t):
+        return [
+            _car(ME, ORANGE, 0.0, 3000.0),
+            _car(MATE, ORANGE, 0.0, 4600.0),
+            _car(OPP, BLUE, 0.0, -3000.0),
+        ]
+
+    frames, origin = _play(12.0, players, lambda t: _ball(0.0, 0.0))
+    return _ctx(frames, goals=goals), origin
+
+
+def _kickoff(origin, me, mate=None, ball_y_after=800.0):
+    """A kickoff released at `origin`, played 2 s later. +y heads for orange's net."""
+    mate = mate or KickoffPlayer(MATE, "BACK", "SUPPORT_HOLD", 0.0, None, team=ORANGE)
+    opp = KickoffPlayer(OPP, "GO", "STANDARD_DIAGONAL", 33.0, 2.0, team=BLUE)
+    return KickoffEvent(
+        t_start=origin,
+        players=(me, mate, opp),
+        first_touch_player=OPP,
+        time_to_first_touch=2.0,
+        first_touch_team="BLUE",
+        ball_y_after=ball_y_after,
+    )
+
+
+def _going(approach="STANDARD_BOOST", flip_lead=None, role="GO", spot="DIAGONAL"):
+    return KickoffPlayer(
+        ME, role, approach, 33.0, 2.0, team=ORANGE, spot=spot, flip_lead=flip_lead
+    )
+
+
+def test_going_for_a_kickoff_without_a_flip_is_flagged():
+    ctx, origin = _kickoff_ctx()
+    _, [flag] = review_kickoffs(ctx, [_kickoff(origin, _going())])
+    assert (flag.kind, flag.category) == ("kickoff_no_flip", "kickoffs")
+    assert flag.t == pytest.approx(origin + 2.0, abs=DT)
+    assert "from the diagonal" in flag.what
+    # The ball headed for orange's net, so it was coming back at you
+    assert "coming back into your half" in flag.what
+    assert flag.instead == INSTEAD["kickoff_no_flip"]
+
+
+def test_a_flip_long_before_the_ball_was_for_speed_so_no_flip_into_it():
+    ctx, origin = _kickoff_ctx()
+    me = _going("STANDARD_DIAGONAL", flip_lead=1.2)
+    _, [flag] = review_kickoffs(ctx, [_kickoff(origin, me)])
+    assert flag.kind == "kickoff_no_flip"
+
+
+def test_a_flip_that_began_after_the_contact_came_late():
+    ctx, origin = _kickoff_ctx()
+    me = _going("STANDARD", flip_lead=-0.08, spot="OFF_CENTRE")
+    _, [flag] = review_kickoffs(ctx, [_kickoff(origin, me, ball_y_after=-800.0)])
+    assert flag.kind == "kickoff_late_flip"
+    assert "0.08 s after" in flag.what and "off-centre" in flag.what
+    assert "went forward for you" in flag.what
+
+
+@pytest.mark.parametrize(
+    "me",
+    [
+        _going("STANDARD_FRONTFLIP", flip_lead=0.12),
+        _going("SPEEDFLIP", flip_lead=0.1),
+        _going("FAKE_STATIONARY"),
+        _going("SUPPORT_HOLD", role="BACK", spot="BACK"),
+    ],
+)
+def test_an_on_time_flip_a_fake_or_support_is_not_flagged(me):
+    ctx, origin = _kickoff_ctx()
+    assert review_kickoffs(ctx, [_kickoff(origin, me)])[1] == []
+
+
+def test_going_from_behind_a_teammate_who_went_is_a_double_commit():
+    ctx, origin = _kickoff_ctx()
+    me = _going("STANDARD_FRONTFLIP", flip_lead=0.1, role="BACK", spot="BACK")
+    mate = KickoffPlayer(MATE, "GO", "STANDARD_DIAGONAL", 33.0, 2.0, team=ORANGE)
+    _, [flag] = review_kickoffs(ctx, [_kickoff(origin, me, mate)])
+    assert flag.kind == "kickoff_double_commit"
+    assert "You and mate both went" in flag.what
+
+
+def test_a_teammate_coming_from_behind_your_go_is_their_mistake():
+    ctx, origin = _kickoff_ctx()
+    me = _going("STANDARD_FRONTFLIP", flip_lead=0.1)
+    mate = KickoffPlayer(
+        MATE, "BACK", "STANDARD_BOOST", 33.0, 2.0, team=ORANGE, spot="BACK"
+    )
+    assert review_kickoffs(ctx, [_kickoff(origin, me, mate)])[1] == []
+    # From level spawns, it's on both of you
+    level = replace(mate, role="WING", spot="DIAGONAL")
+    _, [flag] = review_kickoffs(ctx, [_kickoff(origin, me, level)])
+    assert flag.kind == "kickoff_double_commit"
+
+
+def test_every_kickoff_is_placed_on_the_clock():
+    ctx, origin = _kickoff_ctx()
+    kickoffs = [_kickoff(origin, _going("SPEEDFLIP", flip_lead=0.1))]
+    [moment], _ = review_kickoffs(ctx, kickoffs)
+    assert moment.t == pytest.approx(origin, abs=0.01)
+    assert moment.score == "0-0"
+    assert moment.kickoff is kickoffs[0]
+    assert 0 < moment.seconds_left <= GAME_LENGTH_S
+
+
+def test_a_goal_after_a_kickoff_without_a_flip_is_put_on_it():
+    _, origin = _kickoff_ctx()
+    goal = GoalEvent(t=origin + 6.0, team="BLUE", scorer=OPP)
+    ctx, _ = _kickoff_ctx(goals=[goal])
+    _, flags = review_kickoffs(ctx, [_kickoff(origin, _going())])
+    assert flags[0].outcome == "You conceded 4 s later."
+    review = GoalReview(
+        t=goal.t,
+        clock="4:00",
+        score="0-0",
+        scorer="opp",
+        on_you=False,
+        summary="No mistake found.",
+        lines=(),
+    )
+    reviews, flags = link_goals_to_moments(ctx, [review], flags)
+    assert flags[0].cost_goal is True
+    assert reviews[0].summary == "You went for the kickoff without a flip 4 s before."
+
+
+def test_the_review_places_every_kickoff_of_a_real_game():
+    game = read_game(real_replays.replay(real_replays.REGULATION))
+    me = build_player_identities(game.header.players)[0]
+    report = review_player(game, player_id=me.canonical_id)
+    assert len(report.kickoffs) == len(game.kickoffs) > 0
+    starts = {round(k.t_start + (k.time_to_first_touch or 0), 1) for k in game.kickoffs}
+    for flag in report.mistakes:
+        if flag.category == "kickoffs":
+            assert any(abs(flag.t - s) <= 0.1 for s in starts)

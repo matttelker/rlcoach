@@ -72,8 +72,10 @@ BOOST_APPROACH = 10.0  # A car that used more boost reached the ball on it
 MOVED_UU = 150.0
 
 LATE_FLIP_S = 0.15  # A dodge this soon after the ball was played was into it
+ON_TIME_MAX_S = 0.45  # A flip further ahead of the ball was for speed, not into it
 REACH_UU = 1000.0  # How near the ball, across the field, a car has got there
 RESULT_AFTER_S = 1.0  # Where the ball is this long after the hit
+RESULT_REACH_UU = 500.0  # Past this toward a goal, the ball went that team's way
 DIAGONAL_DEPTH = 3200.0  # Spawns nearer their goal line than this are diagonal
 OFF_CENTRE_DEPTH = 4200.0  # And nearer than this off-centre, behind it back
 
@@ -97,6 +99,7 @@ class KickoffPlayer:
     approach: str
     boost_used: float
     time_to_ball: float | None  # Seconds from the release, if it got there
+    team: int | None = None  # 0 blue, 1 orange
     spot: str | None = None  # Its spawn: DIAGONAL, OFF_CENTRE or BACK
     # For a car that went for the ball: seconds before the ball was played that
     # its flip into it began, below 0 if after. None if it didn't flip into it.
@@ -117,6 +120,50 @@ class KickoffEvent:
     first_touch_team: str | None = None  # "BLUE" or "ORANGE"
     # The ball's y a second after it was played. Blue attacks toward +y.
     ball_y_after: float | None = None
+
+
+WENT_FOR_BALL = frozenset(
+    {
+        "SPEEDFLIP",
+        "STANDARD_FRONTFLIP",
+        "STANDARD_DIAGONAL",
+        "STANDARD_BOOST",
+        "STANDARD",
+    }
+)
+
+
+def went_for_ball(player: KickoffPlayer) -> bool:
+    """The car contested the ball, rather than faking or supporting."""
+    return player.approach in WENT_FOR_BALL
+
+
+def flip_timing(player: KickoffPlayer) -> str | None:
+    """How a car that went for the ball flipped into it: ON_TIME, LATE or NONE.
+
+    None for a car that didn't go for it. A flip that began after the ball was
+    played came LATE. One that began long before was for speed, so NONE.
+    """
+    if not went_for_ball(player):
+        return None
+    lead = player.flip_lead
+    if lead is None or lead > ON_TIME_MAX_S:
+        return "NONE"
+    return "LATE" if lead < 0.0 else "ON_TIME"
+
+
+def kickoff_result(kickoff: KickoffEvent, team: int) -> str | None:
+    """WON, EVEN or LOST for a team, by where the ball was a second after the hit.
+
+    That says more than the first touch: the car there first gets it, but a flip
+    arriving a moment later often sends the ball back the other way.
+    """
+    if kickoff.ball_y_after is None:
+        return None
+    forward = kickoff.ball_y_after if team == 0 else -kickoff.ball_y_after
+    if forward > RESULT_REACH_UU:
+        return "WON"
+    return "LOST" if forward < -RESULT_REACH_UU else "EVEN"
 
 
 def ball_on_spot(ball: BallFrame) -> bool:
@@ -463,6 +510,7 @@ class _Kickoff:
                     approach=car.approach(),
                     boost_used=round(car.boost_used, 2),
                     time_to_ball=None if reached is None else round(reached, 3),
+                    team=car.team,
                     spot=_spot(car.spawn),
                     flip_lead=car.flip_lead(at),
                     reach_time=(
