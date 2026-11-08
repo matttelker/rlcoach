@@ -19,13 +19,15 @@ This started as a fork of treygoff24/rlcoach. That project has never had a licen
 
 Lines still written by the original author, by `git blame -w -M -C`:
 
-| | Before (2026-11-07) | After phase 1 | After phase 2 |
-| --- | --- | --- | --- |
-| `src/` and `parsers/` | 22,916 of 27,884 (82%) | 14,260 of 19,292 (74%) | 10,456 of 16,741 (62%) |
-| `tests/` | 18,480 of 23,594 (78%) | 10,784 of 15,758 (68%) | 6,544 of 12,947 (51%) |
-| `gui/src/` | 1,074 of 3,792 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) |
+| | Before (2026-11-07) | After phase 1 | After phase 2 | After phase 3 |
+| --- | --- | --- | --- | --- |
+| `src/` and `parsers/` | 22,916 of 27,884 (82%) | 14,260 of 19,292 (74%) | 10,456 of 16,741 (62%) | 4,972 of 11,706 (42%) |
+| `tests/` | 18,480 of 23,594 (78%) | 10,784 of 15,758 (68%) | 6,544 of 12,947 (51%) | 1,291 of 7,450 (17%) |
+| `gui/src/` | 1,074 of 3,792 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) |
 
-The counts leave out the benchmark data files in `src/rlcoach/data/`. Blame still gives him 639 of the 2,451 lines in the files phase 2 rewrote: lines that came out the same character for character, such as imports, the config's field names, and the API's parameters and response fields, which the dashboard depends on.
+The counts leave out the benchmark data files in `src/rlcoach/data/`. Blame still gives him 639 of the 2,451 lines in the files phase 2 rewrote: lines that came out the same character for character, such as imports, the config's field names, and the API's parameters and response fields, which the dashboard depends on. In the files phase 3 rewrote it gives him 393 of 1,649, nearly all blank lines, closing brackets, docstring quotes and import lines.
+
+Most of what's left is the parser, phase 4: `lib.rs`, `arena_tables.rs` and `pads.rs` in Rust, and `rust_adapter.py` and `types.py` in Python, 3,915 of his 4,972 lines in `src/` and `parsers/`, and the parser's tests, 624 of his 1,291 in `tests/`.
 
 ## Phase 1: delete what nothing reads (done 2026-11-07)
 
@@ -75,19 +77,35 @@ Keeping them is small. One game has about 160 touches, 20 challenges, 4 demos an
 
 One use: "Do you lose more 50/50s in your own half when you're last back, and is that getting better?" Each challenge already has its location, depth, both players and the winner, so with them stored this is one query over every game, which Claude can answer in chat and the Coach page could chart.
 
-The catch is phase 3. It rewrites `events/`, and the review finds contacts its own way (`find_contacts` in `mistakes.py`), so stored touches would follow definitions that are about to change. Build it after phase 3, or store only challenges now and reload when they change.
+Phase 3 has rewritten `events/` and left every event as it was, so the definitions are settled. The review still finds contacts its own way (`find_contacts` in `mistakes.py`), apart from the touches. Kickoffs now keep how each car played them, which kickoff coaching would want stored the same way.
 
-## Phase 3: the core the mistake detector stands on
+## Phase 3: the core the mistake detector stands on (done 2026-11-07)
 
-- `normalize.py`
-- `events/`: goals, touches, challenges, boost, demos, kickoffs, timeline, types
-- `analysis/`: fundamentals, boost, movement, positioning. Compute only the stats the database stores, then shrink the parity test to those.
-- `report.py`, which turns a loaded game into the stats the database stores
-- `field_constants.py`, `physics_constants.py`
+Rewritten from what each part does, with new tests built from `tests/fixtures/builders.py` and checked against real replays:
 
-`analysis/mistakes.py` reads a `Game` from `game.py`, which `detect_goals`, `detect_touches`, `detect_challenge_events` and `normalize.build_timeline` fill, and it uses the parser's frame types and the field constants. Keep those shapes, or change `mistakes.py` in the same step.
+- **Stats.** `analysis/` works out the 20 columns the database stores and nothing else, from the `Game`: the scoreboard and demos (`fundamentals.py`), boost (`boost.py`), speed (`movement.py`) and position (`positioning.py`), each over a player's own frames (`tracks.py`). The per-team pass and the stats nothing stored are gone. `report.py` turns a game into what `db/games.py` stores, whose `STAT_COLUMNS` names the stats. Working out the stats for 48 replays took 53.4 s on `main` and 14.1 s now.
+- **Events.** Goals with their scorer and likely assist, touches, 50/50s, demos, kickoffs and boost pickups, one module each in `events/`. Kickoffs keep how each car played them: its role, its approach (speedflip, fake, and so on), the boost it used and its time to the ball, for the kickoff coaching to come. The fallback for replays without countdowns, the parser's kickoff markers, the team-side guessing, the pickup merge pass and the debug dump are gone.
+- **Boost pickups** come from the pad events. A replay with none, or with fewer than half as many as its cars' boost rises, reads them from the rises instead, at the nearest pad of the rise's size.
+- **Normalize** takes the parser's dicts straight into frames that carry only what the events, stats and review read. On the 48 replays it took 128.6 s on `main` and 69.4 s now, with every field anything reads the same.
+- **Constants.** The field's walls, goals and 34 boost pads, numbered as the Rust parser numbers them, which a test now checks. `schemas/boost_pad_tables.json`, which only its own test read, the field helpers and the physics values nothing used are gone.
+- **Test replays.** The sample replays and the Ballchasing CSV that came with the original project are gone. The tests that read real replays use your own from the folder `RLCOACH_TEST_REPLAYS` names, outside git (see `AGENTS.md`). The parity test compares three of your games, 18 players, with your Ballchasing exports.
+- `Game.events`, which nothing read, is gone.
 
-The sample replays in `Replay_files/` and their Ballchasing CSVs also came with the original project. Replace them with your own replays and your own Ballchasing export as the tests are rewritten.
+What behaves differently:
+
+- Your Hoops game of 2026-11-01 is the only replay with no pad events, so its pickups come from boost rises. The rewritten rule moves its boost stolen (157 to 127 for you, 93 to 105 and 95 to 119 for two others) and your boost collected by 1 (1,075 to 1,076, BCPM 197.86 to 198.04). You agreed to this. On a Hoops field, Soccar pad positions make every steal a guess. On your 47 Soccar games the new rule is as close to the pad events as the old one: off by 17.3 boost stolen per player per game, where the old was off by 17.2.
+- A replay whose frames show no countdown has no kickoffs. `main` guessed them then. All 48 replays have countdowns, so nothing stored changed.
+- CI runs no test that reads a real replay, since your replays aren't in the repo. Before, it ran them on the samples. Locally they run whenever `RLCOACH_TEST_REPLAYS` is set.
+- The parity bounds are measured on your games, so some are looser than on the old sample: time at zero and full boost read up to 20% and 28% high for a few players, stolen up to 23%. Two differences are known and written into the test: Ballchasing gives 2 goals from 1 shot 200% where we stop at 100%, and doesn't count the demo with no attacker at the end of E8D9.
+
+Left for phase 4: `parser/types.py` still defines the frame fields `normalize.py` no longer fills, such as the driving inputs and the jump flags, and the parser tests are inherited ones pointed at your replays.
+
+Checked:
+
+- After every commit, the stored stats, reviews and events of 48 replays (the 42 live games and the 6 old samples, while they lasted) matched `main`'s, except the Hoops game's boost. All 314 kickoffs matched in every per-car field. The suite passes at every commit.
+- Reloading all 42 games into scratch homes, on `main` and on the new code, gave the same value in every shared column of `replays`, `players`, `player_game_stats`, `game_reviews`, `review_mistakes` and `review_goals`, except those five Hoops values. `main`'s reload matched the live database exactly. Run side by side, the reloads took 200.9 s on `main` (4.8 s a game) and 109.3 s on the new code (2.6 s a game).
+- Every endpoint the dashboard calls, 228 calls in all, gave the same response on `main` and on the new code against a copy of the real database, apart from `/health`'s timestamp.
+- `tests/analysis/test_ballchasing_parity.py` and every check in `AGENTS.md` pass.
 
 ## Phase 4: the Rust parser
 
