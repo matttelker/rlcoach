@@ -6,8 +6,8 @@ import pytest
 
 from rlcoach.analysis.boost import active_play_seconds, boost_stats
 from rlcoach.analysis.tracks import player_tracks
+from rlcoach.events.boost import BoostPickupEvent
 from rlcoach.events.kickoffs import is_held_for_kickoff
-from rlcoach.events.types import BoostPickupEvent
 from rlcoach.field_constants import Vec3
 from tests.fixtures.builders import (
     create_test_ball,
@@ -78,7 +78,7 @@ def test_a_stretch_still_open_at_the_end_counts_for_nothing():
 
 def _pickup(player_id, gain, stolen=False):
     return BoostPickupEvent(
-        t=1.0, player_id=player_id, pad_type="SMALL", stolen=stolen, boost_gain=gain
+        t=1.0, player_id=player_id, pad_id=3, boost_gain=gain, stolen=stolen
     )
 
 

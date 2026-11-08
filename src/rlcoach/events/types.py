@@ -65,36 +65,3 @@ class DemoEvent:
     t: float
     victim: str
     attacker: str | None = None
-
-
-@dataclass(frozen=True)
-class BoostPickupEvent:
-    """Boost pad pickup event."""
-
-    t: float
-    player_id: str
-    pad_type: str  # "SMALL" or "BIG"
-    stolen: bool = False  # True if on opponent half
-    pad_id: int = -1  # Index in boost pad arrays
-    location: Vec3 | None = None
-    frame: int | None = None
-    boost_before: float | None = None
-    boost_after: float | None = None
-    boost_gain: float = 0.0
-
-
-@dataclass
-class PadState:
-    """Runtime tracking for boost pad availability."""
-
-    available_at: float = 0.0
-    last_pickup: float | None = None
-
-
-@dataclass(frozen=True)
-class PadEnvelope:
-    """Spatial heuristics for matching a player to a boost pad."""
-
-    radius: float
-    max_distance: float
-    height_tolerance: float

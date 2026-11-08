@@ -15,8 +15,8 @@ from collections.abc import Mapping
 from itertools import groupby, pairwise
 from typing import Any
 
+from ..events.boost import BoostPickupEvent
 from ..events.kickoffs import is_held_for_kickoff
-from ..events.types import BoostPickupEvent
 from ..parser.types import Frame
 from .tracks import PAUSE_GAP_S, Track
 
