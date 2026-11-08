@@ -8,7 +8,14 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from rlcoach.analysis.mistakes import GoalMoment, GoalReview, Mistake, MistakeReport
+from rlcoach.analysis.mistakes import (
+    GoalMoment,
+    GoalReview,
+    KickoffMoment,
+    Mistake,
+    MistakeReport,
+)
+from rlcoach.events.kickoffs import KickoffEvent, KickoffPlayer
 
 
 @pytest.fixture
@@ -48,7 +55,26 @@ def _flag(kind, category, seconds_left, cost_goal=False):
     )
 
 
-def _review(flags, timeline, against=()):
+def _no_flip_kickoff():
+    """You went at 86 s without a flip, and they scored 2 s after the hit."""
+    me = KickoffPlayer(
+        "epic:me", "GO", "STANDARD_BOOST", 33.0, 2.0, team=1, spot="DIAGONAL"
+    )
+    them = KickoffPlayer(
+        "epic:them", "GO", "STANDARD_DIAGONAL", 33.0, 2.0, team=0, spot="DIAGONAL"
+    )
+    kickoff = KickoffEvent(
+        t_start=86.0,
+        players=(me, them),
+        first_touch_player="epic:them",
+        time_to_first_touch=2.0,
+        first_touch_team="BLUE",
+        ball_y_after=900.0,  # Toward orange's net
+    )
+    return KickoffMoment(86.0, "3:34", 214.0, "1-0", kickoff)
+
+
+def _review(flags, timeline, against=(), kickoffs=()):
     return MistakeReport(
         player="Me",
         team="ORANGE",
@@ -59,6 +85,7 @@ def _review(flags, timeline, against=()):
         clears={"clears": 2, "given_back": 1},
         player_id="epic:me",
         goal_timeline=list(timeline),
+        kickoffs=list(kickoffs),
     )
 
 
@@ -175,6 +202,7 @@ def client(config):
                     90.0, "3:30", "1-0", "Them", False, "No mistake found.", (), 210.0
                 ),
             ],
+            [_no_flip_kickoff()],
         ),
     )
 
@@ -366,6 +394,36 @@ def test_replay_review_reports_a_missing_review(client):
     data = client.get("/replays/unreviewed/review").json()
     assert data["status"] == "missing"
     assert data["mistakes"] == []
+    assert data["kickoffs"] == []
+
+
+def test_replay_review_lists_your_kickoffs_on_the_clock(client):
+    [kickoff] = client.get("/replays/win/review").json()["kickoffs"]
+    assert (kickoff["clock"], kickoff["score"], kickoff["phase"]) == (
+        "3:34",
+        "1-0",
+        "INITIAL",
+    )
+    assert (kickoff["role"], kickoff["approach"], kickoff["flip"]) == (
+        "GO",
+        "STANDARD_BOOST",
+        "NONE",
+    )
+    assert (kickoff["result"], kickoff["first_touch"]) == ("LOST", "opponent")
+    assert (kickoff["goal_after"], kickoff["goal_after_s"]) == ("against", 2.0)
+    assert kickoff["race_gap"] is None
+
+
+def test_coach_summarizes_your_kickoffs_and_the_ladder(client):
+    kickoffs = client.get("/coach").json()["kickoffs"]
+    assert (kickoffs["games"], kickoffs["count"]) == (2, 1)
+    going = kickoffs["going"]
+    assert going["flips"] == {"on_time": 0, "late": 0, "none": 1}
+    assert (going["results"]["lost"], going["goals_against"]) == (1, 1)
+    ladder = kickoffs["ladder"]
+    assert [s["key"] for s in ladder] == ["flip_in", "on_time", "one_goes", "speedflip"]
+    # One kickoff is too few to judge any step
+    assert {s["status"] for s in ladder} == {"unknown"}
 
 
 def test_replay_review_404s_for_an_unknown_game(client):

@@ -152,6 +152,24 @@ def flip_timing(player: KickoffPlayer) -> str | None:
     return "LATE" if lead < 0.0 else "ON_TIME"
 
 
+def went_with(kickoff: KickoffEvent, player: KickoffPlayer) -> list[KickoffPlayer]:
+    """Teammates who went for the ball along with `player`: a double commit.
+
+    A teammate who came from behind `player` going is their mistake alone, but
+    from level spawns it's on both of them.
+    """
+    if not went_for_ball(player):
+        return []
+    return [
+        mate
+        for mate in kickoff.players
+        if mate.team == player.team
+        and mate.player_id != player.player_id
+        and went_for_ball(mate)
+        and (player.role != "GO" or mate.spot == player.spot)
+    ]
+
+
 def kickoff_result(kickoff: KickoffEvent, team: int) -> str | None:
     """WON, EVEN or LOST for a team, by where the ball was a second after the hit.
 

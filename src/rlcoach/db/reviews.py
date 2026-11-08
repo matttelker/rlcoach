@@ -26,6 +26,7 @@ from .session import create_session
 
 if TYPE_CHECKING:
     from ..analysis.mistakes import KickoffMoment, MistakeReport
+    from ..events.kickoffs import KickoffEvent
     from ..game import Game
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,38 @@ def _kickoff_row(moment: KickoffMoment, my_id: str) -> ReviewKickoff:
             for car in kickoff.players
         ],
     )
+
+
+def stored_kickoffs(review: GameReview) -> list[KickoffEvent]:
+    """A stored review's kickoffs, read back as the detector gave them."""
+    from ..events.kickoffs import KickoffEvent, KickoffPlayer
+
+    return [
+        KickoffEvent(
+            t_start=row.t,
+            phase=row.phase,
+            players=tuple(
+                KickoffPlayer(
+                    player_id=car.player_id,
+                    role=car.role,
+                    approach=car.approach,
+                    boost_used=car.boost_used,
+                    time_to_ball=car.time_to_ball,
+                    team=car.team,
+                    spot=car.spot,
+                    flip_lead=car.flip_lead,
+                    reach_time=car.reach_time,
+                    speed_at_contact=car.speed_at_contact,
+                )
+                for car in row.cars
+            ),
+            first_touch_player=row.first_touch_player,
+            time_to_first_touch=row.time_to_first_touch,
+            first_touch_team=row.first_touch_team,
+            ball_y_after=row.ball_y_after,
+        )
+        for row in review.kickoffs
+    ]
 
 
 def save_review(

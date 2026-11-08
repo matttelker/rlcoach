@@ -22,8 +22,16 @@ from ...coaching import (
 )
 from ...compare import standings
 from ...db.grades import goal_ref, grades_for, mistake_ref
-from ...db.models import Benchmark, GameReview, PlayerGameStats, Replay
+from ...db.models import (
+    Benchmark,
+    GameReview,
+    PlayerGameStats,
+    Replay,
+    ReviewKickoff,
+)
+from ...db.reviews import stored_kickoffs
 from ...db.session import create_session
+from ...kickoff_coaching import GameKickoffs, read_kickoff, summarize_kickoffs
 from ...modes import COACHED_PLAYLISTS
 from .stats import direction, resolve_playlist
 
@@ -119,6 +127,16 @@ def _benchmark_strengths(
     ]
 
 
+def _game_kickoffs(replay: Replay, review: GameReview) -> GameKickoffs:
+    return GameKickoffs(
+        replay_id=replay.replay_id,
+        play_date=replay.play_date,
+        my_id=review.player_id,
+        kickoffs=stored_kickoffs(review),
+        goals=[(g.t, bool(g.ours)) for g in review.goals],
+    )
+
+
 @router.get("/coach")
 async def get_coach(
     playlist: str | None = None,
@@ -148,6 +166,9 @@ async def get_coach(
             .options(
                 selectinload(Replay.review).selectinload(GameReview.mistakes),
                 selectinload(Replay.review).selectinload(GameReview.goals),
+                selectinload(Replay.review)
+                .selectinload(GameReview.kickoffs)
+                .selectinload(ReviewKickoff.cars),
             )
             .filter(Replay.playlist.in_(playlists))
         )
@@ -157,10 +178,12 @@ async def get_coach(
 
         reviewed: list[ReviewedGame] = []
         by_id: dict[str, ReviewedGame] = {}
+        kickoff_games: list[GameKickoffs] = []
         for replay, _ in rows:
             review = replay.review
             if review is None or review.status != "ok":
                 continue
+            kickoff_games.append(_game_kickoffs(replay, review))
             game = ReviewedGame(
                 replay_id=replay.replay_id,
                 play_date=replay.play_date,
@@ -250,6 +273,7 @@ async def get_coach(
             "targets": pick_targets(categories),
             "categories": categories,
             "highlights": highlights,
+            "kickoffs": summarize_kickoffs(kickoff_games),
         }
     finally:
         session.close()
@@ -273,8 +297,37 @@ async def get_replay_review(replay_id: str) -> dict[str, Any]:
                 "clears_given_back": 0,
                 "mistakes": [],
                 "goals": [],
+                "kickoffs": [],
             }
         grades = grades_for(session, replay_id)
+        game_kickoffs = _game_kickoffs(replay, review)
+        kickoffs = []
+        for row, kickoff in zip(review.kickoffs, game_kickoffs.kickoffs, strict=True):
+            seen = read_kickoff(game_kickoffs, kickoff)
+            if seen is None:
+                continue
+            kickoffs.append(
+                {
+                    "t": row.t,
+                    "seconds_left": row.seconds_left,
+                    "clock": row.clock,
+                    "score": row.score,
+                    "phase": row.phase,
+                    "role": seen.role,
+                    "spot": seen.spot,
+                    "approach": seen.approach,
+                    "flip": seen.flip,
+                    "flip_lead": seen.flip_lead,
+                    "result": seen.result,
+                    "first_touch": seen.first_touch,
+                    "race_gap": seen.race_gap,
+                    "speed_at_contact": seen.speed_at_contact,
+                    "boost_used": seen.boost_used,
+                    "double_commit": seen.double_commit,
+                    "goal_after": seen.goal_after,
+                    "goal_after_s": seen.goal_after_s,
+                }
+            )
         return {
             "replay_id": replay_id,
             "status": review.status,
@@ -319,6 +372,7 @@ async def get_replay_review(replay_id: str) -> dict[str, Any]:
                 }
                 for g in review.goals
             ],
+            "kickoffs": kickoffs,
         }
     finally:
         session.close()

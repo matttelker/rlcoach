@@ -24,6 +24,7 @@ from ..events.kickoffs import (
     flip_timing,
     kickoff_result,
     went_for_ball,
+    went_with,
 )
 from ..events.types import ChallengeEvent, GoalEvent, team_name
 from ..field_constants import (
@@ -1253,13 +1254,7 @@ def _kickoff_flags(
                 f"ball was played, from {spot}.{after}",
             )
         )
-    mates = [
-        p
-        for p in kickoff.players
-        if p.team == me.team and p.player_id != me.player_id and went_for_ball(p)
-    ]
-    # A teammate's own mistake isn't yours, unless you spawned level with them
-    mates = [p for p in mates if me.role != "GO" or p.spot == me.spot]
+    mates = went_with(kickoff, me)
     if mates:
         flags.append(
             _flag(
