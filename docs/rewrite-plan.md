@@ -19,15 +19,17 @@ This started as a fork of treygoff24/rlcoach. That project has never had a licen
 
 Lines still written by the original author, by `git blame -w -M -C`:
 
-| | Before (2026-11-07) | After phase 1 | After phase 2 | After phase 3 | After phase 4 (2026-11-08) |
-| --- | --- | --- | --- | --- | --- |
-| `src/` and `parsers/` | 22,916 of 27,884 (82%) | 14,260 of 19,292 (74%) | 10,456 of 16,741 (62%) | 4,972 of 11,706 (42%) | 1,166 of 9,794 (12%) |
-| `tests/` | 18,480 of 23,594 (78%) | 10,784 of 15,758 (68%) | 6,544 of 12,947 (51%) | 1,291 of 7,450 (17%) | 398 of 7,409 (5%) |
-| `gui/src/` | 1,074 of 3,792 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,053 of 4,575 (23%) |
+| | Before (2026-11-07) | After phase 1 | After phase 2 | After phase 3 | After phase 4 (2026-11-08) | After the dashboard (2026-11-09) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `src/` and `parsers/` | 22,916 of 27,884 (82%) | 14,260 of 19,292 (74%) | 10,456 of 16,741 (62%) | 4,972 of 11,706 (42%) | 1,166 of 9,794 (12%) | 1,157 of 10,261 (11%) |
+| `tests/` | 18,480 of 23,594 (78%) | 10,784 of 15,758 (68%) | 6,544 of 12,947 (51%) | 1,291 of 7,450 (17%) | 398 of 7,409 (5%) | 398 of 7,749 (5%) |
+| `gui/src/` | 1,074 of 3,792 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,053 of 4,575 (23%) | 492 of 5,044 (10%) |
 
 The counts leave out the benchmark data files in `src/rlcoach/data/`. Kickoff coaching came between phases 3 and 4, so `main` before phase 4 stood at 4,972 of 12,555 (40%) in `src/` and `parsers/`, and 1,291 of 8,125 (16%) in `tests/`, and the dashboard's new lines are its, not phase 4's. Blame still gives him 639 of the 2,451 lines in the files phase 2 rewrote: lines that came out the same character for character, such as imports, the config's field names, and the API's parameters and response fields, which the dashboard depends on. In the files phase 3 rewrote it gives him 393 of 1,649, nearly all blank lines, closing brackets, docstring quotes and import lines. In the files phase 4 rewrote it gives him 155 of 2,041: blank lines, closing braces, imports, and the field names in `parser/types.py`, which normalize, the events and the stats read.
 
-What's left is spread thin. No file holds more than 91 of his lines. The most are in the files phase 2 rewrote (the API's routers, the config, the models, the CLI) and in `tests/fixtures/builders.py`, whose function signatures every test calls.
+The dashboard's rewrite touched only `gui/src/`. The other two rows moved between phase 4 and it with the changes made on purpose and the game's own counts. Just before it, `main` stood at 1,020 of 4,616 (22%) in `gui/src/`.
+
+What's left is spread thin. No file holds more than 90 of his lines, apart from the dashboard's `types/api.ts` with 109, nearly all of them the API's field names. The most are in the files phase 2 rewrote (the API's routers, the config, the models, the CLI) and in `tests/fixtures/builders.py`, whose function signatures every test calls.
 
 ## Phase 1: delete what nothing reads (done 2026-11-07)
 
@@ -198,3 +200,28 @@ What that changed, reloading all 42 games on `main` and on the new code, with `m
 Every changed call checked by hand against the game's count and the ball's team agrees with the new code. Of the 50/50s on low boost only `main` flagged, in 3 you never touched the ball, in 2 the ball shows your team touched last, and 1 is from a game before the count. Each one only the new code flags in a game with the count shows you touching and an opponent last on the ball. Three goal reviews had a teammate turning the ball in, or you getting a touch on it, where the count shows they never touched it. A clear `main` said went straight to Incursion2169 in E561 had a touch by your teammate Jeyker09 in between, which the old contacts missed.
 
 Reloading all 42 games took 37.7 s. The suite, the Rust tests and every check in `AGENTS.md` pass.
+
+## The dashboard (2026-11-09)
+
+The dashboard was redesigned in this fork but never went through a phase, so 1,020 of the 4,616 lines in `gui/src/` were still his. Unlike the other areas, they were real code: the API client, the skeleton, pagination, card and empty-state components, the entry and the routes, and the queries, filters, paging and saves on the Games, Players, player, game, Trends, Compare and Benchmarks pages. Rewritten from what each part does, its tests and the API in `types/api.ts`, with nothing you see changed:
+
+- **The client** is one axios instance and a typed `get` per endpoint. The parameters nothing sent (`date_from`, `date_to`) and the default export are gone.
+- **Lists.** Games and Players each kept their own copy of the same card: the error, ten rows of placeholders, the empty message, the table and Previous and Next. `PagedList` holds it once, and `Pagination` works from the offset and total.
+- **Smaller pieces.** `BackLink` is the detail pages' link back, `LoadingCards` the two placeholder cards a whole page waits on, and `useTagPlayer` the tag and notes saves that Players and the player page share.
+- **Gone:** the pages barrel, the inherited `chart-data` test (its date and label tests moved to `data-transforms.test.ts`), the empty states' unused `action` and defaults, and two CSS rules Tailwind's reset and the layout already cover: the body's margin and the `#root` height.
+- **New tests** for the client's requests, the paging, the components, and the Games, Players and player pages, beside the contract tests, which pass unchanged.
+
+What blame still gives him, 492 lines, is blank lines, closing tags, `return (`, `<thead>` and `<tbody>`, imports, the API's field and type names, the routes in `App.tsx`, the CSS declarations that have no other spelling, and two query keys the contract tests and the player saves depend on.
+
+What behaves differently, none of it on screen:
+
+- The Players filter's options are `tagged` and `untagged` where they were `true` and `false`. The request is the same.
+- The back link's chevron sets its stroke on the `<svg>` rather than the `<path>`. It computes the same stroke, caps and box.
+- The Players list sends `sort` before `limit` and `offset` in the query string.
+
+Checked:
+
+- The markup of 51 page states (loading, error, empty, one page and several, with and without a median, benchmarks or patterns), rendered on the old code and the new, matches apart from the first two differences above. The built CSS differs only by the two removed rules.
+- Against the live dashboard at http://localhost:8000, at 1280 by 900, every page and every step of the Games and Players pagers and filters and the Trends, Compare and Benchmarks pickers gave the same DOM and the same requests, apart from the three differences above. Every element on all eight pages had the same position and size at 1280 by 900 and at phone width.
+- Tagging, untagging, saving and cancelling notes, toggling the tag with the notes open (which closes them, as before) and grading a call behaved the same on the old and the new build, against a scratch API on a copy of your database.
+- Every check in `AGENTS.md` passes.

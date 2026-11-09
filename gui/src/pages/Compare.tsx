@@ -1,37 +1,52 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getComparison } from '../api/client';
-import { Card, SkeletonChart, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField } from '../components';
+import { Card, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField, SkeletonChart } from '../components';
+import type { Comparison } from '../types/api';
 import { PERIOD_OPTIONS } from './coachTransforms';
-import { BENCHMARK_HINT, BENCHMARK_SOURCE, RANK_OPTIONS, buildCompareChartData, isOnTarget } from './dataTransforms';
+import { BENCHMARK_HINT, BENCHMARK_SOURCE, RANK_OPTIONS, gapBars, isOnTarget, signedPct, type GapBar } from './dataTransforms';
 import { AXIS_PROPS, TOOLTIP_PROPS } from './chartStyle';
 
-const signed = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
-
+/** Your averages against a rank's median: a bar chart of the gaps, then the numbers. */
 export function Compare() {
+  // Rank and playlist stay unset until you pick them, so the API opens on your config's rank and latest playlist
   const [pickedRank, setRank] = useState<string>();
   const [period, setPeriod] = useState('30d');
   const [playlist, setPlaylist] = useState<string>();
 
-  const { data, isLoading, error } = useQuery({
+  const comparison = useQuery({
     queryKey: ['compare', pickedRank, period, playlist],
     queryFn: () => getComparison({ rank: pickedRank, period, playlist }),
   });
-  const rank = pickedRank ?? data?.target_rank ?? '';
 
-  const chartData = buildCompareChartData(data?.comparisons);
-  const activePlaylist = playlist ?? data?.playlist;
+  if (comparison.error) {
+    return <ErrorState message="The comparison didn't load. Check that the server is running." />;
+  }
+
+  const data = comparison.data;
+  const loading = comparison.isLoading;
+  const rank = pickedRank ?? data?.target_rank ?? '';
+  const shownPlaylist = playlist ?? data?.playlist;
+  const bars = gapBars(data?.comparisons ?? []);
   const noGames = (
     <NoDataEmpty
-      message={`No ${activePlaylist ?? ''} games in this period`}
+      message={`No ${shownPlaylist ?? ''} games in this period`}
       description="Try a longer period or another playlist."
     />
   );
 
-  if (error) {
-    return <ErrorState message="The comparison didn't load. Check that the server is running." />;
-  }
+  let chart;
+  if (loading) chart = <SkeletonChart />;
+  else if (data?.game_count === 0) chart = noGames;
+  else if (bars.length === 0)
+    chart = <NoDataEmpty message={`No ${rank} benchmarks for ${shownPlaylist}`} description={BENCHMARK_HINT} />;
+  else chart = <GapChart bars={bars} />;
+
+  let table;
+  if (loading) table = <div className="p-5 text-[var(--color-text-muted)]">Loading…</div>;
+  else if (data?.comparisons.length === 0) table = noGames;
+  else table = <GapTable rank={rank} comparisons={data?.comparisons ?? []} />;
 
   return (
     <div>
@@ -46,7 +61,7 @@ export function Compare() {
       >
         <SelectField label="Rank" value={rank} options={RANK_OPTIONS} onChange={setRank} />
         <SelectField label="Period" value={period} options={PERIOD_OPTIONS} onChange={setPeriod} />
-        <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
+        <PlaylistSelect value={shownPlaylist} onChange={setPlaylist} />
       </PageHeader>
 
       <div className="space-y-6">
@@ -55,81 +70,70 @@ export function Compare() {
           <p className="text-[13px] text-[var(--color-text-muted)] mt-1 mb-5">
             Teal bars are on the right side of the median, red bars are short of it.
           </p>
-          {isLoading ? (
-            <SkeletonChart />
-          ) : data?.game_count === 0 ? (
-            noGames
-          ) : chartData.length === 0 ? (
-            <NoDataEmpty message={`No ${rank} benchmarks for ${activePlaylist}`} description={BENCHMARK_HINT} />
-          ) : (
-            <div style={{ height: Math.max(200, chartData.length * 44 + 40) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 0 }}>
-                  <CartesianGrid horizontal={false} stroke="var(--color-border)" />
-                  <XAxis type="number" {...AXIS_PROPS} tickFormatter={(v) => `${v > 0 ? '+' : ''}${v}%`} />
-                  <YAxis type="category" dataKey="metric" {...AXIS_PROPS} width={88} />
-                  <ReferenceLine x={0} stroke="var(--color-text-muted)" />
-                  <Tooltip
-                    {...TOOLTIP_PROPS}
-                    cursor={{ fill: 'var(--color-bg-tertiary)' }}
-                    formatter={(value) => [signed(Number(value) || 0), 'Against the median']}
-                  />
-                  <Bar dataKey="difference" barSize={18} radius={4}>
-                    {chartData.map((entry) => (
-                      <Cell key={entry.metric} fill={entry.onTarget ? 'var(--chart-good)' : 'var(--chart-bad)'} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+          {chart}
         </Card>
 
-        <Card className="overflow-x-auto">
-          {isLoading ? (
-            <div className="p-5 text-[var(--color-text-muted)]">Loading…</div>
-          ) : data?.comparisons.length === 0 ? (
-            noGames
-          ) : (
-            <table className="w-full min-w-[32rem]">
-              <thead>
-                <tr className="border-b border-[var(--color-border)]">
-                  <th className="th text-left pl-5">Stat</th>
-                  <th className="th text-right">You</th>
-                  <th className="th text-right">{rank} median</th>
-                  <th className="th text-right pr-5">Difference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data?.comparisons.map((c) => (
-                  <tr key={c.metric} className="border-b last:border-b-0 border-[var(--color-border)]">
-                    <td className="px-3 pl-5 py-3 font-semibold">{c.metric.toUpperCase()}</td>
-                    <td className="px-3 py-3 text-right">{c.my_value.toFixed(2)}</td>
-                    <td className="px-3 py-3 text-right text-[var(--color-text-muted)]">
-                      {c.target_median?.toFixed(2) ?? '–'}
-                    </td>
-                    <td className="px-3 pr-5 py-3 text-right font-semibold">
-                      {c.difference_pct !== null ? (
-                        <span
-                          className={
-                            isOnTarget(c.difference_pct, c.direction)
-                              ? 'text-[var(--color-success)]'
-                              : 'text-[var(--color-error)]'
-                          }
-                        >
-                          {signed(c.difference_pct)}
-                        </span>
-                      ) : (
-                        '–'
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
+        <Card className="overflow-x-auto">{table}</Card>
       </div>
     </div>
+  );
+}
+
+/** One bar per stat, out from zero: teal on the good side of the median, red short of it */
+function GapChart({ bars }: { bars: GapBar[] }) {
+  return (
+    <div style={{ height: Math.max(200, bars.length * 44 + 40) }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={bars} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 0 }}>
+          <CartesianGrid horizontal={false} stroke="var(--color-border)" />
+          <XAxis type="number" {...AXIS_PROPS} tickFormatter={(v) => `${v > 0 ? '+' : ''}${v}%`} />
+          <YAxis type="category" dataKey="metric" {...AXIS_PROPS} width={88} />
+          <ReferenceLine x={0} stroke="var(--color-text-muted)" />
+          <Tooltip
+            {...TOOLTIP_PROPS}
+            cursor={{ fill: 'var(--color-bg-tertiary)' }}
+            formatter={(value) => [signedPct(Number(value) || 0), 'Against the median']}
+          />
+          <Bar dataKey="difference" barSize={18} radius={4}>
+            {bars.map((bar) => (
+              <Cell key={bar.metric} fill={bar.onTarget ? 'var(--chart-good)' : 'var(--chart-bad)'} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function GapTable({ rank, comparisons }: { rank: string; comparisons: Comparison[] }) {
+  return (
+    <table className="w-full min-w-[32rem]">
+      <thead>
+        <tr className="border-b border-[var(--color-border)]">
+          <th className="th text-left pl-5">Stat</th>
+          <th className="th text-right">You</th>
+          <th className="th text-right">{rank} median</th>
+          <th className="th text-right pr-5">Difference</th>
+        </tr>
+      </thead>
+      <tbody>
+        {comparisons.map((c) => (
+          <tr key={c.metric} className="border-b last:border-b-0 border-[var(--color-border)]">
+            <td className="px-3 pl-5 py-3 font-semibold">{c.metric.toUpperCase()}</td>
+            <td className="px-3 py-3 text-right">{c.my_value.toFixed(2)}</td>
+            <td className="px-3 py-3 text-right text-[var(--color-text-muted)]">{c.target_median?.toFixed(2) ?? '–'}</td>
+            <td className="px-3 pr-5 py-3 text-right font-semibold">
+              {c.difference_pct === null ? '–' : <Gap pct={c.difference_pct} onTarget={isOnTarget(c.difference_pct, c.direction)} />}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function Gap({ pct, onTarget }: { pct: number; onTarget: boolean }) {
+  return (
+    <span className={onTarget ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}>{signedPct(pct)}</span>
   );
 }

@@ -1,12 +1,22 @@
 import { NavLink, Outlet } from 'react-router-dom';
 
-const navItems = [
-  { path: '/', label: 'Coach' },
-  { path: '/games', label: 'Games' },
-  { path: '/stats', label: 'Stats' },
-  { path: '/players', label: 'Players' },
+// The main sections. Coach is the home page.
+const SECTIONS = [
+  { to: '/', label: 'Coach' },
+  { to: '/games', label: 'Games' },
+  { to: '/stats', label: 'Stats' },
+  { to: '/players', label: 'Players' },
 ];
 
+/** A tab in the top bar, underlined while you're in its section */
+function sectionClass({ isActive }: { isActive: boolean }) {
+  const state = isActive
+    ? 'border-[var(--color-text)] text-[var(--color-text)] font-semibold'
+    : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]';
+  return `block px-3 py-3 sm:py-[18px] text-[15px] whitespace-nowrap border-b-2 ${state}`;
+}
+
+/** The top bar on every page, with the page below it. */
 export function Layout() {
   return (
     <div className="min-h-screen">
@@ -18,20 +28,11 @@ export function Layout() {
           </NavLink>
           <nav aria-label="Main" className="-mx-4 sm:mx-0 w-[calc(100%+2rem)] sm:w-auto overflow-x-auto overflow-y-hidden">
             <ul className="flex px-2 sm:px-0">
-              {navItems.map((item) => (
-                <li key={item.path}>
-                  <NavLink
-                    to={item.path}
-                    end={item.path === '/'}
-                    className={({ isActive }) =>
-                      `block px-3 py-3 sm:py-[18px] text-[15px] whitespace-nowrap border-b-2 ${
-                        isActive
-                          ? 'border-[var(--color-text)] text-[var(--color-text)] font-semibold'
-                          : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-                      }`
-                    }
-                  >
-                    {item.label}
+              {SECTIONS.map((section) => (
+                <li key={section.to}>
+                  {/* Coach is only active on the home page itself */}
+                  <NavLink to={section.to} end={section.to === '/'} className={sectionClass}>
+                    {section.label}
                   </NavLink>
                 </li>
               ))}

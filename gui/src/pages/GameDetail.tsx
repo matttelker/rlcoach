@@ -1,8 +1,8 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getReplay } from '../api/client';
-import { Card, SectionTitle, SkeletonCard, ErrorState } from '../components';
-import type { PlayerStats } from '../types/api';
+import { BackLink, Card, ErrorState, LoadingCards, SectionTitle } from '../components';
+import type { PlayerStats, ReplayDetail } from '../types/api';
 import { formatDuration, parseUtc, prettyPlaylist } from './dataTransforms';
 import { GameReview } from './GameReview';
 import { prettyMap } from './coachTransforms';
@@ -13,84 +13,72 @@ const RESULT_WORD: Record<string, { word: string; color: string }> = {
   DRAW: { word: 'Draw', color: 'text-[var(--color-warning)]' },
 };
 
-export function GameDetail() {
-  const { replayId } = useParams<{ replayId: string }>();
+const TEAMS = [
+  { team: 'BLUE', name: 'Blue team', color: 'var(--color-team-blue)' },
+  { team: 'ORANGE', name: 'Orange team', color: 'var(--color-team-orange)' },
+] as const;
 
-  const { data, isLoading, error } = useQuery({
+/** One game: the score, the mistake review, then the box score. */
+export function GameDetail() {
+  const { replayId = '' } = useParams();
+  const replay = useQuery({
     queryKey: ['replay', replayId],
-    queryFn: () => getReplay(replayId!),
-    enabled: !!replayId,
+    queryFn: () => getReplay(replayId),
+    enabled: replayId !== '',
   });
 
-  if (error) {
-    return <ErrorState message="This replay didn't load. Check that the server is running." />;
-  }
+  if (replay.error) return <ErrorState message="This replay didn't load. Check that the server is running." />;
+  if (replay.isLoading) return <LoadingCards />;
+  if (!replay.data) return <ErrorState message="There's no replay with this id. It may have been removed." />;
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <SkeletonCard />
-        <SkeletonCard />
-      </div>
-    );
-  }
-
-  if (!data) {
-    return <ErrorState message="There's no replay with this id. It may have been removed." />;
-  }
-
-  const result = RESULT_WORD[data.result] ?? RESULT_WORD.DRAW;
-  const played = parseUtc(data.played_at_utc);
-
+  const game = replay.data;
   return (
     <div className="space-y-12">
-      <header>
-        <Link
-          to="/games"
-          className="inline-flex items-center gap-1 text-[14px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Games
-        </Link>
-        <div className="flex flex-wrap items-end gap-x-6 gap-y-2 mt-4">
-          <h1 className="type-score text-[76px] sm:text-[96px] leading-[0.85]">
-            <span className="sr-only">{result.word}, </span>
-            {data.my_score}–{data.opponent_score}
-          </h1>
-          <div className="pb-1">
-            <div className={`type-display text-[26px] ${result.color}`} aria-hidden="true">
-              {result.word}
-            </div>
-            <p className="text-[var(--color-text-muted)] mt-1">
-              {prettyMap(data.map)}, {played.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}{' '}
-              at {played.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-            </p>
-          </div>
-        </div>
-      </header>
+      <Scoreline game={game} />
 
-      <GameReview replayId={data.replay_id} />
+      <GameReview replayId={game.replay_id} />
 
       <section>
         <SectionTitle title="Match info" />
         <dl className="flex flex-wrap gap-x-10 gap-y-3 mb-5">
-          <Fact label="Playlist" value={prettyPlaylist(data.playlist)} />
-          <Fact label="Map" value={prettyMap(data.map)} />
-          <Fact label="Length" value={formatDuration(data.duration_seconds)} />
-          <Fact label="Final score" value={`${data.my_score}–${data.opponent_score}`} />
+          <Fact label="Playlist" value={prettyPlaylist(game.playlist)} />
+          <Fact label="Map" value={prettyMap(game.map)} />
+          <Fact label="Length" value={formatDuration(game.duration_seconds)} />
+          <Fact label="Final score" value={`${game.my_score}–${game.opponent_score}`} />
         </dl>
         <div className="grid md:grid-cols-2 gap-6">
-          <TeamTable name="Blue team" color="var(--color-team-blue)" players={data.player_stats.filter((p) => p.team === 'BLUE')} />
-          <TeamTable
-            name="Orange team"
-            color="var(--color-team-orange)"
-            players={data.player_stats.filter((p) => p.team === 'ORANGE')}
-          />
+          {TEAMS.map(({ team, name, color }) => (
+            <TeamTable key={team} name={name} color={color} players={game.player_stats.filter((p) => p.team === team)} />
+          ))}
         </div>
       </section>
     </div>
+  );
+}
+
+/** The score as big as a scoreboard, then the result, map and when it was played */
+function Scoreline({ game }: { game: ReplayDetail }) {
+  const result = RESULT_WORD[game.result] ?? RESULT_WORD.DRAW;
+  const played = parseUtc(game.played_at_utc);
+  return (
+    <header>
+      <BackLink to="/games">Games</BackLink>
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-2 mt-4">
+        <h1 className="type-score text-[76px] sm:text-[96px] leading-[0.85]">
+          <span className="sr-only">{result.word}, </span>
+          {game.my_score}–{game.opponent_score}
+        </h1>
+        <div className="pb-1">
+          <div className={`type-display text-[26px] ${result.color}`} aria-hidden="true">
+            {result.word}
+          </div>
+          <p className="text-[var(--color-text-muted)] mt-1">
+            {prettyMap(game.map)}, {played.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}{' '}
+            at {played.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+          </p>
+        </div>
+      </div>
+    </header>
   );
 }
 

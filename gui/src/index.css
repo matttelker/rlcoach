@@ -81,8 +81,8 @@
   }
 }
 
+/* Tailwind's reset already takes the body's margin, and the layout fills the screen */
 body {
-  margin: 0;
   background-color: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
@@ -91,10 +91,6 @@ body {
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-#root {
-  min-height: 100vh;
 }
 
 @layer components {
@@ -215,6 +211,7 @@ body {
   }
 }
 
+/* Chrome and Edge scrollbars in the page's own colours */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

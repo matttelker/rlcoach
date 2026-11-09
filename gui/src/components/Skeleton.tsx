@@ -1,30 +1,43 @@
-interface SkeletonProps {
-  className?: string;
+// Pulsing grey bars in the shape of what's still loading
+
+function Bar({ size }: { size: string }) {
+  return <div className={`animate-pulse bg-[var(--color-bg-tertiary)] rounded ${size}`} />;
 }
 
-export function Skeleton({ className = '' }: SkeletonProps) {
-  return <div className={`animate-pulse bg-[var(--color-bg-tertiary)] rounded ${className}`} />;
-}
+const CARD_BARS = ['h-4 w-1/3', 'h-8 w-1/2', 'h-3 w-2/3'];
+const ROW_BARS = ['h-4 w-24', 'h-4 w-32', 'h-4 w-20', 'h-4 flex-1'];
+const TABLE_ROWS = 10;
 
 export function SkeletonCard() {
   return (
     <div className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-md p-5 space-y-3">
-      <Skeleton className="h-4 w-1/3" />
-      <Skeleton className="h-8 w-1/2" />
-      <Skeleton className="h-3 w-2/3" />
+      {CARD_BARS.map((size) => (
+        <Bar key={size} size={size} />
+      ))}
     </div>
   );
 }
 
-export function SkeletonTable({ rows = 5 }: { rows?: number }) {
+/** Two cards, for a page that waits on one answer before it shows anything */
+export function LoadingCards() {
+  return (
+    <div className="space-y-6">
+      <SkeletonCard />
+      <SkeletonCard />
+    </div>
+  );
+}
+
+/** A page of table rows */
+export function SkeletonTable() {
+  const rows = Array.from({ length: TABLE_ROWS }, (_, row) => row);
   return (
     <div className="space-y-2">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="flex gap-4 p-3">
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-4 flex-1" />
+      {rows.map((row) => (
+        <div key={row} className="flex gap-4 p-3">
+          {ROW_BARS.map((size) => (
+            <Bar key={size} size={size} />
+          ))}
         </div>
       ))}
     </div>
@@ -32,5 +45,5 @@ export function SkeletonTable({ rows = 5 }: { rows?: number }) {
 }
 
 export function SkeletonChart() {
-  return <Skeleton className="h-72 w-full" />;
+  return <Bar size="h-72 w-full" />;
 }

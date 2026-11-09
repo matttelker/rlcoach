@@ -1,136 +1,74 @@
+// Calls to the local API, which `rlcoach serve` keeps under /api beside the dashboard.
 import axios from 'axios';
 import type {
-  Game,
-  ReplayDetail,
-  TrendsResponse,
-  CompareResponse,
-  PatternsResponse,
-  WeaknessesResponse,
-  Player,
-  PaginatedResponse,
-  TagRequest,
-  GameResult,
   CoachResponse,
-  ReplayReview,
+  CompareResponse,
+  Game,
+  GameResult,
   GradeRequest,
   GradesResponse,
+  PaginatedResponse,
+  PatternsResponse,
+  Player,
+  ReplayDetail,
+  ReplayReview,
+  TagRequest,
+  TrendsResponse,
+  WeaknessesResponse,
 } from '../types/api';
 
-const api = axios.create({
-  baseURL: '/api',
-  timeout: 30000,
-});
+/** The one connection every call goes through. Tests swap its adapter. */
+export const http = axios.create({ baseURL: '/api', timeout: 30_000 });
 
-// Games
-interface ListParams {
-  limit?: number;
-  offset?: number;
-  sort?: string;
+/** A request's query string. axios leaves out the parameters that are undefined. */
+type Query = Record<string, string | number | boolean | undefined>;
+
+async function get<T>(path: string, query?: Query): Promise<T> {
+  const response = await http.get<T>(path, { params: query });
+  return response.data;
 }
 
-export interface GamesParams extends ListParams {
-  playlist?: string;
-  result?: GameResult;
-  date_from?: string;
-  date_to?: string;
-}
+// Ids hold characters such as the colon in "epic:..." and go into paths encoded
+const replayPath = (replayId: string) => `/replays/${encodeURIComponent(replayId)}`;
+const playerPath = (playerId: string) => `/players/${encodeURIComponent(playerId)}`;
 
-export async function getGames(params: GamesParams = {}): Promise<PaginatedResponse<Game>> {
-  const { data } = await api.get<PaginatedResponse<Game>>('/games', { params });
-  return data;
-}
+/** One page of games, of one playlist or result if given. */
+type GamesQuery = { playlist?: string; result?: GameResult; limit: number; offset: number };
 
-export async function getReplay(replayId: string): Promise<ReplayDetail> {
-  const { data } = await api.get<ReplayDetail>(`/replays/${encodeURIComponent(replayId)}`);
-  return data;
-}
+export const getGames = (query: GamesQuery) => get<PaginatedResponse<Game>>('/games', query);
 
-// Analysis
-export interface TrendsParams {
-  metric: string;
-  period?: string;
-  playlist?: string;
-}
+export const getReplay = (replayId: string) => get<ReplayDetail>(replayPath(replayId));
 
-export async function getTrends(params: TrendsParams): Promise<TrendsResponse> {
-  const { data } = await api.get<TrendsResponse>('/trends', { params });
-  return data;
-}
+export const getReplayReview = (replayId: string) => get<ReplayReview>(`${replayPath(replayId)}/review`);
 
-export interface CompareParams {
-  /** Leave out for the rank in your config */
-  rank?: string;
-  playlist?: string;
-  period?: string;
-}
-
-export async function getComparison(params: CompareParams): Promise<CompareResponse> {
-  const { data } = await api.get<CompareResponse>('/compare', { params });
-  return data;
-}
-
-export interface PatternsParams {
-  playlist?: string;
-  period?: string;
-  min_games?: number;
-}
-
-export async function getPatterns(params: PatternsParams = {}): Promise<PatternsResponse> {
-  const { data } = await api.get<PatternsResponse>('/patterns', { params });
-  return data;
-}
-
-export type WeaknessesParams = CompareParams;
-
-export async function getWeaknesses(params: WeaknessesParams = {}): Promise<WeaknessesResponse> {
-  const { data } = await api.get<WeaknessesResponse>('/weaknesses', { params });
-  return data;
-}
-
-// Coaching
-export interface CoachParams {
-  playlist?: string;
-  period?: string;
-}
-
-export async function getCoach(params: CoachParams = {}): Promise<CoachResponse> {
-  const { data } = await api.get<CoachResponse>('/coach', { params });
-  return data;
-}
-
-export async function getReplayReview(replayId: string): Promise<ReplayReview> {
-  const { data } = await api.get<ReplayReview>(`/replays/${encodeURIComponent(replayId)}/review`);
-  return data;
-}
-
+/** Mark one of the review's calls right or wrong, or clear it with a null grade. */
 export async function setGrade(replayId: string, request: GradeRequest): Promise<void> {
-  await api.put(`/replays/${encodeURIComponent(replayId)}/grades`, request);
+  await http.put(`${replayPath(replayId)}/grades`, request);
 }
 
-export async function getGrades(): Promise<GradesResponse> {
-  const { data } = await api.get<GradesResponse>('/grades');
-  return data;
-}
+export const getGrades = () => get<GradesResponse>('/grades');
 
-// Players
-export interface PlayersParams extends ListParams {
-  tagged?: boolean;
-  min_games?: number;
-}
+// The stats views. A playlist or rank left out means the API's choice: the
+// playlist of your latest game, and the rank in your config.
+type StatsQuery = { playlist?: string; period?: string };
 
-export async function getPlayers(params: PlayersParams = {}): Promise<PaginatedResponse<Player>> {
-  const { data } = await api.get<PaginatedResponse<Player>>('/players', { params });
-  return data;
-}
+export const getCoach = (query: StatsQuery) => get<CoachResponse>('/coach', query);
 
-export async function getPlayer(playerId: string): Promise<Player> {
-  const { data } = await api.get<Player>(`/players/${encodeURIComponent(playerId)}`);
-  return data;
-}
+export const getTrends = (query: StatsQuery & { metric: string }) => get<TrendsResponse>('/trends', query);
 
-export async function tagPlayer(playerId: string, request: TagRequest): Promise<Player> {
-  const { data } = await api.post<Player>(`/players/${encodeURIComponent(playerId)}/tag`, request);
-  return data;
-}
+export const getComparison = (query: StatsQuery & { rank?: string }) => get<CompareResponse>('/compare', query);
 
-export default api;
+export const getWeaknesses = (query: StatsQuery & { rank?: string }) => get<WeaknessesResponse>('/weaknesses', query);
+
+export const getPatterns = (query: StatsQuery) => get<PatternsResponse>('/patterns', query);
+
+type PlayersQuery = { tagged?: boolean; min_games: number; sort: string; limit: number; offset: number };
+
+export const getPlayers = (query: PlayersQuery) => get<PaginatedResponse<Player>>('/players', query);
+
+export const getPlayer = (playerId: string) => get<Player>(playerPath(playerId));
+
+/** Tag or untag someone as your teammate. Notes left out stay as they were. */
+export async function tagPlayer(playerId: string, request: TagRequest): Promise<void> {
+  await http.post(`${playerPath(playerId)}/tag`, request);
+}
