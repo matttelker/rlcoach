@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getWeaknesses, getPatterns } from '../api/client';
 import type { Weakness } from '../types/api';
-import { Card, SkeletonCard, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect } from '../components';
-import { BENCHMARK_HINT, BENCHMARK_SOURCE } from './dataTransforms';
+import { Card, SkeletonCard, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField } from '../components';
+import { BENCHMARK_HINT, BENCHMARK_SOURCE, RANK_OPTIONS } from './dataTransforms';
 
 const SEVERITY_MARK: Record<Weakness['severity'] | 'strength', string> = {
   critical: 'var(--chart-bad)',
@@ -16,13 +16,14 @@ const SEVERITY_MARK: Record<Weakness['severity'] | 'strength', string> = {
 
 export function Benchmarks() {
   const [period] = useState('30d');
-  const [rank] = useState('GC1');
+  const [pickedRank, setRank] = useState<string>();
   const [playlist, setPlaylist] = useState<string>();
 
   const { data: weaknessesData, isLoading: weaknessesLoading, error: weaknessesError } = useQuery({
-    queryKey: ['weaknesses', period, rank, playlist],
-    queryFn: () => getWeaknesses({ period, rank, playlist }),
+    queryKey: ['weaknesses', period, pickedRank, playlist],
+    queryFn: () => getWeaknesses({ period, rank: pickedRank, playlist }),
   });
+  const rank = pickedRank ?? weaknessesData?.rank ?? '';
 
   const { data: patternsData, isLoading: patternsLoading, error: patternsError } = useQuery({
     queryKey: ['patterns', period, playlist],
@@ -50,11 +51,13 @@ export function Benchmarks() {
         title="Benchmarks"
         note={
           <>
-            Your last 30 days against {rank} players{weaknessesData ? `, from ${weaknessesData.game_count} games` : ''}.
+            Your last 30 days against {rank || 'your rank'} players
+            {weaknessesData ? `, from ${weaknessesData.game_count} games` : ''}.
             <span className="block text-[13px] mt-1">{BENCHMARK_SOURCE}</span>
           </>
         }
       >
+        <SelectField label="Rank" value={rank} options={RANK_OPTIONS} onChange={setRank} />
         <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
       </PageHeader>
 

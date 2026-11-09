@@ -6,16 +6,20 @@ import { describe, expect, it } from 'vitest';
 
 import { Benchmarks } from '../Benchmarks';
 import { Coach, GradesTable } from '../Coach';
+import { Compare } from '../Compare';
 import { GameDetail } from '../GameDetail';
 import { GameReviewBody } from '../GameReview';
+import { Trends } from '../Trends';
 import type {
   CategorySummary,
   CoachResponse,
+  CompareResponse,
   KickoffSummary,
   GradesResponse,
   PatternsResponse,
   ReplayDetail,
   ReplayReview,
+  TrendsResponse,
   WeaknessesResponse,
 } from '../../types/api';
 
@@ -149,7 +153,7 @@ const KICKOFFS: KickoffSummary = {
 const COACH: CoachResponse = {
   playlist: 'STANDARD',
   period: '30d',
-  rank: 'GC1',
+  rank: 'P1',
   game_count: 11,
   reviewed_count: 10,
   session: {
@@ -562,9 +566,10 @@ const WEAKNESSES: WeaknessesResponse = {
   game_count: 30,
   has_benchmarks: true,
   playlist: 'STANDARD',
+  rank: 'P1',
   strengths: [],
   weaknesses: [
-    { metric: 'bcpm', my_value: 206.69, severity: 'critical', target_median: 366.4, z_score: -2.93 },
+    { metric: 'bcpm', my_value: 206.69, severity: 'critical', target_median: 261.9, z_score: -1.5 },
   ],
 };
 
@@ -582,7 +587,7 @@ const PATTERNS: PatternsResponse = {
 describe('Benchmarks', () => {
   const html = renderWithCache(
     [
-      [['weaknesses', '30d', 'GC1', undefined], WEAKNESSES],
+      [['weaknesses', '30d', undefined, undefined], WEAKNESSES],
       [['patterns', '30d', undefined], PATTERNS],
     ],
     '/',
@@ -599,5 +604,55 @@ describe('Benchmarks', () => {
     expect(row('SAVES')).toContain('--color-error');
     expect(row('SAVES')).toContain('-1.78');
     expect(row('SAVES')).not.toContain('+');
+  });
+
+  it('compares you with the rank the API chose from your config', () => {
+    expect(html).toMatch(/against (<!-- -->)?P1(<!-- -->)? players/);
+    expect(row('BCPM')).toMatch(/P1(<!-- -->)? median/);
+    expect(html).toContain('<option value="P1" selected="">P1</option>');
+  });
+});
+
+// From GET /api/compare and GET /api/trends without a rank
+const COMPARISON: CompareResponse = {
+  target_rank: 'P1',
+  playlist: 'STANDARD',
+  game_count: 30,
+  comparisons: [
+    {
+      metric: 'bcpm',
+      my_value: 206.69,
+      target_median: 261.9,
+      difference: -55.21,
+      difference_pct: -21.1,
+      direction: 'higher',
+    },
+  ],
+};
+
+const TRENDS: TrendsResponse = {
+  metric: 'bcpm',
+  period: '30d',
+  playlist: 'STANDARD',
+  rank: 'P1',
+  rank_median: 261.9,
+  values: [{ date: '2026-11-07', value: 206.69 }],
+};
+
+describe('Compare', () => {
+  const html = renderWithCache([[['compare', undefined, '30d', undefined], COMPARISON]], '/', <Compare />);
+
+  it('opens on the rank the API chose from your config', () => {
+    expect(html).toMatch(/Gap to (<!-- -->)?P1/);
+    expect(html).toContain('<option value="P1" selected="">P1</option>');
+    expect(html).not.toContain('GC1');
+  });
+});
+
+describe('Trends', () => {
+  const html = renderWithCache([[['trends', 'bcpm', '30d', undefined], TRENDS]], '/', <Trends />);
+
+  it('offers the median of the rank in your config', () => {
+    expect(html).toMatch(/Show the (<!-- -->)?P1(<!-- -->)? median/);
   });
 });

@@ -4,22 +4,21 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { getComparison } from '../api/client';
 import { Card, SkeletonChart, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField } from '../components';
 import { PERIOD_OPTIONS } from './coachTransforms';
-import { BENCHMARK_HINT, BENCHMARK_SOURCE, buildCompareChartData, isOnTarget } from './dataTransforms';
+import { BENCHMARK_HINT, BENCHMARK_SOURCE, RANK_OPTIONS, buildCompareChartData, isOnTarget } from './dataTransforms';
 import { AXIS_PROPS, TOOLTIP_PROPS } from './chartStyle';
-
-const RANK_OPTIONS = ['SSL', 'GC3', 'GC2', 'GC1', 'C3', 'C2'].map((r) => ({ value: r, label: r }));
 
 const signed = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 
 export function Compare() {
-  const [rank, setRank] = useState('GC1');
+  const [pickedRank, setRank] = useState<string>();
   const [period, setPeriod] = useState('30d');
   const [playlist, setPlaylist] = useState<string>();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['compare', rank, period, playlist],
-    queryFn: () => getComparison({ rank, period, playlist }),
+    queryKey: ['compare', pickedRank, period, playlist],
+    queryFn: () => getComparison({ rank: pickedRank, period, playlist }),
   });
+  const rank = pickedRank ?? data?.target_rank ?? '';
 
   const chartData = buildCompareChartData(data?.comparisons);
   const activePlaylist = playlist ?? data?.playlist;
@@ -52,7 +51,7 @@ export function Compare() {
 
       <div className="space-y-6">
         <Card className="p-4 sm:p-6">
-          <h2 className="type-display text-[19px]">Gap to {rank}</h2>
+          <h2 className="type-display text-[19px]">Gap to {rank || 'your rank'}</h2>
           <p className="text-[13px] text-[var(--color-text-muted)] mt-1 mb-5">
             Teal bars are on the right side of the median, red bars are short of it.
           </p>

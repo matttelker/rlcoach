@@ -53,18 +53,10 @@ export interface TrendsResponse {
   metric: string;
   period: string;
   playlist: string;
+  /** Your config's rank, and its median for this stat if it has one */
+  rank: string;
+  rank_median: number | null;
   values: TrendValue[];
-}
-
-export interface Benchmark {
-  metric: string;
-  playlist: string;
-  rank_tier: string;
-  median_value: number;
-  p25_value: number;
-  p75_value: number;
-  elite_threshold: number | null;
-  source: string | null;
 }
 
 export interface Comparison {
@@ -113,6 +105,7 @@ export interface WeaknessesResponse {
   strengths: Weakness[];
   game_count: number;
   playlist: string;
+  rank: string;
   has_benchmarks: boolean;
 }
 

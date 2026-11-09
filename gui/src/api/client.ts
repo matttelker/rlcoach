@@ -3,7 +3,6 @@ import type {
   Game,
   ReplayDetail,
   TrendsResponse,
-  Benchmark,
   CompareResponse,
   PatternsResponse,
   WeaknessesResponse,
@@ -58,19 +57,9 @@ export async function getTrends(params: TrendsParams): Promise<TrendsResponse> {
   return data;
 }
 
-export interface BenchmarksParams {
-  metric?: string;
-  playlist?: string;
-  rank?: string;
-}
-
-export async function getBenchmarks(params: BenchmarksParams = {}): Promise<{ items: Benchmark[] }> {
-  const { data } = await api.get<{ items: Benchmark[] }>('/benchmarks', { params });
-  return data;
-}
-
 export interface CompareParams {
-  rank: string;
+  /** Leave out for the rank in your config */
+  rank?: string;
   playlist?: string;
   period?: string;
 }
@@ -91,7 +80,7 @@ export async function getPatterns(params: PatternsParams = {}): Promise<Patterns
   return data;
 }
 
-export type WeaknessesParams = Partial<CompareParams>;
+export type WeaknessesParams = CompareParams;
 
 export async function getWeaknesses(params: WeaknessesParams = {}): Promise<WeaknessesResponse> {
   const { data } = await api.get<WeaknessesResponse>('/weaknesses', { params });

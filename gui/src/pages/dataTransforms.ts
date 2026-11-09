@@ -7,11 +7,15 @@ export type GameFilters = Required<Pick<GamesParams, 'playlist' | 'limit' | 'off
   result: GameResult | '';
 };
 
-export const BENCHMARK_HINT =
-  'Bundled benchmarks cover C2, C3 and GC1 for Doubles and Standard. Add more with rlcoach benchmarks import.';
+// The ranks with benchmarks, highest first. RANKS in metrics.py is the source.
+export const RANK_OPTIONS = ['GC', 'C3', 'C2', 'C1', 'D3', 'D2', 'D1', 'P3', 'P2', 'P1', 'G3', 'G2', 'G1'].map(
+  (r) => ({ value: r, label: r }),
+);
+
+export const BENCHMARK_HINT = 'Benchmarks cover Doubles and Standard, from G1 to GC. Duel has none.';
 
 export const BENCHMARK_SOURCE =
-  'Benchmarks are ballchasing.com averages. GC1 combines every Grand Champion tier.';
+  'Benchmarks are ballchasing.com averages. GC combines every Grand Champion tier.';
 
 // The API sends UTC timestamps with no offset, which browsers would read as local.
 export function parseUtc(value: string): Date {

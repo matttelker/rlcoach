@@ -77,10 +77,10 @@ After a change to the mistake detector, review every game again with `--redo`.
 
 ## Benchmarks
 
-On startup the server loads the bundled benchmarks for any playlist that has none. Doubles and
-Standard each have their own file, with C2, C3 and GC1 rows measured by ballchasing.com across all
-seasons. Ballchasing groups every Grand Champion tier together, so the GC1 rows combine GC1 through
-SSL.
+The server reloads the bundled benchmarks every time it starts. Doubles and Standard each have
+their own file, measured by ballchasing.com across all seasons, with a row per stat for every rank
+from G1 (Gold I) to C3, plus GC. Ballchasing groups every Grand Champion tier together, so GC
+combines GC1 through SSL. The pages open on `target_rank` from your config, P1 unless you set it.
 
 ## Checks
 

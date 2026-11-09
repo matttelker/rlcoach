@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { getTrends, getBenchmarks } from '../api/client';
+import { getTrends } from '../api/client';
 import { Card, SkeletonChart, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField } from '../components';
 import { PERIOD_OPTIONS } from './coachTransforms';
 import { hasBenchmarkValue, parseLocalDate } from './dataTransforms';
@@ -28,14 +28,8 @@ export function Trends() {
   });
 
   const activePlaylist = playlist ?? data?.playlist;
-
-  const { data: benchmarksData } = useQuery({
-    queryKey: ['benchmarks', metric, activePlaylist],
-    queryFn: () => getBenchmarks({ metric, rank: 'GC1', playlist: activePlaylist }),
-    enabled: showBenchmark && !!activePlaylist,
-  });
-
-  const benchmarkValue = benchmarksData?.items?.[0]?.median_value;
+  const rank = data?.rank ?? 'rank';
+  const benchmarkValue = data?.rank_median;
   const hasBenchmark = showBenchmark && hasBenchmarkValue(benchmarkValue);
 
   const chartData =
@@ -59,7 +53,7 @@ export function Trends() {
             onChange={(e) => setShowBenchmark(e.target.checked)}
             className="w-4 h-4 accent-[var(--color-primary)]"
           />
-          Show the GC1 median
+          Show the {rank} median
         </label>
       </PageHeader>
 
@@ -86,7 +80,7 @@ export function Trends() {
                     stroke="var(--color-text-muted)"
                     strokeDasharray="4 4"
                     label={{
-                      value: 'GC1 median',
+                      value: `${rank} median`,
                       position: 'insideTopRight',
                       fill: 'var(--color-text-muted)',
                       fontSize: 13,
