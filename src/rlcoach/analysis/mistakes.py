@@ -80,7 +80,15 @@ GOAL_CHANCES = (
 )
 BEHIND_LINE_MARGIN = 200.0  # A keeper on the line is fine, so ask for a clear gap
 HEADING_MIN_SPEED = 100.0  # Slower than this towards goal is not going in yet
-JUMP_RISE = 60.0  # Height gain that proves a car left the ground
+# Height gain that proves a car left the ground, for replays that don't say when
+# cars jump. Driving up a wall gains height too
+JUMP_RISE = 60.0
+# A jump that starts later than this before the ball goes in can't save it. A car
+# has risen about 60 uu by then
+JUMP_LEAD_S = 0.2
+# A jump or flip this long before the goal review's window still has the car in
+# the air during it. A flip lasts about 0.7 s
+JUMP_LOOKBACK_S = 1.0
 SAVE_REACH = 350.0  # Horizontal distance a jump can cover at the goal line
 SAVE_TRAVEL = 700.0  # Extra reach for each second of warning
 SAVE_REACH_MAX = 900.0
@@ -270,6 +278,7 @@ class DefenderRole:
     index: int
     gap: float = 0.0
     ball_speed: float = 0.0
+    late_jump: bool = False  # Jumped only as the ball went in
 
 
 @dataclass
@@ -289,6 +298,7 @@ class Context:
     times: list[float] = field(default_factory=list)
     last_touch_team: list[int | None] = field(default_factory=list)
     kickoff_start: list[float] = field(default_factory=list)
+    reports_jumps: bool = False  # The replay says when each car jumps and flips
 
     def name(self, player_id: str | None) -> str:
         if player_id == self.player_id:
@@ -480,6 +490,7 @@ def build_context(
         times=[f.timestamp for f in frames],
         last_touch_team=_last_touch_by_frame(frames, contacts, live),
         kickoff_start=_kickoff_starts(live, frames),
+        reports_jumps=any(_left_the_ground(p) for f in frames for p in f.players),
     )
 
 
@@ -829,6 +840,38 @@ def detect_clears_given_back(ctx: Context) -> tuple[list[Mistake], dict[str, int
     return flags, summary
 
 
+def _left_the_ground(car: PlayerFrame) -> bool:
+    """The game says the car is jumping, double jumping or flipping."""
+    return car.is_jumping or car.is_double_jumping or car.is_dodging
+
+
+def _jumps_before(
+    ctx: Context, car_id: str, first: int, cross: int
+) -> tuple[bool, bool]:
+    """Whether a car jumped in time for the ball crossing at `cross`, from the
+    window that starts at `first`, and whether it only jumped too late.
+
+    A jump counts from when it starts, so a state the replay never ends says
+    nothing.
+    """
+    start = ctx.index_at(ctx.times[first] - JUMP_LOOKBACK_S)
+    before = ctx.frames[start - 1].get_player_by_id(car_id) if start else None
+    was_up = before is not None and _left_the_ground(before)
+    jumped = late = False
+    for index in range(start, cross + 1):
+        car = ctx.frames[index].get_player_by_id(car_id)
+        if car is None:
+            continue
+        up = _left_the_ground(car)
+        if up and not was_up:
+            if ctx.times[cross] - ctx.times[index] >= JUMP_LEAD_S:
+                jumped = True
+            else:
+                late = True
+        was_up = up
+    return jumped, late
+
+
 def _cars_on_my_team(frame: Frame, team: int) -> list[PlayerFrame]:
     return [p for p in frame.players if p.team == team]
 
@@ -882,6 +925,7 @@ def _review_defender(
     """Work out what one defender did about a goal."""
     first = ctx.index_at(ctx.times[cross] - GOAL_REVIEW_WINDOW_S)
     heights: list[float] = []
+    jumped, late_jump = _jumps_before(ctx, car_id, first, cross)
     closest = after_shot = math.inf
     moment = shot_moment = cross
     for index in range(first, cross + 1):
@@ -898,7 +942,9 @@ def _review_defender(
     if not heights:
         return DefenderRole("demolished", "was demolished", cross)
 
-    jumped = max(heights) - min(heights) > JUMP_RISE
+    if not ctx.reports_jumps:
+        jumped = max(heights) - min(heights) > JUMP_RISE
+    late_jump = late_jump and not jumped
     touched = any(
         c.player_id == car_id and first <= c.index <= cross for c in ctx.contacts
     )
@@ -914,8 +960,9 @@ def _review_defender(
         return DefenderRole("touched", "got a touch on it", moment)
     in_reach = _can_reach_shot(ctx, at_line, crossing.ball, warning)
     if in_reach and had_time and not jumped:
-        text = "was in goal with time to react and never jumped"
-        return DefenderRole("no_save_attempt", text, moment)
+        late = "jumped too late" if late_jump else "never jumped"
+        text = f"was in goal with time to react and {late}"
+        return DefenderRole("no_save_attempt", text, moment, late_jump=late_jump)
     if closest >= MISS_RANGE:
         if (
             had_time
@@ -942,7 +989,12 @@ def _review_defender(
         return DefenderRole("beaten", "was beaten by the shot", moment)
     velocity = ctx.frames[shot_moment].ball.velocity
     speed = math.hypot(velocity.x, velocity.y, velocity.z)
-    text = "jumped for it and missed" if jumped else "couldn't reach it"
+    if jumped:
+        text = "jumped for it and missed"
+    elif late_jump:
+        text = "jumped too late"
+    else:
+        text = "couldn't reach it"
     return DefenderRole("missed_save", text, shot_moment, after_shot, speed)
 
 
@@ -1003,7 +1055,8 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
         what = "The ball wasn't heading for your goal until your touch turned it in."
     elif label == "no_save_attempt":
         kind = "no_save_attempt"
-        what = "You were in goal with time to react, and you never jumped."
+        late = "jumped too late" if my_role.late_jump else "never jumped"
+        what = f"You were in goal with time to react, and you {late}."
     elif label == "missed_clear":
         kind = "missed_clear"
         what = (

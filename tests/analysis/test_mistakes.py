@@ -680,6 +680,72 @@ def test_defender_who_jumped_and_missed_is_flagged_for_the_miss():
     assert [f.kind for f in flags] == ["missed_save"]
 
 
+def _keeper(**states):
+    """Me on my line under the lob of `_goal_scene`, which crosses at about 3.98 s.
+
+    Each state is a (start, end) spell of scenario time it's on for.
+    """
+
+    def me(t):
+        on = {name: start <= t < end for name, (start, end) in states.items()}
+        return _car(ME, ORANGE, 100.0, 5150.0, z=40.0, **on)
+
+    return me
+
+
+def _review_keeper(**states):
+    frames, goal = _goal_scene(
+        me=_keeper(**states),
+        mate=lambda t: _car(MATE, ORANGE, 3000.0, -3000.0),
+    )
+    return review_conceded_goals(_ctx(frames, goals=[goal]))
+
+
+def test_a_jump_as_the_ball_goes_in_is_too_late_to_be_a_save_attempt():
+    reviews, flags = _review_keeper(is_jumping=(3.85, 3.95))
+    assert [f.kind for f in flags] == ["no_save_attempt"]
+    assert flags[0].what == (
+        "You were in goal with time to react, and you jumped too late."
+    )
+    assert "jumped too late" in reviews[0].lines[0]
+
+
+def test_a_jump_the_game_reports_counts_without_the_car_rising():
+    # Jumping in time but staying low, I never got near the ball
+    reviews, flags = _review_keeper(is_jumping=(3.0, 3.1))
+    assert flags == []
+    assert reviews[0].lines[0].startswith("You got no closer than 4 m")
+
+
+def test_a_flip_started_just_before_the_window_still_counts():
+    # The window opens 2 s before the ball crosses, and the flip 0.4 s earlier
+    reviews, flags = _review_keeper(is_dodging=(1.6, 2.3))
+    assert flags == []
+    assert reviews[0].lines[0].startswith("You got no closer than 4 m")
+
+
+def test_a_state_left_on_all_along_is_no_jump():
+    reviews, flags = _review_keeper(is_dodging=(-100.0, 100.0))
+    assert [f.kind for f in flags] == ["no_save_attempt"]
+    assert "never jumped" in reviews[0].lines[0]
+
+
+def test_rising_without_a_jump_is_none_once_the_game_reports_jumps():
+    """Driving up the wall gains height. Once the replay says when cars jump,
+    only a jump counts."""
+
+    def climbing(t):
+        z = 40.0 if t < 3.0 else 40.0 + 500.0 * (t - 3.0)
+        return _car(ME, ORANGE, 100.0, 5150.0, z=z, vz=500.0)
+
+    def mate(t):
+        return _car(MATE, ORANGE, 3000.0, -3000.0, is_jumping=0.5 <= t < 0.6)
+
+    frames, goal = _goal_scene(me=climbing, mate=mate)
+    reviews, flags = review_conceded_goals(_ctx(frames, goals=[goal]))
+    assert [f.kind for f in flags] == ["no_save_attempt"]
+
+
 def test_slow_ball_i_fail_to_clear_is_on_me():
     """From a real goal: a 24 km/h ball rolled in past a lone keeper."""
 
