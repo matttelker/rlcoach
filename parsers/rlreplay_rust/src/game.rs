@@ -18,12 +18,6 @@ const BALL_AT_REST: Spot = (0.0, 0.0, 93.15);
 const CAR_UNPLACED: Spot = (0.0, 0.0, 17.0);
 /// What a car holds before it sends its boost: the kickoff amount.
 const KICKOFF_BOOST: i64 = 33;
-/// A car whose centre is this close to the ball's touches it.
-const TOUCH_UU: f32 = 200.0;
-/// A car's touches this close together in time are one touch.
-const TOUCH_GAP_S: f64 = 0.2;
-/// And this close in place, they're one touch for twice as long.
-const TOUCH_SAME_PLACE_UU: f32 = 120.0;
 
 const PLAYER_NAME: &str = "Engine.PlayerReplicationInfo:PlayerName";
 const CAR_PRI: &str = "Engine.Pawn:PlayerReplicationInfo";
@@ -32,6 +26,8 @@ const DODGE_TORQUE: &str = "TAGame.CarComponent_Dodge_TA:DodgeTorque";
 /// Boost before `ReplicatedBoost` replaced it.
 const BOOST_AMOUNT: &str = "TAGame.CarComponent_Boost_TA:ReplicatedBoostAmount";
 const FIRST_TOUCHES: &str = "TAGame.PRI_TA:MatchFirstTouches";
+const BALL_TOUCHES: &str = "TAGame.PRI_TA:BallTouches";
+const HIT_TEAM: &str = "TAGame.Ball_TA:HitTeamNum";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
@@ -69,8 +65,6 @@ struct Car {
     boost: Option<i64>,
     /// Demolished. It stays so until the car is gone.
     demolished: bool,
-    /// When and where its last touch was.
-    last_touch: Option<(f64, Spot)>,
 }
 
 /// One player's car in one frame. `row` names the player (see `roster`).
@@ -94,13 +88,18 @@ pub struct FrameOut {
     pub time: f32,
     pub ball_position: Spot,
     pub ball_velocity: Spot,
+    /// The team that touched the ball last, which the ball sends on the frame of a
+    /// touch that changes it. None before the kickoff's first touch.
+    pub hit_team: Option<i64>,
     pub cars: Vec<CarFrame>,
     /// A pad taken: its index, the player and their team, and when.
     pub pickups: Vec<(usize, usize, Option<i64>, f32)>,
     /// A flip: the player, and its torque in the car's own axes, which points the way
     /// the stick did.
     pub dodges: Vec<(usize, Spot)>,
-    pub touches: Vec<usize>,
+    /// The game's own touch counter rose for this player: they touched the ball
+    /// this many times since it last rose. It rises up to a second after a touch.
+    pub touches: Vec<(usize, i32)>,
     /// The game's own first-touch counter rose for this player, up to a second
     /// after the kickoff's first touch.
     pub first_touches: Vec<usize>,
@@ -118,10 +117,13 @@ pub struct Game<'a> {
     ball: Option<i32>,
     ball_position: Spot,
     ball_velocity: Spot,
+    hit_team: Option<i64>,
     roster: Roster,
     pads: Pads,
     /// Each PRI's first-touch count. The game keeps re-sending it.
     first_touch_counts: HashMap<i32, i32>,
+    /// Each PRI's touch count.
+    touch_counts: HashMap<i32, i32>,
 }
 
 /// The object ids of the attributes the walk reads, where the replay has them.
@@ -133,6 +135,8 @@ struct Attributes {
     dodge_torque: Option<usize>,
     boost_amount: Option<usize>,
     first_touches: Option<usize>,
+    ball_touches: Option<usize>,
+    hit_team: Option<usize>,
 }
 
 impl Attributes {
@@ -145,6 +149,8 @@ impl Attributes {
             dodge_torque: id(DODGE_TORQUE),
             boost_amount: id(BOOST_AMOUNT),
             first_touches: id(FIRST_TOUCHES),
+            ball_touches: id(BALL_TOUCHES),
+            hit_team: id(HIT_TEAM),
         }
     }
 }
@@ -174,11 +180,6 @@ fn spot(vector: Vector3f) -> Spot {
     (vector.x, vector.y, vector.z)
 }
 
-fn distance(a: Spot, b: Spot) -> f32 {
-    let (dx, dy, dz) = (a.0 - b.0, a.1 - b.1, a.2 - b.2);
-    (dx * dx + dy * dy + dz * dz).sqrt()
-}
-
 /// A boost byte (0 to 255) as 0 to 100.
 fn boost_percent(raw: u8) -> i64 {
     ((f64::from(raw) * (100.0 / 255.0)).round() as i64).clamp(0, 100)
@@ -201,9 +202,11 @@ impl<'a> Game<'a> {
             ball: None,
             ball_position: BALL_AT_REST,
             ball_velocity: (0.0, 0.0, 0.0),
+            hit_team: None,
             roster: Roster::new(rows, stream_names),
             pads: Pads::new(pad_spots),
             first_touch_counts: HashMap::new(),
+            touch_counts: HashMap::new(),
         }
     }
 
@@ -260,6 +263,7 @@ impl<'a> Game<'a> {
         self.ball = ball;
         self.ball_position = BALL_AT_REST;
         self.ball_velocity = (0.0, 0.0, 0.0);
+        self.hit_team = None;
     }
 
     fn kind(&self, actor: i32) -> Kind {
@@ -312,6 +316,12 @@ impl<'a> Game<'a> {
             Attribute::TeamPaint(paint) => self.roster.paint(actor, paint.team),
             Attribute::ReplicatedBoost(boost) => self.set_boost(actor, boost.boost_amount),
             Attribute::Byte(raw) if attribute == names.boost_amount => self.set_boost(actor, *raw),
+            Attribute::Byte(team) if attribute == names.hit_team => {
+                if self.kind(actor) == Kind::Ball {
+                    // 255 until the kickoff's first touch
+                    self.hit_team = (*team <= 1).then_some(i64::from(*team));
+                }
+            }
             Attribute::Location(torque) if attribute == names.dodge_torque => {
                 events.dodges.push((self.car_of(actor), spot(*torque)));
             }
@@ -321,6 +331,13 @@ impl<'a> Game<'a> {
                 let seen = self.first_touch_counts.insert(actor, *count);
                 if *count == seen.unwrap_or(0) + 1 {
                     events.first_touches.push(actor);
+                }
+            }
+            Attribute::Int(count) if attribute == names.ball_touches => {
+                // The count only grows, and is sent again unchanged
+                let seen = self.touch_counts.insert(actor, *count).unwrap_or(0);
+                if *count > seen {
+                    events.touches.push((actor, *count - seen));
                 }
             }
             Attribute::PickupNew(pickup) => {
@@ -438,12 +455,12 @@ impl<'a> Game<'a> {
                 },
             );
         }
-        let touches = self.touches(f64::from(time));
         let roster = &self.roster;
         FrameOut {
             time,
             ball_position: self.ball_position,
             ball_velocity: self.ball_velocity,
+            hit_team: self.hit_team,
             cars: cars.into_values().collect(),
             pickups: events
                 .pickups
@@ -458,7 +475,11 @@ impl<'a> Game<'a> {
                 .iter()
                 .filter_map(|(car, torque)| Some((roster.row(*car)?, *torque)))
                 .collect(),
-            touches,
+            touches: events
+                .touches
+                .iter()
+                .filter_map(|(pri, count)| Some((roster.pri_row(*pri)?, *count)))
+                .collect(),
             first_touches: events
                 .first_touches
                 .iter()
@@ -473,31 +494,6 @@ impl<'a> Game<'a> {
                 .collect(),
         }
     }
-
-    /// Players whose car came within reach of the ball, once per touch.
-    fn touches(&mut self, now: f64) -> Vec<usize> {
-        let mut touches = Vec::new();
-        for (actor, car) in self.cars.iter_mut() {
-            let Some(position) = car.position else {
-                continue;
-            };
-            if distance(position, self.ball_position) >= TOUCH_UU {
-                continue;
-            }
-            if let Some((then, there)) = car.last_touch {
-                let gap = now - then;
-                let same_place = distance(position, there) <= TOUCH_SAME_PLACE_UU;
-                if gap < TOUCH_GAP_S || (same_place && gap < TOUCH_GAP_S * 2.0) {
-                    continue;
-                }
-            }
-            if let Some(row) = self.roster.row(*actor) {
-                touches.push(row);
-                car.last_touch = Some((now, position));
-            }
-        }
-        touches
-    }
 }
 
 /// What happened during one frame, by actor, until the frame's players are known.
@@ -506,6 +502,7 @@ struct Events {
     pickups: Vec<crate::pads::Pickup>,
     dodges: Vec<(i32, Spot)>,
     first_touches: Vec<i32>,
+    touches: Vec<(i32, i32)>,
     demos: Vec<(i32, Option<i32>)>,
 }
 
@@ -557,6 +554,8 @@ mod tests {
                 COMPONENT_CAR,
                 DODGE_TORQUE,
                 FIRST_TOUCHES,
+                BALL_TOUCHES,
+                HIT_TEAM,
                 RIGID_BODY,
                 BOOST,
                 PICKUP,
@@ -707,15 +706,54 @@ mod tests {
     }
 
     #[test]
-    fn a_touch_counts_once_until_the_car_comes_back() {
+    fn touches_are_the_games_count_as_it_rises() {
         let mut script = Script::new();
         script.kickoff();
-        for time in [0.1, 0.2, 0.35, 0.55] {
-            script.frame(time).place(CAR, (100.0, 0.0, 93.15));
+        for (time, count) in [(0.1, 1), (0.2, 1), (0.3, 3), (0.4, 2)] {
+            script
+                .frame(time)
+                .set(PRI, BALL_TOUCHES, Attribute::Int(count));
         }
-        let touches: Vec<usize> = script.run().iter().map(|f| f.touches.len()).collect();
-        // Again after 0.2 s, or after 0.4 s in the same place
-        assert_eq!(touches, vec![0, 1, 0, 0, 1]);
+        let touches: Vec<_> = script.run().into_iter().map(|f| f.touches).collect();
+        // A re-sent count is no touch, and one that skips counts every touch
+        assert_eq!(
+            touches,
+            vec![vec![], vec![(0, 1)], vec![], vec![(0, 2)], vec![]]
+        );
+    }
+
+    #[test]
+    fn the_ball_says_which_team_touched_it_last() {
+        let mut script = Script::new();
+        script
+            .kickoff()
+            .frame(0.1)
+            .set(BALL, HIT_TEAM, Attribute::Byte(1))
+            .frame(0.2)
+            .frame(0.3)
+            .set(BALL, HIT_TEAM, Attribute::Byte(255));
+        let teams: Vec<_> = script.run().iter().map(|f| f.hit_team).collect();
+        assert_eq!(teams, vec![None, Some(1), Some(1), None]);
+    }
+
+    #[test]
+    fn a_player_the_header_leaves_out_touches_as_their_own_row() {
+        let mut script = Script::new();
+        script
+            .frame(0.0)
+            .spawn(PRI, PRI_OBJECT)
+            .spawn(PAD + 1, PRI_OBJECT)
+            .spawn(CAR, CAR_OBJECT)
+            .set(PAD + 1, PLAYER_NAME, Attribute::String("Me".into()))
+            .set(PRI, PLAYER_NAME, Attribute::String("Left".into()))
+            .link(CAR, CAR_PRI, PRI)
+            .place(CAR, (0.0, -3000.0, 17.0))
+            .frame(0.1)
+            .set(PRI, BALL_TOUCHES, Attribute::Int(1));
+        let out = script.run();
+        // Blue's one row waits for Me, so the leaver gets a number past the rows
+        assert_eq!(out[0].cars[0].row, 2);
+        assert_eq!(out[1].touches, vec![(2, 1)]);
     }
 
     #[test]

@@ -120,6 +120,7 @@ fn frame_dict<'py>(py: Python<'py>, frame: &FrameOut) -> PyResult<Bound<'py, PyD
         intern!(py, "ball"),
         (xyz(frame.ball_position), xyz(frame.ball_velocity)),
     )?;
+    dict.set_item(intern!(py, "hit_team"), frame.hit_team)?;
     let cars = frame.cars.iter().map(|car| {
         let rotation = car.rotation.map(|q| q.map(f64::from));
         (

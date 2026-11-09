@@ -21,6 +21,7 @@ from .parser.types import (
     ParserTouchEvent,
     PlayerFrame,
     Quaternion,
+    TouchCount,
 )
 
 # How far past the walls a position may read. Cars and the ball go inside the
@@ -97,6 +98,7 @@ class _Timeline:
         return Frame(
             timestamp=t,
             ball=BallFrame(position=_on_field(position), velocity=Vec3(*velocity)),
+            hit_team=raw["hit_team"],
             players=list(cars.values()),
             boost_pad_events=[
                 BoostPadEventFrame(
@@ -111,11 +113,7 @@ class _Timeline:
                 Dodge(timestamp=t, player_id=player(row), torque=Vec3(*torque))
                 for row, torque in raw["dodges"]
             ],
-            # By player, so who touched first doesn't hang on the parser's order
-            parser_touch_events=sorted(
-                (ParserTouchEvent(t, player(row)) for row in raw["touches"]),
-                key=lambda event: event.player_id,
-            ),
+            touch_counts=[TouchCount(player(row), n) for row, n in raw["touches"]],
             parser_first_touch_events=[
                 ParserTouchEvent(t, player(row)) for row in raw["first_touches"]
             ],

@@ -41,13 +41,16 @@ def read_frames(
 
     - "time": seconds into the recording
     - "ball": its position and velocity, each (x, y, z)
+    - "hit_team": the team that touched the ball last, or None before a kickoff's
+      first touch
     - "cars": (row, team, position, velocity, angular velocity, rotation, boost,
       demolished) for each player's car. The row is the player's in the header,
       or a number past them for someone who left. The rotation is a quaternion
       (x, y, z, w), or None before the car sends one
     - "pickups": (pad, row, team, time) for each pad taken. The team can be None
     - "dodges": (row, torque) for each flip
-    - "touches": the rows of the cars that touched the ball
+    - "touches": (row, count) for each player whose touch counter rose: they
+      touched the ball that many times, up to a second before
     - "first_touches": the rows whose first-touch counter rose
     - "demos": (victim row, attacker row or None)
     """

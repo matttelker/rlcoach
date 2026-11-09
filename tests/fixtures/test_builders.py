@@ -52,7 +52,7 @@ def test_with_flip_at_adds_a_dodge_to_the_nearest_frame():
 
 def test_a_test_frame_carries_the_parsers_events():
     frame = create_test_frame(1.0, [create_test_player("player1", 0)])
-    assert (frame.dodges, frame.parser_touch_events, frame.boost_pad_events) == (
+    assert (frame.dodges, frame.touch_counts, frame.boost_pad_events) == (
         [],
         [],
         [],

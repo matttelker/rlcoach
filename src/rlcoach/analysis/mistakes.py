@@ -3,9 +3,7 @@
 The other analyzers describe a whole game. This one lists the moments that cost
 one player: what happened, when, and what to do instead.
 
-It works from frames wherever the event layer is not reliable enough to accuse
-someone. Parser touches only record a change of team, so same-team touches are
-missing, and boost pickups undercount badly on current builds.
+It works from the game's own touches (see `events.touches`) and from frames.
 """
 
 from __future__ import annotations
@@ -26,36 +24,23 @@ from ..events.kickoffs import (
     went_for_ball,
     went_with,
 )
-from ..events.types import ChallengeEvent, GoalEvent, team_name
+from ..events.touches import detect_touches
+from ..events.types import ChallengeEvent, GoalEvent, TouchEvent, team_name
 from ..field_constants import (
     BACK_WALL_Y,
-    CEILING_Z,
     GOAL_HEIGHT,
     GOAL_WIDTH,
-    SIDE_WALL_X,
 )
 from ..game import Game, read_game
 from ..identity import build_player_identities
 from ..modes import mode_of
 from ..parser.types import BallFrame, Frame, PlayerFrame
-from ..physics_constants import BALL_RADIUS_UU
 
 GOAL_LINE_Y = BACK_WALL_Y
 
 GAME_LENGTH_S = 300.0
-GRAVITY_UU_S2 = 650.0
 MAX_FRAME_GAP_S = 0.5  # Longer gaps are goal replays, and they end any episode
 KICKOFF_GRACE_S = 3.0  # Everyone converges on a kickoff, so skip this window
-
-# A ball "contact" is a velocity change with a car in reach.
-CONTACT_MIN_SPEED_CHANGE = 200.0
-CONTACT_RANGE = 300.0  # Both have moved apart by the frame after a hit
-BOUNCE_CONTACT_RANGE = 165.0  # A bounce-shaped change needs a car right there
-BOUNCE_GAP_SLOP = 30.0
-BOUNCE_SPEED_SLOP = 100.0
-CONTACT_MERGE_S = 0.2
-PUSH_MIN_FIT = 0.7  # 1 means the ball's speed changed straight away from the car
-TOUCH_EVENT_WINDOW_S = 0.16  # The replay's touch events run a little off the ball
 
 DANGER_DEPTH = 3500.0  # Ball this deep in your half threatens the net
 DANGER_WINDOW_S = 5.0
@@ -209,7 +194,7 @@ class UnsupportedReplayError(ValueError):
 
 @dataclass(frozen=True)
 class Contact:
-    """A ball contact inferred from frames."""
+    """A touch the game counted, at the frame `index`."""
 
     t: float
     index: int
@@ -362,115 +347,8 @@ def _flat_distance(a: Any, b: Any) -> float:
     return math.dist((a.x, a.y), (b.x, b.y))
 
 
-def _speed_change(before: BallFrame, after: BallFrame, dt: float) -> float:
-    return math.dist(
-        (before.velocity.x, before.velocity.y, before.velocity.z - GRAVITY_UU_S2 * dt),
-        (after.velocity.x, after.velocity.y, after.velocity.z),
-    )
-
-
-def _is_rebound(before: BallFrame, after: BallFrame, dt: float) -> bool:
-    """Check whether a velocity change fits the ball bouncing off a surface.
-
-    A rebound reverses the speed into the surface, loses some of it, and adds
-    nothing along the surface. A hit from a car rarely does all of that.
-    """
-    old = (before.velocity.x, before.velocity.y, before.velocity.z)
-    new = (after.velocity.x, after.velocity.y, after.velocity.z)
-    # Z is measured from mid height, so the floor and ceiling act like two walls.
-    spot = (before.position.x, before.position.y, before.position.z - CEILING_Z / 2)
-    extents = (SIDE_WALL_X, GOAL_LINE_Y, CEILING_Z / 2)
-    for axis, extent in enumerate(extents):
-        if old[axis] * new[axis] >= 0 or abs(new[axis]) > abs(old[axis]):
-            continue
-        if old[axis] * spot[axis] <= 0:
-            continue
-        gap = extent - abs(spot[axis]) - BALL_RADIUS_UU
-        if gap > abs(old[axis]) * dt + BOUNCE_GAP_SLOP:
-            continue
-        along_old = math.hypot(*(v for i, v in enumerate(old) if i != axis))
-        along_new = math.hypot(*(v for i, v in enumerate(new) if i != axis))
-        if along_new <= along_old + BOUNCE_SPEED_SLOP:
-            return True
-    return False
-
-
 def _active_cars(frame: Frame) -> list[PlayerFrame]:
     return [p for p in frame.players if not p.is_demolished]
-
-
-def _push_fit(car: PlayerFrame, before: BallFrame, after: BallFrame) -> float:
-    """Measure how well a ball's velocity change points away from a car, -1 to 1."""
-    away = (
-        after.position.x - car.position.x,
-        after.position.y - car.position.y,
-        after.position.z - car.position.z,
-    )
-    change = (
-        after.velocity.x - before.velocity.x,
-        after.velocity.y - before.velocity.y,
-        after.velocity.z - before.velocity.z,
-    )
-    size = math.hypot(*away) * math.hypot(*change)
-    if not size:
-        return 0.0
-    return sum(a * c for a, c in zip(away, change, strict=True)) / size
-
-
-def _hitting_car(
-    cars: Sequence[PlayerFrame],
-    before: BallFrame,
-    after: BallFrame,
-    reach: float,
-    named: set[str],
-) -> PlayerFrame | None:
-    """Pick the car in reach that hit the ball.
-
-    The replay's touch events miss some hits, but a car they name beats one they
-    don't. Then the nearest car that could push the ball the way it went wins,
-    because the nearest car can be a bystander beside the real hit. Car positions
-    lag the ball, so if no car fits the push, the nearest one keeps the touch.
-    """
-    in_reach = sorted(
-        (c for c in cars if _distance(c.position, after.position) <= reach),
-        key=lambda c: _distance(c.position, after.position),
-    )
-    pool = [c for c in in_reach if c.player_id in named] or in_reach
-    pushers = (c for c in pool if _push_fit(c, before, after) >= PUSH_MIN_FIT)
-    return next(pushers, pool[0] if pool else None)
-
-
-def find_contacts(frames: Sequence[Frame]) -> list[Contact]:
-    """Infer ball contacts from sudden velocity changes beside a car."""
-    contacts: list[Contact] = []
-    last_contact: dict[str, float] = {}
-    touch_events = [
-        (frame.timestamp, event.player_id)
-        for frame in frames
-        for event in frame.parser_touch_events
-    ]
-    for index in range(1, len(frames)):
-        before, frame = frames[index - 1], frames[index]
-        dt = frame.timestamp - before.timestamp
-        if not 0 < dt <= MAX_FRAME_GAP_S:
-            continue
-        if _speed_change(before.ball, frame.ball, dt) < CONTACT_MIN_SPEED_CHANGE:
-            continue
-        rebound = _is_rebound(before.ball, frame.ball, dt)
-        reach = BOUNCE_CONTACT_RANGE if rebound else CONTACT_RANGE
-        named = {
-            player_id
-            for t, player_id in touch_events
-            if abs(t - frame.timestamp) <= TOUCH_EVENT_WINDOW_S
-        }
-        car = _hitting_car(_active_cars(frame), before.ball, frame.ball, reach, named)
-        if car is None:
-            continue
-        if frame.timestamp - last_contact.get(car.player_id, -1e9) < CONTACT_MERGE_S:
-            continue
-        last_contact[car.player_id] = frame.timestamp
-        contacts.append(Contact(frame.timestamp, index, car.player_id, car.team))
-    return contacts
 
 
 def _ball_is_parked(ball: BallFrame) -> bool:
@@ -528,6 +406,13 @@ def format_clock(seconds_left: float) -> str:
 def _last_touch_by_frame(
     frames: Sequence[Frame], contacts: Sequence[Contact], live: Sequence[bool]
 ) -> list[int | None]:
+    """The team that touched the ball last at each frame, or None while it's dead
+    and until a kickoff's first touch. The ball says, on any replay that has it."""
+    if any(frame.hit_team is not None for frame in frames):
+        return [
+            frame.hit_team if is_live else None
+            for frame, is_live in zip(frames, live, strict=True)
+        ]
     result: list[int | None] = []
     position = 0
     team: int | None = None
@@ -561,8 +446,10 @@ def build_context(
     challenges: list[ChallengeEvent],
     names: dict[str, str],
     team_size: int | None = None,
+    touches: Sequence[TouchEvent] | None = None,
 ) -> Context:
-    """Prepare the shared timeline for one reviewed player."""
+    """Prepare the shared timeline for one reviewed player. `touches` are the
+    game's (see `events.touches`), found from the frames if not given."""
     team = next(
         (p.team for frame in frames for p in frame.players if p.player_id == player_id),
         None,
@@ -572,7 +459,13 @@ def build_context(
     if team_size is None:
         team_size = sum(1 for p in frames[0].players if p.team == team)
     live = live_mask(frames, [g.t for g in goals])
-    contacts = find_contacts(frames)
+    if touches is None:
+        touches = detect_touches(frames)
+    contacts = [
+        Contact(touch.t, touch.frame, touch.player_id, touch.team)
+        for touch in touches
+        if touch.team is not None
+    ]
     return Context(
         frames=frames,
         player_id=player_id,
@@ -1415,6 +1308,7 @@ def review_player(
         challenges=game.challenges,
         names=names,
         team_size=header.team_size,
+        touches=game.touches,
     )
 
     reviews, goal_flags = review_conceded_goals(ctx)

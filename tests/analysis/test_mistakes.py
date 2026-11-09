@@ -22,7 +22,6 @@ from rlcoach.analysis.mistakes import (
     detect_clears_given_back,
     detect_double_commits,
     detect_low_boost_challenges,
-    find_contacts,
     format_clock,
     game_clock,
     goal_timeline,
@@ -38,7 +37,6 @@ from rlcoach.events.types import ChallengeEvent, GoalEvent
 from rlcoach.field_constants import Vec3
 from rlcoach.game import read_game
 from rlcoach.identity import build_player_identities
-from rlcoach.parser.types import ParserTouchEvent
 from tests.fixtures import real_replays
 from tests.fixtures.builders import (
     create_test_ball,
@@ -117,115 +115,6 @@ def test_own_depth_is_positive_towards_each_teams_goal():
     assert own_depth(5000.0, ORANGE) == 5000.0
     assert own_depth(5000.0, BLUE) == -5000.0
     assert own_depth(-5000.0, BLUE) == 5000.0
-
-
-def test_find_contacts_sees_a_hit_beside_a_car():
-    players = [_car(ME, ORANGE, 0.0, 1000.0, z=300.0)]
-    frames = [
-        create_test_frame(0.0, players, _ball(0.0, 900.0, 300.0, vy=500.0)),
-        create_test_frame(DT, players, _ball(0.0, 917.0, 300.0, vy=500.0)),
-        create_test_frame(2 * DT, players, _ball(0.0, 900.0, 300.0, vy=-1500.0)),
-    ]
-    contacts = find_contacts(frames)
-    assert [c.player_id for c in contacts] == [ME]
-
-
-def test_find_contacts_ignores_a_floor_bounce_under_a_car():
-    players = [_car(ME, ORANGE, 150.0, 1000.0, z=240.0)]
-    frames = [
-        create_test_frame(
-            0.0, players, _ball(0.0, 900.0, 110.0, vy=1700.0, vz=-1100.0)
-        ),
-        create_test_frame(DT, players, _ball(0.0, 957.0, 100.0, vy=1700.0, vz=-1140.0)),
-        create_test_frame(
-            2 * DT, players, _ball(0.0, 993.0, 130.0, vy=1085.0, vz=650.0)
-        ),
-    ]
-    assert find_contacts(frames) == []
-
-
-def test_find_contacts_sees_a_ground_hit_with_the_car_already_past():
-    """From a real clear: the hit left the car 193 uu from a ball at z=100."""
-    players = [_car(ME, ORANGE, 1500.0, -2820.0)]
-    frames = [
-        create_test_frame(
-            0.0, players, _ball(1460.0, -2700.0, 100.0, vx=-790.0, vy=-1150.0)
-        ),
-        create_test_frame(
-            DT, players, _ball(1430.0, -2640.0, 120.0, vx=-330.0, vy=1950.0, vz=900.0)
-        ),
-    ]
-    assert [c.player_id for c in find_contacts(frames)] == [ME]
-
-
-def test_find_contacts_credits_the_car_that_can_push_the_ball_that_way():
-    """From a real shot: a defender stood nearest, on the far side of the ball."""
-    players = [
-        _car(MATE, ORANGE, -1042.0, 4715.0, z=140.0),
-        _car(OPP, BLUE, -978.0, 4529.0, z=119.0),
-    ]
-    frames = [
-        create_test_frame(
-            0.0, players, _ball(-1030.0, 4638.0, 273.0, vx=1142.0, vy=-440.0)
-        ),
-        create_test_frame(
-            DT,
-            players,
-            _ball(-975.0, 4647.0, 247.0, vx=1060.0, vy=1858.0, vz=1700.0),
-        ),
-    ]
-    assert [c.player_id for c in find_contacts(frames)] == [OPP]
-
-
-def test_find_contacts_trusts_the_replays_touch_event_over_the_push_fit():
-    """The other car only looks right: the replay says who hit the ball."""
-    players = [
-        _car(MATE, ORANGE, -1042.0, 4715.0, z=140.0),
-        _car(OPP, BLUE, -978.0, 4529.0, z=119.0),
-    ]
-    event = ParserTouchEvent(timestamp=DT, player_id=MATE)
-    frames = [
-        create_test_frame(
-            0.0, players, _ball(-1030.0, 4638.0, 273.0, vx=1142.0, vy=-440.0)
-        ),
-        replace(
-            create_test_frame(
-                DT,
-                players,
-                _ball(-975.0, 4647.0, 247.0, vx=1060.0, vy=1858.0, vz=1700.0),
-            ),
-            parser_touch_events=[event],
-        ),
-    ]
-    assert [c.player_id for c in find_contacts(frames)] == [MATE]
-
-
-def test_find_contacts_keeps_the_nearest_car_when_none_fits_the_push():
-    """Car positions lag the ball, so a poor fit alone must not lose a touch."""
-    players = [_car(ME, ORANGE, 0.0, 800.0, z=300.0)]
-    frames = [
-        create_test_frame(0.0, players, _ball(0.0, 900.0, 300.0, vy=500.0)),
-        create_test_frame(DT, players, _ball(0.0, 917.0, 300.0, vy=-1500.0)),
-    ]
-    assert [c.player_id for c in find_contacts(frames)] == [ME]
-
-
-def test_find_contacts_ignores_a_wall_bounce_beside_a_car():
-    players = [_car(ME, ORANGE, 3800.0, 1000.0, z=300.0)]
-    frames = [
-        create_test_frame(0.0, players, _ball(3990.0, 900.0, 300.0, vx=1500.0)),
-        create_test_frame(DT, players, _ball(3970.0, 910.0, 300.0, vx=-900.0, vy=20.0)),
-    ]
-    assert find_contacts(frames) == []
-
-
-def test_find_contacts_ignores_gravity():
-    players = [_car(ME, ORANGE, 0.0, 1000.0, z=300.0)]
-    frames = [
-        create_test_frame(i * DT, players, _ball(0.0, 950.0, 400.0, vz=-650.0 * i * DT))
-        for i in range(5)
-    ]
-    assert find_contacts(frames) == []
 
 
 def test_clock_counts_only_live_play():

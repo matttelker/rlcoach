@@ -36,12 +36,14 @@ class GoalEvent:
 
 @dataclass(frozen=True)
 class TouchEvent:
-    """A touch the parser saw, where the car was, and how fast the ball went."""
+    """A touch the game counted, where the car was, and how fast the ball went."""
 
     t: float
     player_id: str
     location: Vec3
     ball_speed_kph: float = 0.0
+    frame: int = 0  # The frame it's placed at
+    team: int | None = None
 
 
 @dataclass(frozen=True)

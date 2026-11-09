@@ -108,10 +108,19 @@ class Dodge:
 
 @dataclass(frozen=True)
 class ParserTouchEvent:
-    """A car within 200 uu of the ball, or the game's first-touch counter rising."""
+    """The game's first-touch counter rising for a player."""
 
     timestamp: float
     player_id: str
+
+
+@dataclass(frozen=True)
+class TouchCount:
+    """The game's touch counter rising for a player: they touched the ball `count`
+    times since it last rose. It rises up to a second after a touch."""
+
+    player_id: str
+    count: int
 
 
 @dataclass(frozen=True)
@@ -127,10 +136,13 @@ class Frame:
 
     timestamp: float  # Seconds from the first frame
     ball: BallFrame
+    # The team that touched the ball last, from the ball itself, which sends it on
+    # the frame of a touch that changes it. None before a kickoff's first touch
+    hit_team: int | None = None
     players: list[PlayerFrame] = field(default_factory=list)
     boost_pad_events: list[BoostPadEventFrame] = field(default_factory=list)
     dodges: list[Dodge] = field(default_factory=list)
-    parser_touch_events: list[ParserTouchEvent] = field(default_factory=list)
+    touch_counts: list[TouchCount] = field(default_factory=list)
     # When the game's first-touch counter rose, up to a second after the touch itself
     parser_first_touch_events: list[ParserTouchEvent] = field(default_factory=list)
     parser_demo_events: list[ParserDemoEvent] = field(default_factory=list)

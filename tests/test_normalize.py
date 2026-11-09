@@ -26,6 +26,7 @@ def _frame(t, cars=(), ball=((0.0, 0.0, 93.15), STILL), **events):
     return {
         "time": t,
         "ball": ball,
+        "hit_team": None,
         "cars": list(cars),
         "pickups": [],
         "dodges": [],
@@ -105,14 +106,12 @@ def test_a_car_keeps_its_spin_and_rotation_and_whether_its_demolished():
     assert not plain.is_demolished
 
 
-def test_touches_on_one_frame_come_in_player_order_at_the_frames_time():
-    frame = _one(touches=[1, 0], first_touches=[0])
-    assert [(e.player_id, e.timestamp) for e in frame.parser_touch_events] == [
-        (ME, 0.0),
-        (THEM, 0.0),
-    ]
+def test_touch_counts_name_their_players_and_the_ball_its_team():
+    frame = _one(touches=[(1, 2), (0, 1)], first_touches=[0], hit_team=1)
+    assert [(c.player_id, c.count) for c in frame.touch_counts] == [(THEM, 2), (ME, 1)]
+    assert frame.hit_team == 1
     [first] = frame.parser_first_touch_events
-    assert first.player_id == ME
+    assert (first.player_id, first.timestamp) == (ME, 0.0)
 
 
 def test_demos_name_their_players_and_may_have_no_attacker():

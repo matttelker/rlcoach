@@ -11,9 +11,9 @@ from rlcoach.parser.types import (
     Dodge,
     Frame,
     ParserDemoEvent,
-    ParserTouchEvent,
     PlayerFrame,
     Quaternion,
+    TouchCount,
 )
 
 STILL = Vec3(0.0, 0.0, 0.0)
@@ -57,7 +57,8 @@ def create_test_frame(
     ball: BallFrame | None = None,
     *,
     dodges: list[Dodge] | None = None,
-    touches: list[ParserTouchEvent] | None = None,
+    touches: list[TouchCount] | None = None,
+    hit_team: int | None = None,
     demos: list[ParserDemoEvent] | None = None,
     pad_events: list[BoostPadEventFrame] | None = None,
 ) -> Frame:
@@ -65,9 +66,10 @@ def create_test_frame(
     return Frame(
         timestamp=timestamp,
         ball=ball or create_test_ball(),
+        hit_team=hit_team,
         players=players,
         dodges=dodges or [],
-        parser_touch_events=touches or [],
+        touch_counts=touches or [],
         parser_demo_events=demos or [],
         boost_pad_events=pad_events or [],
     )

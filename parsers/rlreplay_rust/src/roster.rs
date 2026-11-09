@@ -79,12 +79,14 @@ impl Roster {
             .or_else(|| seat.pri.and_then(|pri| self.pri_row.get(&pri).copied()))
     }
 
+    /// The row a PRI plays as: its header row, or a number past them.
+    pub fn pri_row(&self, pri: i32) -> Option<usize> {
+        self.pri_row.get(&pri).copied()
+    }
+
     /// The header row a PRI plays as, if it has one.
     pub fn header_row(&self, pri: i32) -> Option<usize> {
-        self.pri_row
-            .get(&pri)
-            .copied()
-            .filter(|row| *row < self.rows.len())
+        self.pri_row(pri).filter(|row| *row < self.rows.len())
     }
 
     pub fn add_car(&mut self, car: i32) {

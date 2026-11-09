@@ -95,8 +95,26 @@ def test_leavers_get_rows_past_the_header():
     assert rows == set(range(len(header.players) + 5))
 
 
-def test_touches_and_demos_name_players():
-    assert len(_all(real_replays.REGULATION, "touches")) == 98
+def test_touches_are_the_games_count_by_player():
+    touches = _all(real_replays.REGULATION, "touches")
+    assert sum(count for _, count in touches) == 107
+    assert {row for row, _ in touches} == set(range(6))
+    assert all(count >= 1 for _, count in touches)
+
+
+def test_a_replay_from_before_the_touch_count_has_none():
+    assert _all(real_replays.WITH_LEAVERS, "touches") == []
+
+
+def test_the_ball_names_the_team_that_touched_it_last():
+    teams = [frame["hit_team"] for frame in _frames(real_replays.REGULATION)]
+    assert set(teams) == {None, 0, 1}
+    pairs = zip(teams, teams[1:], strict=False)
+    changes = sum(1 for a, b in pairs if b is not None and a != b)
+    assert changes == 57
+
+
+def test_demos_name_players():
     assert _all(real_replays.REGULATION, "demos") == [(3, 5), (5, 0)]
     # The last demo in E8D9 came at the end, with no attacker
     assert _all(real_replays.OVERTIME, "demos")[-1] == (5, None)
