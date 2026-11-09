@@ -71,4 +71,4 @@ On startup the server loads the bundled benchmarks for any playlist that has non
 - [AGENTS.md](AGENTS.md): how the code is laid out, how to build and test it, and the working rules.
 - [docs/rewrite-plan.md](docs/rewrite-plan.md): what's left of the original code and the plan to replace it.
 - [gui/README.md](gui/README.md): the dashboard.
-- [docs/parser_adapter.md](docs/parser_adapter.md): what the parser returns and how it reports problems.
+- [docs/parser.md](docs/parser.md): what the parser reads from a replay, and how it tells the players apart.

@@ -19,15 +19,15 @@ This started as a fork of treygoff24/rlcoach. That project has never had a licen
 
 Lines still written by the original author, by `git blame -w -M -C`:
 
-| | Before (2026-11-07) | After phase 1 | After phase 2 | After phase 3 |
-| --- | --- | --- | --- | --- |
-| `src/` and `parsers/` | 22,916 of 27,884 (82%) | 14,260 of 19,292 (74%) | 10,456 of 16,741 (62%) | 4,972 of 11,706 (42%) |
-| `tests/` | 18,480 of 23,594 (78%) | 10,784 of 15,758 (68%) | 6,544 of 12,947 (51%) | 1,291 of 7,450 (17%) |
-| `gui/src/` | 1,074 of 3,792 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) |
+| | Before (2026-11-07) | After phase 1 | After phase 2 | After phase 3 | After phase 4 (2026-11-08) |
+| --- | --- | --- | --- | --- | --- |
+| `src/` and `parsers/` | 22,916 of 27,884 (82%) | 14,260 of 19,292 (74%) | 10,456 of 16,741 (62%) | 4,972 of 11,706 (42%) | 1,178 of 9,560 (12%) |
+| `tests/` | 18,480 of 23,594 (78%) | 10,784 of 15,758 (68%) | 6,544 of 12,947 (51%) | 1,291 of 7,450 (17%) | 398 of 7,345 (5%) |
+| `gui/src/` | 1,074 of 3,792 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,053 of 4,575 (23%) |
 
-The counts leave out the benchmark data files in `src/rlcoach/data/`. Blame still gives him 639 of the 2,451 lines in the files phase 2 rewrote: lines that came out the same character for character, such as imports, the config's field names, and the API's parameters and response fields, which the dashboard depends on. In the files phase 3 rewrote it gives him 393 of 1,649, nearly all blank lines, closing brackets, docstring quotes and import lines.
+The counts leave out the benchmark data files in `src/rlcoach/data/`. Kickoff coaching came between phases 3 and 4, so `main` before phase 4 stood at 4,972 of 12,555 (40%) in `src/` and `parsers/`, and 1,291 of 8,125 (16%) in `tests/`. Blame still gives him 639 of the 2,451 lines in the files phase 2 rewrote: lines that came out the same character for character, such as imports, the config's field names, and the API's parameters and response fields, which the dashboard depends on. In the files phase 3 rewrote it gives him 393 of 1,649, nearly all blank lines, closing brackets, docstring quotes and import lines. In the files phase 4 rewrote it gives him 155 of 2,041: blank lines, closing braces, imports, and the field names in `parser/types.py`, which normalize, the events and the stats read.
 
-Most of what's left is the parser, phase 4: `lib.rs`, `arena_tables.rs` and `pads.rs` in Rust, and `rust_adapter.py` and `types.py` in Python, 3,915 of his 4,972 lines in `src/` and `parsers/`, and the parser's tests, 624 of his 1,291 in `tests/`.
+What's left is spread thin. No file holds more than 91 of his lines. The most are in the files phase 2 rewrote (the API's routers, the config, the models, the CLI) and in `tests/fixtures/builders.py`, whose function signatures every test calls.
 
 ## Phase 1: delete what nothing reads (done 2026-11-07)
 
@@ -109,9 +109,25 @@ Checked:
 - Every endpoint the dashboard calls, 228 calls in all, gave the same response on `main` and on the new code against a copy of the real database, apart from `/health`'s timestamp.
 - `tests/analysis/test_ballchasing_parity.py` and every check in `AGENTS.md` pass.
 
-## Phase 4: the Rust parser
+## Phase 4: the Rust parser (done 2026-11-08)
 
-- `parsers/rlreplay_rust/src/lib.rs` (3,057 lines, 83% his), `arena_tables.rs`, the parts of `pads.rs` that are still his
-- `parser/rust_adapter.py`, `parser/types.py`, `docs/parser_adapter.md`
+Rewritten from what it does, checked frame by frame against `main`'s output on all 42 games, with new tests: synthetic frames in Rust for the walk, the players and the pads, and your replays for what the module hands over (`tests/parser/`). boxcars, the replay library underneath, is a third-party MIT crate and stays, pinned at 0.13.0. [docs/parser.md](parser.md) says what the parser reads and how.
 
-boxcars, the replay library underneath, is a third-party MIT crate and stays. The build is fragile on this PC (see `AGENTS.md`), and a parser can pass its tests while missing data on real replays, so the reload comparison matters most here.
+- **Rust.** `lib.rs` (3,057 lines, 83% his) is now 161 lines: the module's two functions, `header` and `frames`, and the conversion to Python values. The walk through the frames is `game.rs`, which player each car is `roster.rs`, and pad pickups `pads.rs`, each with its own tests. `arena_tables.rs` is gone: Python passes the pad table in, so the pads live in `field_constants.py` alone.
+- **Python.** `rust_adapter.py` and `parser/errors.py` are gone. `parser/__init__.py` calls the module, `parser/header.py` turns the header's properties into a `Header`, and `parser/types.py` holds only what normalize fills. Normalize reads the parser's tuples straight into frames.
+- **What the parser hands over** is only what normalize, the events, the stats and the review read. Gone: the driving inputs, the jump, flip and boost flags, the ball's spin, Euler angles, the camera settings, loadouts, the game's stat events, tick marks, kickoff markers, pad respawns and pickups with no player, the diagnostics and quality warnings, and the header fields nothing read (engine build, match id, mutators, overtime, match length, highlights).
+- **Speed.** Reading a replay (header, frames and normalize) took 91.1 s for the 42 games on `main` and 20.8 s now, of which the Rust walk is 3.7 s. Reloading all 42 into scratch homes, back to back, took 90.8 s on `main` (2.2 s a game) and 38.6 s on the new code (0.9 s a game).
+
+What behaves differently, none of it in your 42 games:
+
+- A replay whose network data boxcars can't decode raises with boxcars' reason. `main` returned it with diagnostics and no frames, which already stopped the load.
+- The pickup format from before `NewReplicatedPickupData`, a flag rather than a counter, isn't read, so such a replay's pickups come from boost rises.
+- A replay whose header lists no players gets no stand-in numbering: only cars with a PRI are listed, past the (no) rows.
+- The playlist always comes from the match type and team size. `main` went by `PlaylistID` when a header had one, which made it UNKNOWN. None of your 42 headers has one.
+- The overtime flag in old headers isn't read. The report already went by the overtime kickoff, since current headers carry no flag.
+
+Checked:
+
+- Reloading all 42 games into scratch homes, on `main` and on the new code, gave the same value in every shared column of `replays`, `players`, `player_game_stats`, `game_reviews`, `review_mistakes`, `review_goals`, `review_kickoffs` and `review_kickoff_cars`. `main`'s reload matched the live database exactly.
+- Every endpoint the dashboard calls, 228 calls in all, gave the same response on `main` and on the new code against a copy of the real database, apart from `/health`'s timestamp.
+- `tests/analysis/test_ballchasing_parity.py` and every check in `AGENTS.md` pass.
