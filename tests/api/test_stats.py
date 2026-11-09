@@ -20,7 +20,7 @@ from tests.api.stored_games import (
 )
 
 WIN_STATS = {"goals": 3, "saves": 1, "epic_saves": 1, "bcpm": 400.0, "avg_boost": 60.0}
-LOSS_STATS = {"goals": 0, "saves": 1, "bcpm": 300.0, "avg_boost": 60.0}
+LOSS_STATS = {"goals": 0, "saves": 1, "epic_saves": 0, "bcpm": 300.0, "avg_boost": 60.0}
 
 
 def _games(session):

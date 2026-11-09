@@ -108,6 +108,7 @@ def test_each_player_gets_their_stats_with_missing_counts_zero_and_others_empty(
             "shooting_pct": 50.0,
             "bcpm": 410.0,
             "first_man_pct": 33.3,
+            "clears": 3,
         }
     }
     store_game(make_report(stats=stats), "h", "steam:1", CONFIG)
@@ -124,6 +125,8 @@ def test_each_player_gets_their_stats_with_missing_counts_zero_and_others_empty(
         0,
         None,
     )
+    # The game's counts are empty for a replay that carries none
+    assert (mine.clears, mine.epic_saves) == (3, None)
     theirs = _stats("r1", "epic:2")
     assert (theirs.is_me, theirs.team, theirs.goals, theirs.bcpm) == (
         False,
