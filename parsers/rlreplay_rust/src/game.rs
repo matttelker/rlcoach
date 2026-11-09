@@ -1,6 +1,7 @@
 //! Walk a replay's network frames and say, for each one, where the ball and every
 //! player's car are, whether each car is jumping or flipping, and what happened:
-//! pickups, flips, touches, first touches and demolitions.
+//! pickups, flips, touches, first touches, the game's own stat counts and
+//! demolitions.
 //!
 //! A frame only carries what changed, so the walk keeps every actor's last state.
 //! Actors are told apart by the object they were made from, and attributes by name.
@@ -30,6 +31,14 @@ const BALL_TOUCHES: &str = "TAGame.PRI_TA:BallTouches";
 const HIT_TEAM: &str = "TAGame.Ball_TA:HitTeamNum";
 /// A car component in use: jumping, flipping and so on.
 const ACTIVE: &str = "TAGame.CarComponent_TA:ReplicatedActive";
+/// The game's own per-player counts that the header's scoreboard leaves out, by the
+/// names the rest of the code knows them by.
+pub const COUNTERS: [(&str, &str); 4] = [
+    ("TAGame.PRI_TA:MatchEpicSaves", "epic_save"),
+    ("TAGame.PRI_TA:MatchClears", "clear"),
+    ("TAGame.PRI_TA:MatchCenters", "center"),
+    ("TAGame.PRI_TA:MatchAerialHits", "aerial_hit"),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
@@ -132,6 +141,9 @@ pub struct FrameOut {
     /// The game's own first-touch counter rose for this player, up to a second
     /// after the kickoff's first touch.
     pub first_touches: Vec<usize>,
+    /// One of the game's `COUNTERS` rose for this player: the player, the counter's
+    /// name, and by how much. It rises up to a few seconds after the touch.
+    pub counts: Vec<(usize, &'static str, i32)>,
     /// The car demolished, and the one that did it.
     pub demos: Vec<(usize, Option<usize>)>,
 }
@@ -157,6 +169,8 @@ pub struct Game<'a> {
     first_touch_counts: HashMap<i32, i32>,
     /// Each PRI's touch count.
     touch_counts: HashMap<i32, i32>,
+    /// Each PRI's count on each of `COUNTERS`, by its index there.
+    counts: HashMap<(i32, usize), i32>,
 }
 
 /// The object ids of the attributes the walk reads, where the replay has them.
@@ -171,6 +185,7 @@ struct Attributes {
     ball_touches: Option<usize>,
     hit_team: Option<usize>,
     active: Option<usize>,
+    counters: [Option<usize>; COUNTERS.len()],
 }
 
 impl Attributes {
@@ -186,7 +201,14 @@ impl Attributes {
             ball_touches: id(BALL_TOUCHES),
             hit_team: id(HIT_TEAM),
             active: id(ACTIVE),
+            counters: COUNTERS.map(|(name, _)| id(name)),
         }
+    }
+
+    /// Which of `COUNTERS` an attribute is, if any.
+    fn counter(&self, attribute: Option<usize>) -> Option<usize> {
+        let attribute = attribute?;
+        self.counters.iter().position(|c| *c == Some(attribute))
     }
 }
 
@@ -244,6 +266,7 @@ impl<'a> Game<'a> {
             pads: Pads::new(pad_spots),
             first_touch_counts: HashMap::new(),
             touch_counts: HashMap::new(),
+            counts: HashMap::new(),
         }
     }
 
@@ -382,6 +405,14 @@ impl<'a> Game<'a> {
                 let seen = self.touch_counts.insert(actor, *count).unwrap_or(0);
                 if *count > seen {
                     events.touches.push((actor, *count - seen));
+                }
+            }
+            Attribute::Int(count) if names.counter(attribute).is_some() => {
+                // Like the touch count, it only grows and is sent again unchanged
+                let counter = names.counter(attribute).unwrap_or_default();
+                let seen = self.counts.insert((actor, counter), *count).unwrap_or(0);
+                if *count > seen {
+                    events.counts.push((actor, counter, *count - seen));
                 }
             }
             Attribute::Byte(state) if attribute == names.active => {
@@ -556,6 +587,13 @@ impl<'a> Game<'a> {
                 .iter()
                 .filter_map(|pri| roster.header_row(*pri))
                 .collect(),
+            counts: events
+                .counts
+                .iter()
+                .filter_map(|(pri, counter, rise)| {
+                    Some((roster.pri_row(*pri)?, COUNTERS[*counter].1, *rise))
+                })
+                .collect(),
             demos: events
                 .demos
                 .iter()
@@ -574,6 +612,8 @@ struct Events {
     dodges: Vec<(i32, Spot)>,
     first_touches: Vec<i32>,
     touches: Vec<(i32, i32)>,
+    /// A PRI, which of `COUNTERS`, and how far it rose.
+    counts: Vec<(i32, usize, i32)>,
     demos: Vec<(i32, Option<i32>)>,
 }
 
@@ -631,6 +671,8 @@ mod tests {
                 BALL_TOUCHES,
                 HIT_TEAM,
                 ACTIVE,
+                COUNTERS[0].0,
+                COUNTERS[3].0,
                 RIGID_BODY,
                 BOOST,
                 PICKUP,
@@ -778,6 +820,28 @@ mod tests {
         assert!(out[0].cars.is_empty(), "a car that has sent nothing");
         let car = &out[1].cars[0];
         assert_eq!((car.row, car.team, car.boost), (1, 1, KICKOFF_BOOST));
+    }
+
+    #[test]
+    fn the_games_counts_are_named_as_they_rise() {
+        let (epic_saves, aerial_hits) = (COUNTERS[0].0, COUNTERS[3].0);
+        let mut script = Script::new();
+        script.kickoff();
+        script.frame(0.1).set(PRI, epic_saves, Attribute::Int(1));
+        script
+            .frame(0.2)
+            .set(PRI, epic_saves, Attribute::Int(1))
+            .set(PRI, aerial_hits, Attribute::Int(2));
+        let counts: Vec<_> = script.run().into_iter().map(|f| f.counts).collect();
+        // A re-sent count is nothing new, and one that skips counts each step
+        assert_eq!(
+            counts,
+            vec![
+                vec![],
+                vec![(0, "epic_save", 1)],
+                vec![(0, "aerial_hit", 2)]
+            ]
+        );
     }
 
     #[test]

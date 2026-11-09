@@ -33,6 +33,7 @@ def _frame(t, cars=(), ball=((0.0, 0.0, 93.15), STILL), **events):
         "dodges": [],
         "touches": [],
         "first_touches": [],
+        "counts": [],
         "demos": [],
         **events,
     }
@@ -113,6 +114,14 @@ def test_touch_counts_name_their_players_and_the_ball_its_team():
     assert frame.hit_team == 1
     [first] = frame.parser_first_touch_events
     assert (first.player_id, first.timestamp) == (ME, 0.0)
+
+
+def test_the_games_counts_name_their_players():
+    frame = _one(counts=[(1, "epic_save", 1), (0, "aerial_hit", 2)])
+    assert [(c.player_id, c.stat, c.count) for c in frame.stat_counts] == [
+        (THEM, "epic_save", 1),
+        (ME, "aerial_hit", 2),
+    ]
 
 
 def test_demos_name_their_players_and_may_have_no_attacker():

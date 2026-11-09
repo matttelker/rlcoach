@@ -19,6 +19,7 @@ __all__ = [
     "PlayerFrame",
     "PlayerInfo",
     "Quaternion",
+    "StatCount",
     "TouchCount",
     "Vec3",
 ]
@@ -130,6 +131,17 @@ class TouchCount:
 
 
 @dataclass(frozen=True)
+class StatCount:
+    """One of the game's own counts rising for a player by `count`: "epic_save",
+    "clear", "center" or "aerial_hit". Like the touch count, it rises after the
+    touch that earned it, a median 0.4 s for an aerial hit and 1.7 s for a center."""
+
+    player_id: str
+    stat: str
+    count: int
+
+
+@dataclass(frozen=True)
 class ParserDemoEvent:
     timestamp: float
     victim_id: str
@@ -149,6 +161,7 @@ class Frame:
     boost_pad_events: list[BoostPadEventFrame] = field(default_factory=list)
     dodges: list[Dodge] = field(default_factory=list)
     touch_counts: list[TouchCount] = field(default_factory=list)
+    stat_counts: list[StatCount] = field(default_factory=list)
     # When the game's first-touch counter rose, up to a second after the touch itself
     parser_first_touch_events: list[ParserTouchEvent] = field(default_factory=list)
     parser_demo_events: list[ParserDemoEvent] = field(default_factory=list)

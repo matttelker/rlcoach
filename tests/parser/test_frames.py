@@ -123,6 +123,18 @@ def test_touches_are_the_games_count_by_player():
     assert all(count >= 1 for _, count in touches)
 
 
+def test_the_games_counts_rise_by_player():
+    counts = _all(real_replays.REGULATION, "counts")
+    assert {name for _, name, _ in counts} <= {
+        "epic_save",
+        "clear",
+        "center",
+        "aerial_hit",
+    }
+    assert all(rise >= 1 for _, _, rise in counts)
+    assert sum(rise for _, name, rise in counts if name == "aerial_hit") > 0
+
+
 def test_a_replay_from_before_the_touch_count_has_none():
     assert _all(real_replays.WITH_LEAVERS, "touches") == []
 

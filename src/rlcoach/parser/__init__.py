@@ -53,6 +53,8 @@ def read_frames(
     - "touches": (row, count) for each player whose touch counter rose: they
       touched the ball that many times, up to a second before
     - "first_touches": the rows whose first-touch counter rose
+    - "counts": (row, name, rise) for each of the game's own counts that rose:
+      "epic_save", "clear", "center" or "aerial_hit"
     - "demos": (victim row, attacker row or None)
     """
     return _parser().frames(str(path), [tuple(spot) for spot in pad_spots])

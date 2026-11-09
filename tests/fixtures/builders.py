@@ -13,6 +13,7 @@ from rlcoach.parser.types import (
     ParserDemoEvent,
     PlayerFrame,
     Quaternion,
+    StatCount,
     TouchCount,
 )
 
@@ -67,6 +68,7 @@ def create_test_frame(
     hit_team: int | None = None,
     demos: list[ParserDemoEvent] | None = None,
     pad_events: list[BoostPadEventFrame] | None = None,
+    stat_counts: list[StatCount] | None = None,
 ) -> Frame:
     """A frame with these cars and the parser's events on it."""
     return Frame(
@@ -78,6 +80,7 @@ def create_test_frame(
         touch_counts=touches or [],
         parser_demo_events=demos or [],
         boost_pad_events=pad_events or [],
+        stat_counts=stat_counts or [],
     )
 
 

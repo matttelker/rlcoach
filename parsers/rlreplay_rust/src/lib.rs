@@ -155,6 +155,7 @@ fn frame_dict<'py>(py: Python<'py>, frame: &FrameOut) -> PyResult<Bound<'py, PyD
         intern!(py, "first_touches"),
         PyList::new(py, &frame.first_touches)?,
     )?;
+    dict.set_item(intern!(py, "counts"), PyList::new(py, &frame.counts)?)?;
     dict.set_item(intern!(py, "demos"), PyList::new(py, &frame.demos)?)?;
     Ok(dict)
 }

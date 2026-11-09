@@ -21,6 +21,7 @@ from .parser.types import (
     ParserTouchEvent,
     PlayerFrame,
     Quaternion,
+    StatCount,
     TouchCount,
 )
 
@@ -118,6 +119,9 @@ class _Timeline:
                 for row, torque in raw["dodges"]
             ],
             touch_counts=[TouchCount(player(row), n) for row, n in raw["touches"]],
+            stat_counts=[
+                StatCount(player(row), stat, n) for row, stat, n in raw["counts"]
+            ],
             parser_first_touch_events=[
                 ParserTouchEvent(t, player(row)) for row in raw["first_touches"]
             ],
