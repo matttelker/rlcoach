@@ -1,18 +1,12 @@
-interface EmptyStateProps {
-  title: string;
-  description?: React.ReactNode;
-  tone?: 'neutral' | 'error';
-  action?: React.ReactNode;
-}
+import type { ReactNode } from 'react';
 
 /** A flat line on the monitor: nothing to show yet, and what to do about it. */
-export function EmptyState({ title, description, tone = 'neutral', action }: EmptyStateProps) {
+function Notice({ title, error = false, children }: { title: string; error?: boolean; children: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-      <FlatLine error={tone === 'error'} />
+      <FlatLine error={error} />
       <h3 className="type-display text-[18px] mt-5 mb-2">{title}</h3>
-      {description && <p className="text-[var(--color-text-muted)] max-w-md">{description}</p>}
-      {action && <div className="mt-4">{action}</div>}
+      <p className="text-[var(--color-text-muted)] max-w-md">{children}</p>
     </div>
   );
 }
@@ -32,31 +26,27 @@ function FlatLine({ error }: { error: boolean }) {
   );
 }
 
+/** Before the first replay has loaded */
 export function NoGamesEmpty() {
   return (
-    <EmptyState
-      title="No games yet"
-      description={
-        <>
-          Replays in your watch folder load on their own, about 30 seconds after a match ends. If none show up, check{' '}
-          <code className="px-1 rounded bg-[var(--color-bg-tertiary)]">watch_folder</code> in{' '}
-          <code className="px-1 rounded bg-[var(--color-bg-tertiary)]">~/.rlcoach/config.toml</code>.
-        </>
-      }
-    />
+    <Notice title="No games yet">
+      Replays in your watch folder load on their own, about 30 seconds after a match ends. If none show up, check{' '}
+      <code className="px-1 rounded bg-[var(--color-bg-tertiary)]">watch_folder</code> in{' '}
+      <code className="px-1 rounded bg-[var(--color-bg-tertiary)]">~/.rlcoach/config.toml</code>.
+    </Notice>
   );
 }
 
-export function NoDataEmpty({
-  message = 'No data yet',
-  description = 'Play more games to fill this in.',
-}: {
-  message?: string;
-  description?: string;
-}) {
-  return <EmptyState title={message} description={description} />;
+/** A playlist, period or rank with nothing in it to show */
+export function NoDataEmpty({ message, description }: { message: string; description: string }) {
+  return <Notice title={message}>{description}</Notice>;
 }
 
-export function ErrorState({ message = 'Something went wrong' }: { message?: string }) {
-  return <EmptyState tone="error" title="Couldn't load this" description={message} />;
+/** The API didn't answer, or answered with an error */
+export function ErrorState({ message }: { message: string }) {
+  return (
+    <Notice title="Couldn't load this" error>
+      {message}
+    </Notice>
+  );
 }

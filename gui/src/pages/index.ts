@@ -1,9 +1,0 @@
-export { Coach } from './Coach';
-export { Games } from './Games';
-export { GameDetail } from './GameDetail';
-export { Stats } from './Stats';
-export { Trends } from './Trends';
-export { Compare } from './Compare';
-export { Benchmarks } from './Benchmarks';
-export { Players } from './Players';
-export { PlayerDetail } from './PlayerDetail';

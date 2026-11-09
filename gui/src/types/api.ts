@@ -1,7 +1,11 @@
-// API response types for RLCoach
+// What the local API sends back, as the dashboard reads it. The routes are in
+// src/rlcoach/api/routers/, and the contract tests in
+// pages/__tests__/api-contract.test.tsx hold a payload of each.
 
+/** Yours, from your team's side of the score */
 export type GameResult = 'WIN' | 'LOSS' | 'DRAW';
 
+/** One page of a list, with how many there are in all */
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
@@ -9,6 +13,8 @@ export interface PaginatedResponse<T> {
   offset: number;
 }
 
+// GET /games and GET /replays/{id} (games.py). Both describe a game the same
+// way; the list adds the day it was played and the replay adds the box score.
 interface ReplaySummary {
   replay_id: string;
   played_at_utc: string;
@@ -19,12 +25,12 @@ interface ReplaySummary {
   duration_seconds: number;
 }
 
-// Game/Replay types
 export interface Game extends ReplaySummary {
   play_date: string;
   map: string;
 }
 
+/** One player's line in a game's box score */
 export interface PlayerStats {
   player_id: string;
   display_name: string;
@@ -43,7 +49,9 @@ export interface ReplayDetail extends ReplaySummary {
   player_stats: PlayerStats[];
 }
 
-// Analysis types
+// GET /trends, /compare, /patterns and /weaknesses (stats.py)
+
+/** Your value of one stat on one day */
 export interface TrendValue {
   date: string;
   value: number;
@@ -59,6 +67,7 @@ export interface TrendsResponse {
   values: TrendValue[];
 }
 
+/** Your average of one stat against a rank's median. The gaps are null without a median. */
 export interface Comparison {
   metric: string;
   my_value: number;
@@ -75,6 +84,7 @@ export interface CompareResponse {
   game_count: number;
 }
 
+/** A stat that differs between your wins and your losses */
 export interface Pattern {
   metric: string;
   win_avg: number;
@@ -89,9 +99,11 @@ export interface PatternsResponse {
   playlist: string;
   win_count: number;
   loss_count: number;
+  /** The wins and the losses it needs before it finds any */
   min_games: number;
 }
 
+/** A stat of yours well below or above a rank's median, in standard deviations */
 export interface Weakness {
   metric: string;
   my_value: number;
@@ -109,7 +121,9 @@ export interface WeaknessesResponse {
   has_benchmarks: boolean;
 }
 
-// Player types
+// GET /players, GET /players/{id} and POST /players/{id}/tag (players.py)
+
+/** Someone you've played with or against, or you */
 export interface Player {
   player_id: string;
   display_name: string;
@@ -123,8 +137,9 @@ export interface Player {
 }
 
 export interface TagRequest {
-  tagged?: boolean;
-  notes?: string | null;
+  tagged: boolean;
+  /** Left out, the notes stay as they were */
+  notes?: string;
 }
 
 // Coaching types

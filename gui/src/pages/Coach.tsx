@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getCoach, getGrades } from '../api/client';
 import {
   Card,
-  SkeletonCard,
+  LoadingCards,
   ErrorState,
   NoGamesEmpty,
   PageHeader,
@@ -61,10 +61,7 @@ export function Coach() {
             <ErrorState message="Couldn't load your coaching summary. Is the server running the latest code?" />
           </Card>
         ) : isLoading || !data ? (
-          <div className="space-y-6">
-            <SkeletonCard />
-            <SkeletonCard />
-          </div>
+          <LoadingCards />
         ) : (
           <CoachBody data={data} />
         )}

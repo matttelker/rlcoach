@@ -1,11 +1,4 @@
-import type { GamesParams } from '../api/client';
-import type { Comparison, GameResult } from '../types/api';
-
-export type { GameResult } from '../types/api';
-
-export type GameFilters = Required<Pick<GamesParams, 'playlist' | 'limit' | 'offset'>> & {
-  result: GameResult | '';
-};
+import type { Comparison } from '../types/api';
 
 // The ranks with benchmarks, highest first. RANKS in metrics.py is the source.
 export const RANK_OPTIONS = ['GC', 'C3', 'C2', 'C1', 'D3', 'D2', 'D1', 'P3', 'P2', 'P1', 'G3', 'G2', 'G1'].map(
@@ -31,32 +24,32 @@ export function isOnTarget(differencePct: number, direction: Comparison['directi
   return direction === 'lower' ? differencePct <= 0 : differencePct >= 0;
 }
 
-export function hasBenchmarkValue(value: number | null | undefined): value is number {
-  return value != null;
+/** A percentage with its sign, such as +4.0% or -21.1% */
+export const signedPct = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+
+/** One bar of Compare's chart: how far a stat sits from the rank's median, in percent */
+export interface GapBar {
+  metric: string;
+  difference: number;
+  onTarget: boolean;
+  myValue: number;
+  targetMedian: number;
 }
 
-export function buildCompareChartData(comparisons: Comparison[] = []) {
-  return comparisons
-    .filter(
-      (c): c is Comparison & { target_median: number; difference_pct: number } =>
-        c.target_median !== null && c.difference_pct !== null,
-    )
-    .map((c) => ({
-      metric: c.metric.toUpperCase(),
-      difference: c.difference_pct,
-      onTarget: isOnTarget(c.difference_pct, c.direction),
-      myValue: c.my_value,
-      targetMedian: c.target_median,
-    }));
-}
-
-export function buildGamesParams(filters: GameFilters): GamesParams {
-  return {
-    playlist: filters.playlist || undefined,
-    result: filters.result || undefined,
-    limit: filters.limit,
-    offset: filters.offset,
-  };
+/** The bars for the stats that have a median to compare with. The rest have no gap to draw. */
+export function gapBars(comparisons: Comparison[]): GapBar[] {
+  const bars: GapBar[] = [];
+  for (const { metric, my_value, target_median, difference_pct, direction } of comparisons) {
+    if (target_median === null || difference_pct === null) continue;
+    bars.push({
+      metric: metric.toUpperCase(),
+      difference: difference_pct,
+      onTarget: isOnTarget(difference_pct, direction),
+      myValue: my_value,
+      targetMedian: target_median,
+    });
+  }
+  return bars;
 }
 
 // Playlists arrive as ids like "STANDARD"

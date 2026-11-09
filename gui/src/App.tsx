@@ -1,18 +1,17 @@
-import { Navigate, Routes, Route } from 'react-router-dom'
-import { Layout } from './components'
-import {
-  Coach,
-  Games,
-  GameDetail,
-  Stats,
-  Trends,
-  Compare,
-  Benchmarks,
-  Players,
-  PlayerDetail,
-} from './pages'
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { Layout } from './components';
+import { Benchmarks } from './pages/Benchmarks';
+import { Coach } from './pages/Coach';
+import { Compare } from './pages/Compare';
+import { GameDetail } from './pages/GameDetail';
+import { Games } from './pages/Games';
+import { PlayerDetail } from './pages/PlayerDetail';
+import { Players } from './pages/Players';
+import { Stats } from './pages/Stats';
+import { Trends } from './pages/Trends';
 
-function App() {
+/** Every page inside the top bar. Stats opens on Trends, with Compare and Benchmarks as tabs beside it. */
+export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
@@ -29,7 +28,5 @@ function App() {
         <Route path="players/:playerId" element={<PlayerDetail />} />
       </Route>
     </Routes>
-  )
+  );
 }
-
-export default App

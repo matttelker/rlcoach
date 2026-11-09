@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getWeaknesses, getPatterns } from '../api/client';
-import type { Weakness } from '../types/api';
-import { Card, SkeletonCard, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField } from '../components';
+import { getPatterns, getWeaknesses } from '../api/client';
+import { Card, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField, SkeletonCard } from '../components';
+import type { Pattern, PatternsResponse, Weakness } from '../types/api';
 import { BENCHMARK_HINT, BENCHMARK_SOURCE, RANK_OPTIONS } from './dataTransforms';
+
+// The page always looks at your last 30 days
+const PERIOD = '30d';
 
 const SEVERITY_MARK: Record<Weakness['severity'] | 'strength', string> = {
   critical: 'var(--chart-bad)',
@@ -14,36 +17,35 @@ const SEVERITY_MARK: Record<Weakness['severity'] | 'strength', string> = {
   strength: 'var(--chart-good)',
 };
 
+/** Where you sit well off a rank's median, and which stats move with your wins. */
 export function Benchmarks() {
-  const [period] = useState('30d');
+  // Unset until you pick them, so the API opens on your config's rank and latest playlist
   const [pickedRank, setRank] = useState<string>();
   const [playlist, setPlaylist] = useState<string>();
 
-  const { data: weaknessesData, isLoading: weaknessesLoading, error: weaknessesError } = useQuery({
-    queryKey: ['weaknesses', period, pickedRank, playlist],
-    queryFn: () => getWeaknesses({ period, rank: pickedRank, playlist }),
+  const spread = useQuery({
+    queryKey: ['weaknesses', PERIOD, pickedRank, playlist],
+    queryFn: () => getWeaknesses({ period: PERIOD, rank: pickedRank, playlist }),
   });
-  const rank = pickedRank ?? weaknessesData?.rank ?? '';
-
-  const { data: patternsData, isLoading: patternsLoading, error: patternsError } = useQuery({
-    queryKey: ['patterns', period, playlist],
-    queryFn: () => getPatterns({ period, playlist }),
+  const patterns = useQuery({
+    queryKey: ['patterns', PERIOD, playlist],
+    queryFn: () => getPatterns({ period: PERIOD, playlist }),
   });
 
-  if (weaknessesError || patternsError) {
+  if (spread.error || patterns.error) {
     return <ErrorState message="Benchmarks didn't load. Check that the server is running." />;
   }
 
-  const activePlaylist = playlist ?? weaknessesData?.playlist;
-  const missingData =
-    weaknessesData?.game_count === 0
-      ? {
-          message: `No ${activePlaylist} games in this period`,
-          description: 'Try another playlist.',
-        }
-      : weaknessesData?.has_benchmarks === false
-        ? { message: `No ${rank} benchmarks for ${activePlaylist}`, description: BENCHMARK_HINT }
-        : null;
+  const data = spread.data;
+  const rank = pickedRank ?? data?.rank ?? '';
+  const shownPlaylist = playlist ?? data?.playlist;
+  // Why neither list can say anything, if it can't
+  let nothing: Message | null = null;
+  if (data?.game_count === 0) {
+    nothing = { message: `No ${shownPlaylist} games in this period`, description: 'Try another playlist.' };
+  } else if (data?.has_benchmarks === false) {
+    nothing = { message: `No ${rank} benchmarks for ${shownPlaylist}`, description: BENCHMARK_HINT };
+  }
 
   return (
     <div>
@@ -52,99 +54,137 @@ export function Benchmarks() {
         note={
           <>
             Your last 30 days against {rank || 'your rank'} players
-            {weaknessesData ? `, from ${weaknessesData.game_count} games` : ''}.
+            {data ? `, from ${data.game_count} games` : ''}.
             <span className="block text-[13px] mt-1">{BENCHMARK_SOURCE}</span>
           </>
         }
       >
         <SelectField label="Rank" value={rank} options={RANK_OPTIONS} onChange={setRank} />
-        <PlaylistSelect value={activePlaylist} onChange={setPlaylist} />
+        <PlaylistSelect value={shownPlaylist} onChange={setPlaylist} />
       </PageHeader>
 
       <div className="space-y-6">
         <div className="grid lg:grid-cols-2 gap-6 items-start">
           <Card className="p-5">
             <h2 className="type-display text-[19px] mb-4">Areas to improve</h2>
-            {weaknessesLoading ? (
-              <SkeletonCard />
-            ) : missingData ? (
-              <NoDataEmpty {...missingData} />
-            ) : weaknessesData?.weaknesses.length === 0 ? (
-              <NoDataEmpty
-                message="Nothing below the usual range"
-                description={`Your averages sit within the normal ${rank} range.`}
-              />
-            ) : (
-              <ul className="divide-y divide-[var(--color-border)]">
-                {weaknessesData?.weaknesses.map((w) => (
-                  <MetricRow key={w.metric} item={w} rank={rank} severity={w.severity} />
-                ))}
-              </ul>
-            )}
+            <StatList
+              loading={spread.isLoading}
+              nothing={nothing}
+              stats={data?.weaknesses}
+              none={{
+                message: 'Nothing below the usual range',
+                description: `Your averages sit within the normal ${rank} range.`,
+              }}
+              rank={rank}
+            />
           </Card>
 
           <Card className="p-5">
             <h2 className="type-display text-[19px] mb-4">Your strengths</h2>
-            {weaknessesLoading ? (
-              <SkeletonCard />
-            ) : missingData ? (
-              <NoDataEmpty {...missingData} />
-            ) : weaknessesData?.strengths.length === 0 ? (
-              <NoDataEmpty message="No strengths yet" description="Strengths show up once a stat sits clearly above the median." />
-            ) : (
-              <ul className="divide-y divide-[var(--color-border)]">
-                {weaknessesData?.strengths.map((s) => (
-                  <MetricRow key={s.metric} item={s} rank={rank} severity="strength" />
-                ))}
-              </ul>
-            )}
+            <StatList
+              loading={spread.isLoading}
+              nothing={nothing}
+              stats={data?.strengths}
+              none={{
+                message: 'No strengths yet',
+                description: 'Strengths show up once a stat sits clearly above the median.',
+              }}
+              rank={rank}
+              strengths
+            />
           </Card>
         </div>
 
-        <Card className="p-5">
-          <h2 className="type-display text-[19px]">Wins against losses</h2>
-          {patternsData && (
-            <p className="text-[13px] text-[var(--color-text-muted)] mt-1">
-              From {patternsData.win_count} wins and {patternsData.loss_count} losses
-            </p>
-          )}
-          <div className="mt-4">
-            {patternsLoading ? (
-              <SkeletonCard />
-            ) : patternsData?.patterns.length === 0 ? (
-              <NoDataEmpty
-                message="Not enough games yet"
-                description={`Needs at least ${patternsData?.min_games} wins and ${patternsData?.min_games} losses in ${patternsData?.playlist}.`}
-              />
-            ) : (
-              <ul className="divide-y divide-[var(--color-border)]">
-                {patternsData?.patterns.map((p) => (
-                  <li key={p.metric} className="flex items-center justify-between gap-4 py-3">
-                    <div>
-                      <div className="font-semibold">{p.metric.toUpperCase()}</div>
-                      <div className="text-[14px] text-[var(--color-text-muted)]">
-                        {p.win_avg.toFixed(2)} in wins, {p.loss_avg.toFixed(2)} in losses
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div
-                        className={`type-score text-[26px] ${
-                          p.direction === 'higher_in_wins' ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'
-                        }`}
-                      >
-                        {p.direction === 'higher_in_wins' ? '+' : ''}
-                        {p.delta.toFixed(2)}
-                      </div>
-                      <div className="text-[13px] text-[var(--color-text-muted)]">Effect size {p.effect_size.toFixed(2)}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </Card>
+        <WinsAgainstLosses loading={patterns.isLoading} data={patterns.data} />
       </div>
     </div>
+  );
+}
+
+/** A heading and a line under it, for a list with nothing in it */
+type Message = { message: string; description: string };
+
+function StatList({
+  loading,
+  nothing,
+  stats,
+  none,
+  rank,
+  strengths = false,
+}: {
+  loading: boolean;
+  /** Why there's nothing to compare, which comes before an empty list */
+  nothing: Message | null;
+  stats: Weakness[] | undefined;
+  /** What to say when every stat sits in the usual range */
+  none: Message;
+  rank: string;
+  strengths?: boolean;
+}) {
+  if (loading) return <SkeletonCard />;
+  if (nothing) return <NoDataEmpty {...nothing} />;
+  if (stats?.length === 0) return <NoDataEmpty {...none} />;
+  return (
+    <ul className="divide-y divide-[var(--color-border)]">
+      {stats?.map((stat) => (
+        <MetricRow key={stat.metric} item={stat} rank={rank} severity={strengths ? 'strength' : stat.severity} />
+      ))}
+    </ul>
+  );
+}
+
+function WinsAgainstLosses({ loading, data }: { loading: boolean; data: PatternsResponse | undefined }) {
+  let body;
+  if (loading) {
+    body = <SkeletonCard />;
+  } else if (data?.patterns.length === 0) {
+    body = (
+      <NoDataEmpty
+        message="Not enough games yet"
+        description={`Needs at least ${data.min_games} wins and ${data.min_games} losses in ${data.playlist}.`}
+      />
+    );
+  } else {
+    body = (
+      <ul className="divide-y divide-[var(--color-border)]">
+        {data?.patterns.map((pattern) => (
+          <PatternRow key={pattern.metric} pattern={pattern} />
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <Card className="p-5">
+      <h2 className="type-display text-[19px]">Wins against losses</h2>
+      {data && (
+        <p className="text-[13px] text-[var(--color-text-muted)] mt-1">
+          From {data.win_count} wins and {data.loss_count} losses
+        </p>
+      )}
+      <div className="mt-4">{body}</div>
+    </Card>
+  );
+}
+
+/** A stat with its average in wins and in losses. Green when more of it goes with winning. */
+function PatternRow({ pattern }: { pattern: Pattern }) {
+  const helps = pattern.direction === 'higher_in_wins';
+  return (
+    <li className="flex items-center justify-between gap-4 py-3">
+      <div>
+        <div className="font-semibold">{pattern.metric.toUpperCase()}</div>
+        <div className="text-[14px] text-[var(--color-text-muted)]">
+          {pattern.win_avg.toFixed(2)} in wins, {pattern.loss_avg.toFixed(2)} in losses
+        </div>
+      </div>
+      <div className="text-right">
+        <div className={`type-score text-[26px] ${helps ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>
+          {helps ? '+' : ''}
+          {pattern.delta.toFixed(2)}
+        </div>
+        <div className="text-[13px] text-[var(--color-text-muted)]">Effect size {pattern.effect_size.toFixed(2)}</div>
+      </div>
+    </li>
   );
 }
 
