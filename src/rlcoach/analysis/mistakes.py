@@ -25,7 +25,13 @@ from ..events.kickoffs import (
     went_with,
 )
 from ..events.touches import detect_touches
-from ..events.types import ChallengeEvent, GoalEvent, TouchEvent, team_name
+from ..events.types import (
+    ChallengeEvent,
+    DemoEvent,
+    GoalEvent,
+    TouchEvent,
+    team_name,
+)
 from ..field_constants import (
     BACK_WALL_Y,
     GOAL_HEIGHT,
@@ -286,6 +292,33 @@ class KickoffMoment:
 
 
 @dataclass(frozen=True)
+class TouchMoment:
+    """One touch by any car, on the game clock."""
+
+    seconds_left: float
+    touch: TouchEvent
+
+
+@dataclass(frozen=True)
+class ChallengeMoment:
+    """One 50/50 on the game clock, and whether each of its two players was their
+    team's last back then (None for a car that wasn't on the field)."""
+
+    seconds_left: float
+    challenge: ChallengeEvent
+    first_last_back: bool | None
+    second_last_back: bool | None
+
+
+@dataclass(frozen=True)
+class DemoMoment:
+    """One demo on the game clock."""
+
+    seconds_left: float
+    demo: DemoEvent
+
+
+@dataclass(frozen=True)
 class DefenderRole:
     """What one defender did about a goal."""
 
@@ -344,9 +377,16 @@ class MistakeReport:
     player_id: str = ""
     goal_timeline: list[GoalMoment] = field(default_factory=list)
     kickoffs: list[KickoffMoment] = field(default_factory=list)
+    # The game's events, every car's, which the database keeps with the review
+    touches: list[TouchMoment] = field(default_factory=list)
+    challenges: list[ChallengeMoment] = field(default_factory=list)
+    demos: list[DemoMoment] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        """The review, without the game's events."""
+        events = ("touches", "challenges", "demos")
+        trimmed = asdict(replace(self, **{name: [] for name in events}))
+        return {key: value for key, value in trimmed.items() if key not in events}
 
 
 def own_depth(y: float, team: int) -> float:
@@ -991,6 +1031,23 @@ def _cars_on_my_team(frame: Frame, team: int) -> list[PlayerFrame]:
     return [p for p in frame.players if p.team == team]
 
 
+def last_back_car(frame: Frame, team: int) -> PlayerFrame | None:
+    """The team's last player back: its car nearest its own goal, of those not
+    demolished."""
+    standing = [c for c in _cars_on_my_team(frame, team) if not c.is_demolished]
+    return max(standing, key=lambda c: own_depth(c.position.y, team), default=None)
+
+
+def is_last_back(frame: Frame, player_id: str) -> bool | None:
+    """Whether a player was their team's last back, or None if their car wasn't
+    on the field."""
+    car = frame.get_player_by_id(player_id)
+    if car is None or car.is_demolished:
+        return None
+    back = last_back_car(frame, car.team)
+    return back is not None and back.player_id == player_id
+
+
 def _can_reach_shot(
     ctx: Context, car: PlayerFrame | None, ball: BallFrame, warning: float
 ) -> bool:
@@ -1157,8 +1214,7 @@ def _review_goal(ctx: Context, goal: GoalEvent) -> tuple[GoalReview, Mistake | N
             f"{ctx.name(car.player_id)} {text} ({at_line.boost_amount:.0f} boost)"
         )
 
-    standing = [c for c in cars if not c.is_demolished]
-    last_back = max(standing, key=lambda c: ctx.depth(c.position.y), default=None)
+    last_back = last_back_car(decision_frame, ctx.team)
     my_role = roles.get(ctx.player_id)
     label = my_role.label if my_role is not None else None
 
@@ -1353,6 +1409,39 @@ def review_kickoffs(
     return moments, flags
 
 
+def _seconds_left(ctx: Context, index: int) -> float:
+    return round(_seconds_left_at(ctx, index), 1)
+
+
+def place_touches(ctx: Context, touches: Iterable[TouchEvent]) -> list[TouchMoment]:
+    """Place every car's touches on the clock."""
+    return [TouchMoment(_seconds_left(ctx, touch.frame), touch) for touch in touches]
+
+
+def place_challenges(
+    ctx: Context, challenges: Iterable[ChallengeEvent]
+) -> list[ChallengeMoment]:
+    """Place every 50/50 on the clock, with who was last back for each team."""
+    moments = []
+    for challenge in challenges:
+        index = ctx.index_at(challenge.t)
+        frame = ctx.frames[index]
+        moments.append(
+            ChallengeMoment(
+                seconds_left=_seconds_left(ctx, index),
+                challenge=challenge,
+                first_last_back=is_last_back(frame, challenge.first_player),
+                second_last_back=is_last_back(frame, challenge.second_player),
+            )
+        )
+    return moments
+
+
+def place_demos(ctx: Context, demos: Iterable[DemoEvent]) -> list[DemoMoment]:
+    """Place every demo on the clock."""
+    return [DemoMoment(_seconds_left(ctx, ctx.index_at(d.t)), d) for d in demos]
+
+
 LEAD_IN = {
     "clear_given_back": "Your clear went straight back to them",
     "double_commit": "You double committed",
@@ -1507,6 +1596,9 @@ def review_player(
         player_id=match.canonical_id,
         goal_timeline=goal_timeline(ctx),
         kickoffs=kickoffs,
+        touches=place_touches(ctx, game.touches),
+        challenges=place_challenges(ctx, game.challenges),
+        demos=place_demos(ctx, game.demos),
     )
 
 

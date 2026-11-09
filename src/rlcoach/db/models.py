@@ -163,6 +163,21 @@ class GameReview(Base):
         cascade="all, delete-orphan",
         order_by="ReviewKickoff.t",
     )
+    touches: Mapped[list[ReviewTouch]] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewTouch.t",
+    )
+    challenges: Mapped[list[ReviewChallenge]] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewChallenge.t",
+    )
+    demos: Mapped[list[ReviewDemo]] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewDemo.t",
+    )
 
 
 class ReviewMistake(Base):
@@ -282,6 +297,103 @@ class ReviewKickoffCar(Base):
         Index("ix_review_kickoff_cars_kickoff", "kickoff_id"),
         Index("ix_review_kickoff_cars_player", "player_id"),
     )
+
+
+# The game's events, every car's, kept with the review so a question across games
+# reads the database instead of every replay. Times are the replay's, as the
+# other review tables' `t`. Positions are in uu: blue defends -y and orange +y, so
+# for ORANGE y > 0 is its own half and for BLUE y < 0. Team 0 is BLUE.
+
+
+class ReviewTouch(Base):
+    """One touch by any car. See `events.touches`.
+
+    The position is the car's on the frame of the touch, or the ball's when the
+    car isn't on that frame.
+    """
+
+    __tablename__ = "review_touches"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE")
+    )
+    t: Mapped[float]
+    seconds_left: Mapped[float]
+    player_id: Mapped[str]
+    team: Mapped[int | None]  # 0 or 1
+    is_me: Mapped[bool]
+    x: Mapped[float]
+    y: Mapped[float]
+    z: Mapped[float]
+    ball_speed_kph: Mapped[float]  # On the frame of the touch
+
+    review: Mapped[GameReview] = relationship(back_populates="touches")
+
+    __table_args__ = (
+        Index("ix_review_touches_replay", "replay_id"),
+        Index("ix_review_touches_player", "player_id"),
+    )
+
+
+class ReviewChallenge(Base):
+    """One 50/50: opponents touching the ball one straight after the other. See
+    `events.challenges`.
+
+    `winner_team` ("BLUE" or "ORANGE") touched last, in the scramble straight
+    after if there was one. The position is midway between the two cars at their
+    touches. `first_last_back` and `second_last_back` say whether that player was
+    their team's car nearest its own goal, of those not demolished, as the goal
+    review judges the last player back. They're read at `t`, and empty for a car
+    that wasn't on the field.
+    """
+
+    __tablename__ = "review_challenges"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE")
+    )
+    t: Mapped[float]  # Midway between the two touches
+    seconds_left: Mapped[float]
+    first_player: Mapped[str]
+    second_player: Mapped[str]
+    winner_team: Mapped[str | None]
+    x: Mapped[float | None]
+    y: Mapped[float | None]
+    z: Mapped[float | None]
+    first_last_back: Mapped[bool | None]
+    second_last_back: Mapped[bool | None]
+
+    review: Mapped[GameReview] = relationship(back_populates="challenges")
+
+    __table_args__ = (Index("ix_review_challenges_replay", "replay_id"),)
+
+
+class ReviewDemo(Base):
+    """One demolition. See `events.demos`.
+
+    The game doesn't always say who did it. The position is the victim's car,
+    empty when the frame doesn't show it.
+    """
+
+    __tablename__ = "review_demos"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE")
+    )
+    t: Mapped[float]
+    seconds_left: Mapped[float]
+    victim: Mapped[str]
+    attacker: Mapped[str | None]
+    x: Mapped[float | None]
+    y: Mapped[float | None]
+    z: Mapped[float | None]
+
+    review: Mapped[GameReview] = relationship(back_populates="demos")
+
+    __table_args__ = (Index("ix_review_demos_replay", "replay_id"),)
 
 
 class ReviewGrade(Base):

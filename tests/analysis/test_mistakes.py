@@ -14,7 +14,10 @@ from rlcoach.analysis.mistakes import (
     GOAL_CHANCES,
     INSTEAD,
     LEAD_IN,
+    ChallengeMoment,
     GoalReview,
+    MistakeReport,
+    TouchMoment,
     UnsupportedReplayError,
     build_context,
     check_supported_map,
@@ -26,15 +29,20 @@ from rlcoach.analysis.mistakes import (
     format_clock,
     game_clock,
     goal_timeline,
+    is_last_back,
+    last_back_car,
     link_goals_to_moments,
     live_mask,
     own_depth,
+    place_challenges,
+    place_demos,
+    place_touches,
     review_conceded_goals,
     review_kickoffs,
     review_player,
 )
 from rlcoach.events.kickoffs import KickoffEvent, KickoffPlayer
-from rlcoach.events.types import ChallengeEvent, GoalEvent
+from rlcoach.events.types import ChallengeEvent, DemoEvent, GoalEvent, TouchEvent
 from rlcoach.field_constants import Vec3
 from rlcoach.game import read_game
 from rlcoach.identity import build_player_identities
@@ -1372,15 +1380,117 @@ def test_a_goal_after_a_kickoff_without_a_flip_is_put_on_it():
     assert reviews[0].summary == "You went for the kickoff without a flip 4 s before."
 
 
-def test_the_review_places_every_kickoff_of_a_real_game():
+@pytest.fixture(scope="module")
+def regulation():
+    """A real game and the review of the player who saved it."""
     game = read_game(real_replays.replay(real_replays.REGULATION))
     me = build_player_identities(game.header.players)[0]
-    report = review_player(game, player_id=me.canonical_id)
+    return game, review_player(game, player_id=me.canonical_id)
+
+
+def test_the_review_places_every_kickoff_of_a_real_game(regulation):
+    game, report = regulation
     assert len(report.kickoffs) == len(game.kickoffs) > 0
     starts = {round(k.t_start + (k.time_to_first_touch or 0), 1) for k in game.kickoffs}
     for flag in report.mistakes:
         if flag.category == "kickoffs":
             assert any(abs(flag.t - s) <= 0.1 for s in starts)
+
+
+def test_the_review_places_every_touch_5050_and_demo_of_a_real_game(regulation):
+    game, report = regulation
+    assert game.touches and game.challenges
+    assert [m.touch for m in report.touches] == game.touches
+    assert [m.challenge for m in report.challenges] == game.challenges
+    assert [m.demo for m in report.demos] == game.demos
+    # The clock only runs down, and this game had no overtime
+    clock = [m.seconds_left for m in report.touches]
+    assert clock == sorted(clock, reverse=True)
+    assert 0.0 <= clock[-1] < clock[0] <= GAME_LENGTH_S
+    assert all(m.challenge.location is not None for m in report.challenges)
+
+
+def test_the_last_back_is_the_standing_car_nearest_its_own_goal():
+    frame = create_test_frame(
+        0.0,
+        [
+            _car(ME, ORANGE, 0.0, 3000.0),
+            _car(MATE, ORANGE, 0.0, 4500.0, is_demolished=True),
+            _car("upfield", ORANGE, 0.0, -1000.0),
+            _car(OPP, BLUE, 0.0, 2000.0),
+            _car("keeper", BLUE, 0.0, -3000.0),
+        ],
+    )
+    assert last_back_car(frame, ORANGE).player_id == ME
+    assert last_back_car(frame, BLUE).player_id == "keeper"
+    assert (is_last_back(frame, ME), is_last_back(frame, "upfield")) == (True, False)
+    assert is_last_back(frame, OPP) is False
+    # Off the field, nobody's last back
+    assert is_last_back(frame, MATE) is None
+    assert is_last_back(frame, "ghost") is None
+
+
+def _events_scene():
+    """Open play with me at halfway, my mate behind me and one opponent."""
+
+    def players(t):
+        return [
+            _car(ME, ORANGE, 0.0, 0.0),
+            _car(MATE, ORANGE, 0.0, 4000.0),
+            _car(OPP, BLUE, 200.0, 0.0),
+        ]
+
+    frames, origin = _play(1.0, players, lambda t: _ball(100.0, 0.0))
+    ctx = _ctx(frames)
+    index = ctx.index_at(origin + 0.5)
+    return ctx, index
+
+
+def test_a_5050_is_placed_on_the_clock_with_who_was_last_back():
+    ctx, index = _events_scene()
+    event = ChallengeEvent(
+        t=ctx.times[index], first_player=ME, second_player=OPP, winner_team="BLUE"
+    )
+    [moment] = place_challenges(ctx, [event])
+    assert moment.challenge is event
+    assert moment.seconds_left == round(ctx.clock[index], 1) < GAME_LENGTH_S
+    # My mate was further back. The opponent was alone
+    assert (moment.first_last_back, moment.second_last_back) == (False, True)
+
+
+def test_touches_and_demos_are_placed_on_the_clock():
+    ctx, index = _events_scene()
+    touch = TouchEvent(
+        t=ctx.times[index],
+        player_id=ME,
+        location=Vec3(0.0, 0.0, 17.0),
+        frame=index,
+        team=ORANGE,
+    )
+    demo = DemoEvent(t=ctx.times[index], victim=OPP, attacker=ME)
+    clock = round(ctx.clock[index], 1)
+    assert place_touches(ctx, [touch]) == [TouchMoment(clock, touch)]
+    assert [(m.seconds_left, m.demo) for m in place_demos(ctx, [demo])] == [
+        (clock, demo)
+    ]
+
+
+def test_the_reviews_json_leaves_out_the_games_events():
+    challenge = ChallengeEvent(1.0, ME, OPP, "BLUE")
+    report = MistakeReport(
+        player="me",
+        team="ORANGE",
+        map_name="Stadium_P",
+        final_score="1-0",
+        goals=[],
+        mistakes=[],
+        clears={"clears": 0, "given_back": 0},
+        touches=[TouchMoment(299.0, TouchEvent(1.0, ME, Vec3(0.0, 0.0, 17.0)))],
+        challenges=[ChallengeMoment(299.0, challenge, True, True)],
+    )
+    data = report.to_dict()
+    assert not {"touches", "challenges", "demos"} & set(data)
+    assert data["kickoffs"] == [] and data["player"] == "me"
 
 
 def _whiff_scene(*, flip=False, beside=150.0, taker=OPP, touched=False, goal_s=None):

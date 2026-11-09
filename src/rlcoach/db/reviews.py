@@ -1,9 +1,12 @@
-"""Store the mistake detector's review of each game, with its kickoffs.
+"""Store the mistake detector's review of each game, with the game's events.
+
+The events are every car's kickoffs, touches, 50/50s and demos. A game the
+review doesn't support, such as Hoops, has none stored.
 
 Loading a game reviews it from the frames it already read. `rlcoach reviews`
 fills in games loaded before reviews existed, or redoes them all after the
-detector changes, reading each replay again. That also fills in the kickoffs
-of games reviewed before they were stored.
+detector changes, reading each replay again. That also fills in the events of
+games reviewed before they were stored.
 """
 
 from __future__ import annotations
@@ -17,19 +20,72 @@ from typing import TYPE_CHECKING
 from .models import (
     GameReview,
     Replay,
+    ReviewChallenge,
+    ReviewDemo,
     ReviewGoal,
     ReviewKickoff,
     ReviewKickoffCar,
     ReviewMistake,
+    ReviewTouch,
 )
 from .session import create_session
 
 if TYPE_CHECKING:
-    from ..analysis.mistakes import KickoffMoment, MistakeReport
+    from ..analysis.mistakes import (
+        ChallengeMoment,
+        DemoMoment,
+        KickoffMoment,
+        MistakeReport,
+        TouchMoment,
+    )
     from ..events.kickoffs import KickoffEvent
     from ..game import Game
 
 logger = logging.getLogger(__name__)
+
+
+def _touch_row(moment: TouchMoment, my_id: str) -> ReviewTouch:
+    touch = moment.touch
+    return ReviewTouch(
+        t=touch.t,
+        seconds_left=moment.seconds_left,
+        player_id=touch.player_id,
+        team=touch.team,
+        is_me=touch.player_id == my_id,
+        x=touch.location.x,
+        y=touch.location.y,
+        z=touch.location.z,
+        ball_speed_kph=touch.ball_speed_kph,
+    )
+
+
+def _challenge_row(moment: ChallengeMoment) -> ReviewChallenge:
+    challenge, where = moment.challenge, moment.challenge.location
+    return ReviewChallenge(
+        t=challenge.t,
+        seconds_left=moment.seconds_left,
+        first_player=challenge.first_player,
+        second_player=challenge.second_player,
+        winner_team=challenge.winner_team,
+        x=where.x if where else None,
+        y=where.y if where else None,
+        z=where.z if where else None,
+        first_last_back=moment.first_last_back,
+        second_last_back=moment.second_last_back,
+    )
+
+
+def _demo_row(moment: DemoMoment) -> ReviewDemo:
+    demo, where = moment.demo, moment.demo.location
+    return ReviewDemo(
+        t=demo.t,
+        seconds_left=moment.seconds_left,
+        victim=demo.victim,
+        attacker=demo.attacker,
+        x=where.x if where else None,
+        y=where.y if where else None,
+        z=where.z if where else None,
+    )
 
 
 def _kickoff_row(moment: KickoffMoment, my_id: str) -> ReviewKickoff:
@@ -161,6 +217,11 @@ def save_review(
             review.kickoffs = [
                 _kickoff_row(moment, report.player_id) for moment in report.kickoffs
             ]
+            review.touches = [
+                _touch_row(moment, report.player_id) for moment in report.touches
+            ]
+            review.challenges = [_challenge_row(m) for m in report.challenges]
+            review.demos = [_demo_row(m) for m in report.demos]
         session.add(review)
         session.commit()
     finally:

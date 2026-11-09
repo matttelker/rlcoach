@@ -9,24 +9,32 @@ from datetime import UTC, date, datetime
 import pytest
 
 from rlcoach.analysis.mistakes import (
+    ChallengeMoment,
+    DemoMoment,
     GoalMoment,
     GoalReview,
     KickoffMoment,
     Mistake,
     MistakeReport,
+    TouchMoment,
 )
 from rlcoach.db.models import (
     GameReview,
     Player,
     Replay,
+    ReviewChallenge,
+    ReviewDemo,
     ReviewGoal,
     ReviewKickoff,
     ReviewKickoffCar,
     ReviewMistake,
+    ReviewTouch,
 )
 from rlcoach.db.reviews import games_to_review, review_game, save_review
 from rlcoach.db.session import create_session, init_db, reset_engine
 from rlcoach.events.kickoffs import KickoffEvent, KickoffPlayer
+from rlcoach.events.types import ChallengeEvent, DemoEvent, TouchEvent
+from rlcoach.field_constants import Vec3
 
 
 @pytest.fixture(autouse=True)
@@ -220,4 +228,94 @@ def test_saving_again_replaces_the_kickoffs_too():
     save_review("r0", "epic:me", status="error", error="parser failed")
     assert session.query(ReviewKickoff).count() == 0
     assert session.query(ReviewKickoffCar).count() == 0
+    session.close()
+
+
+def _with_events() -> MistakeReport:
+    mine = TouchEvent(10.0, "epic:me", Vec3(100.0, 2000.0, 17.0), 55.5, 300, 1)
+    theirs = TouchEvent(10.4, "epic:them", Vec3(300.0, 2400.0, 17.0), 40.0, 312, 0)
+    challenge = ChallengeEvent(
+        10.2, "epic:me", "epic:them", "BLUE", Vec3(200.0, 2200.0, 17.0)
+    )
+    demo = DemoEvent(50.0, "epic:them", "epic:me", Vec3(-500.0, -3000.0, 17.0))
+    unseen = DemoEvent(60.0, "epic:me")
+    return replace(
+        _report(),
+        touches=[TouchMoment(290.0, mine), TouchMoment(289.6, theirs)],
+        challenges=[ChallengeMoment(289.8, challenge, True, None)],
+        demos=[DemoMoment(250.0, demo), DemoMoment(240.0, unseen)],
+    )
+
+
+def test_save_review_stores_every_touch_5050_and_demo():
+    save_review("r0", "epic:me", _with_events())
+
+    session = create_session()
+    review = session.get(GameReview, "r0")
+    assert [
+        (t.t, t.seconds_left, t.player_id, t.team, t.is_me, t.x, t.y, t.z)
+        for t in review.touches
+    ] == [
+        (10.0, 290.0, "epic:me", 1, True, 100.0, 2000.0, 17.0),
+        (10.4, 289.6, "epic:them", 0, False, 300.0, 2400.0, 17.0),
+    ]
+    assert [t.ball_speed_kph for t in review.touches] == [55.5, 40.0]
+    [challenge] = review.challenges
+    assert (challenge.t, challenge.seconds_left, challenge.winner_team) == (
+        10.2,
+        289.8,
+        "BLUE",
+    )
+    assert (challenge.first_player, challenge.second_player) == (
+        "epic:me",
+        "epic:them",
+    )
+    assert (challenge.x, challenge.y, challenge.z) == (200.0, 2200.0, 17.0)
+    assert (challenge.first_last_back, challenge.second_last_back) == (True, None)
+    seen, unseen = review.demos
+    assert (seen.victim, seen.attacker, seen.x, seen.y) == (
+        "epic:them",
+        "epic:me",
+        -500.0,
+        -3000.0,
+    )
+    assert (unseen.t, unseen.seconds_left, unseen.attacker, unseen.y) == (
+        60.0,
+        240.0,
+        None,
+        None,
+    )
+    session.close()
+
+
+def test_saving_again_replaces_the_events_too():
+    save_review("r0", "epic:me", _with_events())
+    save_review("r0", "epic:me", _with_events())
+    session = create_session()
+    counts = (ReviewTouch, ReviewChallenge, ReviewDemo)
+    assert [session.query(table).count() for table in counts] == [2, 1, 2]
+    save_review("r0", "epic:me", status="unsupported", error="Hoops")
+    assert [session.query(table).count() for table in counts] == [0, 0, 0]
+    session.close()
+
+
+def test_a_database_from_before_the_events_gets_them_on_the_next_review(tmp_path):
+    save_review("r0", "epic:me", _report())
+    session = create_session()
+    engine = session.get_bind()
+    session.close()
+    with engine.begin() as connection:
+        for table in ("review_touches", "review_challenges", "review_demos"):
+            connection.exec_driver_sql(f"DROP TABLE {table}")
+    reset_engine()
+
+    init_db(tmp_path / "test.db")
+    save_review("r0", "epic:me", _with_events())
+    session = create_session()
+    review = session.get(GameReview, "r0")
+    assert (len(review.touches), len(review.challenges), len(review.demos)) == (
+        2,
+        1,
+        2,
+    )
     session.close()
