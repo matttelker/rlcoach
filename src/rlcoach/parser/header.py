@@ -13,9 +13,16 @@ from typing import Any
 from .types import GoalHeader, Header, PlayerInfo
 
 SCOREBOARD = ("Score", "Goals", "Assists", "Saves", "Shots")
-# The platforms an account is filed under by its own name. Other platforms, such
-# as "OnlinePlatform_PS4", go by their whole name in lower case
-PLATFORMS = {"OnlinePlatform_Steam": "steam", "OnlinePlatform_Epic": "epic"}
+# What each platform's accounts are filed under. "Dingo" is Xbox and "NNX" is
+# Switch. Any other platform goes by its name, such as "ps5" for OnlinePlatform_PS5
+PLATFORMS = {
+    "OnlinePlatform_Steam": "steam",
+    "OnlinePlatform_Epic": "epic",
+    "OnlinePlatform_PS3": "psn",
+    "OnlinePlatform_PS4": "psn",
+    "OnlinePlatform_Dingo": "xbox",
+    "OnlinePlatform_NNX": "switch",
+}
 _DATE_FORMATS = ("%Y-%m-%d %H-%M-%S", "%Y-%m-%d:%H-%M")
 
 
@@ -64,27 +71,22 @@ def _player(row: dict[str, Any]) -> PlayerInfo:
 
 
 def accounts(row: dict[str, Any]) -> dict[str, str]:
-    """A player's accounts, from their `PlayerStats` row.
+    """A player's account, from their `PlayerStats` row: {platform: account}.
 
-    `PlayerID.Uid` is the account number on Steam, PlayStation, Xbox and Switch
-    alike, and has always been stored as "steam", so every such player's id is
-    `steam:<uid>`. A row without `PlayerID` has only `OnlineID`, filed under its
-    platform's name, such as "onlineplatform_ps4".
+    An Epic account is `PlayerID.EpicAccountId`. Every other platform's is a
+    number, `PlayerID.Uid`, which `OnlineID` repeats, so a row without `PlayerID`
+    still has it. Bots and Epic rows without `PlayerID` have none.
     """
-    found: dict[str, str] = {}
     unique = row.get("PlayerID") or {}
-    if unique.get("Uid"):
-        found["steam"] = str(unique["Uid"])
-    if unique.get("EpicAccountId"):
-        found["epic"] = str(unique["EpicAccountId"])
-    psn = ((unique.get("NpId") or {}).get("Handle") or {}).get("Data")
-    if psn:
-        found["psn"] = str(psn)
-    platform = str(row.get("Platform") or "")
-    platform = PLATFORMS.get(platform, platform.lower())
-    if not found and row.get("OnlineID") and platform:
-        found[platform] = str(row["OnlineID"])
-    return found
+    name = str(unique.get("Platform") or row.get("Platform") or "")
+    platform = PLATFORMS.get(name, name.removeprefix("OnlinePlatform_").lower())
+    if platform == "epic":
+        account = unique.get("EpicAccountId")
+    else:
+        account = unique.get("Uid") or row.get("OnlineID")
+    if not (platform and account) or platform == "unknown":
+        return {}
+    return {platform: str(account)}
 
 
 def parse_replay_date(raw: Any, tz: _dt.tzinfo | None = None) -> str | None:

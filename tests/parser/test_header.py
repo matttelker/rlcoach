@@ -67,35 +67,32 @@ def test_a_header_missing_fields_reads_as_empty():
     assert (header.players, header.goals, header.started_at_utc) == ([], [], None)
 
 
-EPIC = {"Uid": 0, "NpId": {"Handle": {"Data": 0}}, "EpicAccountId": "abc"}
+EPIC = {"Uid": 0, "EpicAccountId": "abc", "Platform": "OnlinePlatform_Epic"}
 
 
 @pytest.mark.parametrize(
     ("row", "found"),
     [
         ({"Platform": "OnlinePlatform_Epic", "PlayerID": EPIC}, {"epic": "abc"}),
-        (
-            {"Platform": "OnlinePlatform_PS4", "OnlineID": 76, "PlayerID": {"Uid": 76}},
-            {"steam": "76"},
-        ),
+        ({"Platform": "OnlinePlatform_Steam", "OnlineID": 7656}, {"steam": "7656"}),
         (
             {
                 "Platform": "OnlinePlatform_PS4",
+                "OnlineID": 76,
                 "PlayerID": {"Uid": 76, "NpId": {"Handle": {"Data": "kev"}}},
             },
-            {"steam": "76", "psn": "kev"},
+            {"psn": "76"},
         ),
-        # Without PlayerID only OnlineID is left, filed under the platform
-        (
-            {"Platform": "OnlinePlatform_Dingo", "OnlineID": 2535},
-            {"onlineplatform_dingo": "2535"},
-        ),
-        ({"Platform": "OnlinePlatform_Steam", "OnlineID": 7656}, {"steam": "7656"}),
+        ({"Platform": "OnlinePlatform_Dingo", "PlayerID": {"Uid": 25}}, {"xbox": "25"}),
+        # Without PlayerID, OnlineID has the same number
+        ({"Platform": "OnlinePlatform_Dingo", "OnlineID": 25}, {"xbox": "25"}),
+        ({"Platform": "OnlinePlatform_NNX", "OnlineID": 15}, {"switch": "15"}),
+        ({"Platform": "OnlinePlatform_PS5", "OnlineID": 9}, {"ps5": "9"}),
         ({"Platform": "OnlinePlatform_Epic", "OnlineID": 0}, {}),
-        ({"Platform": "OnlinePlatform_Unknown", "bBot": True}, {}),
+        ({"Platform": "OnlinePlatform_Unknown", "OnlineID": 0, "bBot": True}, {}),
     ],
 )
-def test_accounts_come_from_the_unique_id_or_else_the_online_id(row, found):
+def test_an_account_is_filed_under_its_own_platform(row, found):
     assert accounts(row) == found
 
 
