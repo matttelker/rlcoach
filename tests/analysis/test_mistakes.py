@@ -22,6 +22,7 @@ from rlcoach.analysis.mistakes import (
     detect_clears_given_back,
     detect_double_commits,
     detect_low_boost_challenges,
+    detect_whiffs,
     format_clock,
     game_clock,
     goal_timeline,
@@ -37,6 +38,7 @@ from rlcoach.events.types import ChallengeEvent, GoalEvent
 from rlcoach.field_constants import Vec3
 from rlcoach.game import read_game
 from rlcoach.identity import build_player_identities
+from rlcoach.parser.types import TouchCount
 from tests.fixtures import real_replays
 from tests.fixtures.builders import (
     create_test_ball,
@@ -1379,3 +1381,107 @@ def test_the_review_places_every_kickoff_of_a_real_game():
     for flag in report.mistakes:
         if flag.category == "kickoffs":
             assert any(abs(flag.t - s) <= 0.1 for s in starts)
+
+
+def _whiff_scene(*, flip=False, beside=150.0, taker=OPP, touched=False, goal_s=None):
+    """The ball rolls at my net and I jump at it as it reaches me, passing
+    `beside` it. At 2.5 s `taker` touches it, unless I touched it at 1 s.
+
+    The ball goes on into my end either way. Returns the context, my jump's time
+    and the scenario's start.
+    """
+
+    def players(t):
+        air = max(t - 0.6, 0.0)
+        me = _car(
+            ME,
+            ORANGE,
+            beside,
+            4000.0 - 1200.0 * t,
+            vy=-1200.0,
+            z=max(17.0, 17.0 + 700.0 * air - 650.0 * air * air),
+            is_jumping=0.6 <= t < 0.72,
+            is_dodging=flip and 0.8 <= t < 1.4,
+        )
+        mate = _car(MATE, ORANGE, -3000.0, 5000.0)
+        opp_y = 1000.0 + 1300.0 * t
+        mate_y = 5000.0 - 450.0 * t
+        if taker == MATE:
+            mate = _car(MATE, ORANGE, 0.0, mate_y, vy=-450.0)
+        return [me, mate, _car(OPP, BLUE, 0.0, opp_y, vy=1300.0)]
+
+    def ball(t):
+        return _ball(0.0, 2000.0 + 800.0 * t, vy=800.0)
+
+    frames, origin = _play(4.0, players, ball)
+
+    def touch(at, player, team):
+        index = min(range(len(frames)), key=lambda i: abs(frames[i].timestamp - at))
+        frames[index] = replace(frames[index], touch_counts=[TouchCount(player, 1)])
+        for i in range(index, len(frames)):
+            frames[i] = replace(frames[i], hit_team=team)
+
+    if touched:
+        touch(origin + 1.0, ME, ORANGE)
+    else:
+        touch(origin + 2.5, taker, BLUE if taker == OPP else ORANGE)
+    goals = [] if goal_s is None else [GoalEvent(origin + goal_s, OPP, "BLUE")]
+    return _ctx(frames, goals=goals), origin + 0.6, origin
+
+
+def test_jumping_at_the_ball_and_missing_it_is_a_whiff():
+    ctx, jumped, _ = _whiff_scene()
+    [flag] = detect_whiffs(ctx)
+    assert (flag.kind, flag.category) == ("whiff", "whiffs")
+    assert flag.t == pytest.approx(jumped, abs=DT)
+    assert flag.what == (
+        "You jumped at the ball in your half and missed it, 1.8 m away at the "
+        "closest. opp got it next."
+    )
+    assert flag.outcome == "The ball reached your end."
+
+
+def test_a_flip_after_the_jump_is_the_same_go():
+    ctx, jumped, _ = _whiff_scene(flip=True)
+    [flag] = detect_whiffs(ctx)
+    assert flag.t == pytest.approx(jumped, abs=DT)
+    assert flag.what.startswith("You flipped at the ball in your half")
+
+
+def test_a_jump_that_touches_the_ball_is_no_whiff():
+    ctx, _, _ = _whiff_scene(touched=True)
+    assert detect_whiffs(ctx) == []
+
+
+def test_a_miss_your_teammate_cleans_up_is_no_whiff():
+    ctx, _, _ = _whiff_scene(taker=MATE)
+    assert detect_whiffs(ctx) == []
+
+
+def test_a_jump_that_never_reaches_the_ball_is_no_whiff():
+    ctx, _, _ = _whiff_scene(beside=600.0)
+    assert detect_whiffs(ctx) == []
+
+
+def test_a_miss_just_before_a_goal_is_left_to_the_goal_review():
+    ctx, _, _ = _whiff_scene(goal_s=2.5)
+    assert detect_whiffs(ctx) == []
+    ctx, _, _ = _whiff_scene(goal_s=3.5)
+    assert [f.outcome for f in detect_whiffs(ctx)] == ["You conceded 3 s later."]
+
+
+def test_a_whiff_the_opponents_score_from_costs_the_goal():
+    ctx, _, origin = _whiff_scene(goal_s=8.0)
+    flags = detect_whiffs(ctx)
+    review = GoalReview(
+        t=origin + 8.0,
+        clock="1:00",
+        score="0-0",
+        scorer="opp",
+        on_you=False,
+        summary="No mistake found.",
+        lines=(),
+    )
+    reviews, flags = link_goals_to_moments(ctx, [review], flags)
+    assert flags[0].cost_goal is True
+    assert reviews[0].summary == "You whiffed 7 s before."

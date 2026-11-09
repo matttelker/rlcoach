@@ -100,6 +100,15 @@ MISS_RANGE = 400.0  # Closer than this in the last seconds counts as a chance
 SLOW_BALL_SPEED = 1000.0
 UU_S_TO_KPH = 0.036
 
+# A whiff: you jumped or flipped at the ball, got within reach of it, and nobody
+# touched it. Of the jumps and flips on your games that came this near the ball,
+# 86% touched it
+WHIFF_REACH = 300.0
+WHIFF_MIN_CLOSING = 500.0  # Driving at the ball this fast as you leave the ground
+WHIFF_SAME_GO_S = 1.5  # A flip or double jump this soon after a jump is the same go
+WHIFF_WINDOW_S = 1.2  # After the go's last jump or flip
+TOUCH_SLOP_S = 0.05  # The game can place a touch a frame early
+
 INSTEAD = {
     "double_commit": (
         "Leave it to the closer teammate. Peel to the back post or grab boost, "
@@ -157,6 +166,11 @@ INSTEAD = {
         "Start your flip a moment sooner, about two car lengths from the ball. "
         "A flip that starts as you reach the ball puts no power into the hit."
     ),
+    "whiff": (
+        "Line it up before you leave the ground. Get to where the ball is going, "
+        "then jump or flip when it's in reach, not on the way to it. If you can't "
+        "get there cleanly, don't go: shadow it and wait for a better touch."
+    ),
     "kickoff_double_commit": (
         "Only one of you goes. From level spawns the usual rule is the car on "
         "the left goes, otherwise the nearer car. The other cheats up behind "
@@ -172,6 +186,7 @@ CATEGORIES = {
     "goalkeeping": "Goalkeeping",
     "boost": "Boost",
     "kickoffs": "Kickoffs",
+    "whiffs": "Whiffs",
 }
 CATEGORY = {
     "last_back_upfield": "last_back",
@@ -188,6 +203,7 @@ CATEGORY = {
     "kickoff_no_flip": "kickoffs",
     "kickoff_late_flip": "kickoffs",
     "kickoff_double_commit": "kickoffs",
+    "whiff": "whiffs",
 }
 SPOT_NAMES = {
     "DIAGONAL": "the diagonal",
@@ -872,6 +888,105 @@ def _jumps_before(
     return jumped, late
 
 
+def _goes(ctx: Context) -> list[tuple[int, int]]:
+    """Each time you left the ground in play: the frames where its first and last
+    jump or flip started. A flip or double jump soon after a jump is the same go."""
+    goes: list[tuple[int, int]] = []
+    was_up = False
+    for index, frame in enumerate(ctx.frames):
+        car = frame.get_player_by_id(ctx.player_id)
+        up = car is not None and _left_the_ground(car)
+        if up and not was_up and ctx.live[index]:
+            if goes and ctx.times[index] - ctx.times[goes[-1][1]] < WHIFF_SAME_GO_S:
+                goes[-1] = (goes[-1][0], index)
+            else:
+                goes.append((index, index))
+        was_up = up
+    return goes
+
+
+def _nearest_approach(ctx: Context, first: int, end_t: float) -> tuple[float, int]:
+    """How near your car came to the ball from frame `first` until `end_t`."""
+    best, best_index = math.inf, first
+    index = first
+    while index < len(ctx.frames) and ctx.times[index] <= end_t:
+        car = ctx.frames[index].get_player_by_id(ctx.player_id)
+        if car is not None and not car.is_demolished:
+            gap = _distance(car.position, ctx.frames[index].ball.position)
+            if gap < best:
+                best, best_index = gap, index
+        index += 1
+    return best, best_index
+
+
+def _lost_it(ctx: Context, t: float) -> tuple[bool, str | None]:
+    """Whether the opponents had the ball next after `t`, before your team touched
+    it, and who took it. A goal against with no touch before it means they did,
+    with nobody to name."""
+    mine = team_name(ctx.team)
+    goal = next((g for g in ctx.goals if g.team != mine and g.t > t), None)
+    following = _next_contact_after(ctx, t)
+    if goal is not None and (following is None or goal.t < following.t):
+        return True, None
+    if following is None or following.team == ctx.team:
+        return False, None
+    return True, following.player_id
+
+
+def detect_whiffs(ctx: Context) -> list[Mistake]:
+    """Flag jumping or flipping at the ball and missing it, when the opponents
+    took it and it led somewhere.
+
+    The goal review already judges a miss in the last seconds before a goal
+    against, so those are left to it.
+    """
+    flags: list[Mistake] = []
+    mine = team_name(ctx.team)
+    for first, last in _goes(ctx):
+        if not _past_kickoff(ctx, first):
+            continue
+        frame = ctx.frames[first]
+        me = frame.get_player_by_id(ctx.player_id)
+        if me is None or _closing_speed(me, frame.ball) < WHIFF_MIN_CLOSING:
+            continue
+        start, end = ctx.times[first], ctx.times[last] + WHIFF_WINDOW_S
+        if any(start - TOUCH_SLOP_S <= c.t <= end for c in ctx.contacts):
+            continue
+        gap, nearest = _nearest_approach(ctx, first, end)
+        if gap >= WHIFF_REACH:
+            continue
+        t = ctx.times[nearest]
+        if any(
+            g.team != mine and 0.0 <= g.t - t <= GOAL_REVIEW_WINDOW_S for g in ctx.goals
+        ):
+            continue
+        lost, taker = _lost_it(ctx, t)
+        if not lost:
+            continue
+        flipped = any(
+            car is not None and car.is_dodging
+            for car in (
+                ctx.frames[i].get_player_by_id(ctx.player_id)
+                for i in range(first, nearest + 1)
+            )
+        )
+        where = (
+            "your" if ctx.depth(ctx.frames[nearest].ball.position.y) > 0 else "their"
+        )
+        flag = _flag(
+            ctx,
+            "whiff",
+            first,
+            t - start,
+            f"You {'flipped' if flipped else 'jumped'} at the ball in {where} half "
+            f"and missed it, {gap / 100:.1f} m away at the closest."
+            + (f" {ctx.name(taker)} got it next." if taker else ""),
+        )
+        if flag.outcome:
+            flags.append(flag)
+    return flags
+
+
 def _cars_on_my_team(frame: Frame, team: int) -> list[PlayerFrame]:
     return [p for p in frame.players if p.team == team]
 
@@ -1246,6 +1361,7 @@ LEAD_IN = {
     "kickoff_no_flip": "You went for the kickoff without a flip",
     "kickoff_late_flip": "Your kickoff flip came late",
     "kickoff_double_commit": "You and a teammate both went for the kickoff",
+    "whiff": "You whiffed",
 }
 
 
@@ -1375,6 +1491,7 @@ def review_player(
             *detect_caught_upfield(ctx),
             *detect_low_boost_challenges(ctx),
             *clear_flags,
+            *detect_whiffs(ctx),
             *kickoff_flags,
         ],
     )
