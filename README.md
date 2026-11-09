@@ -64,7 +64,7 @@ uv run rlcoach reviews --redo
 
 ## Benchmarks
 
-On startup the server loads the bundled benchmarks for any playlist that has none. Doubles and Standard have their own files, with C2, C3 and GC1 rows measured by ballchasing.com. Ballchasing groups every Grand Champion tier together, so the GC1 rows combine GC1 through SSL.
+Doubles and Standard each have a bundled file of benchmarks measured by ballchasing.com, one row per stat for every rank from G1 (Gold I) to C3, plus GC. Ballchasing groups every Grand Champion tier together, so GC combines GC1 through SSL. The server reloads them every time it starts. The Coach, Benchmarks, Compare and Trends pages compare you with `target_rank` in your config, P1 unless you set it, and Benchmarks and Compare let you pick another rank.
 
 ## Docs
 

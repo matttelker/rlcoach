@@ -33,11 +33,11 @@ from ...db.reviews import stored_kickoffs
 from ...db.session import create_session
 from ...kickoff_coaching import GameKickoffs, read_kickoff, summarize_kickoffs
 from ...modes import COACHED_PLAYLISTS
-from .stats import direction, resolve_playlist
+from .stats import direction, resolve_playlist, resolve_rank
 
 router = APIRouter(tags=["coach"])
 
-# Per-game counts that read naturally as "more goals than GC1 players"
+# Per-game counts that read naturally as "more goals than P1 players"
 STRENGTH_METRICS = ("goals", "assists", "saves", "shots")
 
 
@@ -51,15 +51,6 @@ def _date_from(period: str) -> date | None:
             status_code=400, detail="period must be 'all' or a number of days like 30d"
         ) from None
     return date.today() - timedelta(days=days)
-
-
-def _target_rank() -> str:
-    from ..app import get_config
-
-    try:
-        return get_config().preferences.target_rank
-    except RuntimeError:
-        return "GC1"
 
 
 def _latest_playlist(session) -> str | None:
@@ -149,7 +140,7 @@ async def get_coach(
     see them together.
     """
     date_from = _date_from(period)
-    rank = _target_rank()
+    rank = resolve_rank(None)
 
     session = create_session()
     try:

@@ -16,7 +16,7 @@ def make_config(tmp_path: Path, playlist: str = "STANDARD") -> RLCoachConfig:
     return RLCoachConfig(
         identity=IdentityConfig(platform_ids=["epic:me"]),
         paths=PathsConfig(watch_folder=tmp_path / "replays", data_dir=tmp_path),
-        preferences=PreferencesConfig(primary_playlist=playlist, target_rank="GC1"),
+        preferences=PreferencesConfig(primary_playlist=playlist, target_rank="GC"),
     )
 
 
@@ -81,7 +81,7 @@ def add_players(session, *players: tuple[str, str]) -> None:
         )
 
 
-def add_benchmark(session, metric, median, p25, p75, playlist="STANDARD", rank="GC1"):
+def add_benchmark(session, metric, median, p25, p75, playlist="STANDARD", rank="GC"):
     session.add(
         Benchmark(
             metric=metric,

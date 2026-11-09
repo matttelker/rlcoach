@@ -1,7 +1,8 @@
 """The rank benchmarks bundled with rlcoach, loaded into the database.
 
-They come from ballchasing.com's population stats (see each file's notes). A
-playlist that already has rows keeps them, so loading runs once per playlist.
+They come from ballchasing.com's population stats (see each file's notes). The
+server reloads them every time it starts, so a changed file reaches the
+dashboard after a restart.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import Any
 
 from .db.models import Benchmark
 from .db.session import create_session
-from .metrics import VALID_RANKS, is_valid_metric
+from .metrics import RANKS, is_valid_metric
 from .modes import COACHED_PLAYLISTS
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -38,50 +39,42 @@ def problems(data: dict[str, Any]) -> list[str]:
             found.append(f"{where}: unknown metric {row.get('metric')!r}")
         if row.get("playlist") not in COACHED_PLAYLISTS:
             found.append(f"{where}: unknown playlist {row.get('playlist')!r}")
-        if row.get("rank_tier") not in VALID_RANKS:
+        if row.get("rank_tier") not in RANKS:
             found.append(f"{where}: unknown rank {row.get('rank_tier')!r}")
         if "median" not in row:
             found.append(f"{where}: no median")
     return found
 
 
-def load_benchmarks(path: Path) -> int:
-    """Add or update every benchmark in a file. Returns how many it holds."""
+def read_benchmarks(path: Path) -> list[Benchmark]:
+    """A benchmark file's rows, unsaved. Raises if any row is bad."""
     data = json.loads(path.read_text(encoding="utf-8"))
     if found := problems(data):
         raise BenchmarkValidationError(f"{path.name}: " + "; ".join(found))
     about = data.get("metadata", {})
     collected = about.get("collected_date")
+    return [
+        Benchmark(
+            metric=row["metric"],
+            playlist=row["playlist"],
+            rank_tier=row["rank_tier"],
+            median_value=row["median"],
+            p25_value=row.get("p25"),
+            p75_value=row.get("p75"),
+            elite_threshold=row.get("elite"),
+            source=about.get("source", "unknown"),
+            source_date=date.fromisoformat(collected) if collected else None,
+            notes=row.get("notes") or about.get("notes"),
+            imported_at=datetime.now(UTC),
+        )
+        for row in data["benchmarks"]
+    ]
+
+
+def seed_benchmarks() -> int:
+    """Replace the stored benchmarks with the bundled ones. Returns how many."""
+    rows = [r for path in BUNDLED_BENCHMARKS.values() for r in read_benchmarks(path)]
     with create_session() as session, session.begin():
-        for row in data["benchmarks"]:
-            key = {
-                "metric": row["metric"],
-                "playlist": row["playlist"],
-                "rank_tier": row["rank_tier"],
-            }
-            stored = session.query(Benchmark).filter_by(**key).first()
-            if stored is None:
-                stored = Benchmark(**key)
-                session.add(stored)
-            stored.median_value = row["median"]
-            stored.p25_value = row.get("p25")
-            stored.p75_value = row.get("p75")
-            stored.elite_threshold = row.get("elite")
-            stored.source = about.get("source", "unknown")
-            stored.source_date = date.fromisoformat(collected) if collected else None
-            stored.notes = row.get("notes") or about.get("notes")
-            stored.imported_at = datetime.now(UTC)
-    return len(data["benchmarks"])
-
-
-def seed_default_benchmarks() -> int:
-    """Load the bundled benchmarks for each playlist that has none yet."""
-    with create_session() as session:
-        stocked = {
-            playlist for (playlist,) in session.query(Benchmark.playlist).distinct()
-        }
-    return sum(
-        load_benchmarks(path)
-        for playlist, path in BUNDLED_BENCHMARKS.items()
-        if playlist not in stocked
-    )
+        session.query(Benchmark).delete()
+        session.add_all(rows)
+    return len(rows)

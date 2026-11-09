@@ -29,7 +29,7 @@ def client(tmp_path):
             watch_folder=tmp_path / "replays",
             data_dir=tmp_path / "data",
         ),
-        preferences=PreferencesConfig(primary_playlist="STANDARD", target_rank="GC1"),
+        preferences=PreferencesConfig(primary_playlist="STANDARD", target_rank="GC"),
     )
     config.paths.data_dir.mkdir(parents=True, exist_ok=True)
     init_db(config.db_path)

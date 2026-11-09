@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ...compare import SEVERITY_ORDER, standings, win_loss_patterns
+from ...config import DEFAULT_RANK
 from ...db.models import Benchmark, PlayerGameStats, Replay
 from ...db.session import create_session
 from ...metrics import MetricDirection, metric_direction
@@ -45,6 +46,18 @@ def resolve_playlist(playlist: str | None) -> str:
         return get_config().preferences.primary_playlist
     except RuntimeError:
         return "DOUBLES"
+
+
+def resolve_rank(rank: str | None) -> str:
+    """The rank asked for, or the one your config compares you with."""
+    if rank:
+        return rank
+    from ..app import get_config
+
+    try:
+        return get_config().preferences.target_rank
+    except RuntimeError:
+        return DEFAULT_RANK
 
 
 def direction(metric: str) -> str:
@@ -102,7 +115,7 @@ async def get_trends(
     period: str = Query(default="30d", description="7d, 30d, 90d or all"),
     playlist: str | None = None,
 ) -> dict[str, Any]:
-    """One stat of yours game by game, oldest first."""
+    """One stat of yours game by game, oldest first, and your rank's median."""
     if metric not in TREND_METRICS:
         raise HTTPException(
             status_code=400, detail=f"Invalid metric. Allowed: {sorted(TREND_METRICS)}"
@@ -112,7 +125,13 @@ async def get_trends(
             status_code=400, detail=f"Invalid period. Allowed: {sorted(TREND_PERIODS)}"
         )
     playlist = resolve_playlist(playlist)
+    rank = resolve_rank(None)
     with create_session() as session:
+        benchmark = (
+            session.query(Benchmark)
+            .filter_by(metric=metric, playlist=playlist, rank_tier=rank)
+            .first()
+        )
         query = (
             session.query(Replay.play_date, getattr(PlayerGameStats, metric))
             .join(PlayerGameStats, Replay.replay_id == PlayerGameStats.replay_id)
@@ -127,6 +146,8 @@ async def get_trends(
         "metric": metric,
         "period": period,
         "playlist": playlist,
+        "rank": rank,
+        "rank_median": benchmark.median_value if benchmark else None,
         "values": [
             {"date": day.isoformat() if day else None, "value": value}
             for day, value in rows
@@ -168,12 +189,13 @@ async def list_benchmarks(
 
 @router.get("/compare")
 async def get_comparison(
-    rank: str = Query(..., description="Rank to compare with, such as GC1"),
+    rank: str | None = Query(default=None, description="Such as P1. Default: config"),
     playlist: str | None = None,
     period: str = Query(default="30d"),
 ) -> dict[str, Any]:
     """Your averages next to a rank's medians."""
     playlist = resolve_playlist(playlist)
+    rank = resolve_rank(rank)
     with create_session() as session:
         rows = _my_stats(session, playlist, period).all()
         if not rows:
@@ -251,11 +273,12 @@ async def get_patterns(
 @router.get("/weaknesses")
 async def get_weaknesses(
     playlist: str | None = None,
-    rank: str = Query(default="GC1"),
+    rank: str | None = Query(default=None, description="Such as P1. Default: config"),
     period: str = Query(default="30d"),
 ) -> dict[str, Any]:
     """Your stats furthest below a rank's spread, and the ones well above it."""
     playlist = resolve_playlist(playlist)
+    rank = resolve_rank(rank)
     with create_session() as session:
         rows = _my_stats(session, playlist, period).all()
         if not rows:
@@ -264,6 +287,7 @@ async def get_weaknesses(
                 "strengths": [],
                 "game_count": 0,
                 "playlist": playlist,
+                "rank": rank,
                 "has_benchmarks": False,
             }
         benchmarks = _benchmarks(session, playlist, rank)
@@ -298,5 +322,6 @@ async def get_weaknesses(
         ),
         "game_count": len(rows),
         "playlist": playlist,
+        "rank": rank,
         "has_benchmarks": bool(benchmarks),
     }

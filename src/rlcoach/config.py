@@ -14,12 +14,13 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .metrics import VALID_RANKS
+from .metrics import RANKS
 from .modes import COACHED_PLAYLISTS
 
 ACCOUNT_PATTERN = re.compile(r"^(steam|epic|psn|xbox|switch):[a-zA-Z0-9_-]+$")
 DEFAULT_WATCH_FOLDER = "~/Documents/My Games/Rocket League/TAGame/Demos"
 DEFAULT_DATA_DIR = "~/.rlcoach/data"
+DEFAULT_RANK = "P1"
 
 CONFIG_TEMPLATE = """\
 # rlcoach settings
@@ -40,8 +41,9 @@ data_dir = "~/.rlcoach/data"
 [preferences]
 # Playlist the stats pages open on: STANDARD, DOUBLES or DUEL
 primary_playlist = "STANDARD"
-# Rank the benchmarks compare you with: C2, C3, GC1, GC2, GC3 or SSL
-target_rank = "GC1"
+# Rank the benchmarks compare you with: G1 to G3 for Gold, then P1 to P3,
+# D1 to D3, C1 to C3, or GC for every Grand Champion tier
+target_rank = "P1"
 # Decides which day a game belongs to, such as "America/New_York".
 # Leave it out to use this computer's timezone.
 # timezone = "America/New_York"
@@ -68,7 +70,7 @@ class PathsConfig:
 @dataclass
 class PreferencesConfig:
     primary_playlist: str = "DOUBLES"
-    target_rank: str = "GC1"
+    target_rank: str = DEFAULT_RANK
     timezone: str | None = None
 
 
@@ -95,10 +97,9 @@ class RLCoachConfig:
                     f"platform_id {account!r} isn't 'platform:id' with platform "
                     "one of steam, epic, psn, xbox or switch"
                 )
-        if prefs.target_rank not in VALID_RANKS:
+        if prefs.target_rank not in RANKS:
             raise ConfigError(
-                f"target_rank {prefs.target_rank!r} isn't one of "
-                f"{', '.join(sorted(VALID_RANKS))}"
+                f"target_rank {prefs.target_rank!r} isn't one of {', '.join(RANKS)}"
             )
         if prefs.primary_playlist not in COACHED_PLAYLISTS:
             raise ConfigError(
@@ -155,7 +156,7 @@ def load_config(path: Path) -> RLCoachConfig:
         ),
         preferences=PreferencesConfig(
             primary_playlist=prefs.get("primary_playlist", "DOUBLES"),
-            target_rank=prefs.get("target_rank", "GC1"),
+            target_rank=prefs.get("target_rank", DEFAULT_RANK),
             timezone=prefs.get("timezone"),
         ),
     )

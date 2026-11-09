@@ -43,7 +43,9 @@ DIRECTIONS: dict[str, MetricDirection] = {
     "third_man_pct": _CONTEXT,
 }
 
-VALID_RANKS = frozenset({"C2", "C3", "GC1", "GC2", "GC3", "SSL"})
+# The ranks the bundled benchmarks cover, lowest first. Ballchasing groups
+# every Grand Champion tier together, so GC is GC1 through SSL.
+RANKS = ("G1", "G2", "G3", "P1", "P2", "P3", "D1", "D2", "D3", "C1", "C2", "C3", "GC")
 
 
 def is_valid_metric(key: str) -> bool:

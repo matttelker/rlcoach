@@ -61,6 +61,14 @@ def test_trends_list_your_games_oldest_first_in_your_playlist(client):
     assert doubles["values"] == [{"date": doubles["values"][0]["date"], "value": 5}]
 
 
+def test_trends_carry_your_ranks_median_when_it_has_one(client):
+    goals = client.get("/trends?metric=goals").json()
+    assert (goals["rank"], goals["rank_median"]) == ("GC", 1.0)
+    assert client.get("/trends?metric=saves").json()["rank_median"] is None
+    doubles = client.get("/trends?metric=goals&playlist=DOUBLES").json()
+    assert doubles["rank_median"] is None
+
+
 def test_trends_skip_games_without_the_stat_and_refuse_unknown_ones(client):
     assert client.get("/trends?metric=avg_speed_kph").json()["values"] == []
     assert client.get("/trends?metric=source_file").status_code == 400
@@ -68,12 +76,12 @@ def test_trends_skip_games_without_the_stat_and_refuse_unknown_ones(client):
 
 
 def test_benchmarks_filter_by_rank(client):
-    items = client.get("/benchmarks?rank=GC1").json()["items"]
+    items = client.get("/benchmarks?rank=GC").json()["items"]
     assert [b["metric"] for b in items] == ["avg_boost", "goals"]
     assert items[1] == {
         "metric": "goals",
         "playlist": "STANDARD",
-        "rank_tier": "GC1",
+        "rank_tier": "GC",
         "median_value": 1.0,
         "p25_value": 0.5,
         "p75_value": 1.5,
@@ -83,8 +91,8 @@ def test_benchmarks_filter_by_rank(client):
 
 
 def test_compare_gives_each_stats_gap_and_which_way_is_better(client):
-    body = client.get("/compare?rank=GC1").json()
-    assert (body["game_count"], body["target_rank"]) == (12, "GC1")
+    body = client.get("/compare").json()
+    assert (body["game_count"], body["target_rank"]) == (12, "GC")
     by_metric = {c["metric"]: c for c in body["comparisons"]}
     assert list(by_metric) == [
         "bcpm",
@@ -108,9 +116,18 @@ def test_compare_gives_each_stats_gap_and_which_way_is_better(client):
 
 
 def test_compare_without_games_and_with_a_bad_period(client):
-    empty = client.get("/compare?rank=GC1&playlist=DUEL").json()
+    empty = client.get("/compare?playlist=DUEL").json()
     assert (empty["comparisons"], empty["game_count"]) == ([], 0)
-    assert client.get("/compare?rank=GC1&period=soon").status_code == 400
+    assert client.get("/compare?period=soon").status_code == 400
+
+
+def test_compare_and_weaknesses_take_another_rank(client):
+    compare = client.get("/compare?rank=C3").json()
+    goals = next(c for c in compare["comparisons"] if c["metric"] == "goals")
+    assert (compare["target_rank"], goals["target_median"]) == ("C3", 0.8)
+    weaknesses = client.get("/weaknesses?rank=C3").json()
+    assert (weaknesses["rank"], weaknesses["has_benchmarks"]) == ("C3", True)
+    assert [s["target_median"] for s in weaknesses["strengths"]] == [0.8]
 
 
 def test_patterns_find_what_differs_in_wins(client):
@@ -125,7 +142,7 @@ def test_patterns_find_what_differs_in_wins(client):
 
 def test_holding_too_much_boost_is_a_weakness_and_goals_a_strength(client):
     body = client.get("/weaknesses").json()
-    assert body["has_benchmarks"] is True
+    assert (body["rank"], body["has_benchmarks"]) == ("GC", True)
     assert [w["metric"] for w in body["weaknesses"]] == ["avg_boost"]
     assert body["weaknesses"][0]["severity"] == "high"
     assert body["strengths"] == [
@@ -140,15 +157,15 @@ def test_holding_too_much_boost_is_a_weakness_and_goals_a_strength(client):
 
 
 def test_weaknesses_say_when_there_are_no_benchmarks(client):
-    assert client.get("/weaknesses?rank=SSL").json()["has_benchmarks"] is False
+    assert client.get("/weaknesses?rank=G1").json()["has_benchmarks"] is False
     empty = client.get("/weaknesses?playlist=DUEL").json()
     assert (empty["game_count"], empty["has_benchmarks"]) == (0, False)
 
 
-def test_the_playlist_falls_back_to_doubles_without_a_config(tmp_path):
+def test_playlist_and_rank_fall_back_to_defaults_without_a_config(tmp_path):
     init_db(tmp_path / "test.db")
     try:
-        body = TestClient(create_app()).get("/compare?rank=GC1").json()
+        body = TestClient(create_app()).get("/compare").json()
     finally:
         reset_engine()
-    assert body["playlist"] == "DOUBLES"
+    assert (body["playlist"], body["target_rank"]) == ("DOUBLES", "P1")

@@ -50,7 +50,7 @@ data_dir = "~/rl-data"
 
 [preferences]
 primary_playlist = "STANDARD"
-target_rank = "GC2"
+target_rank = "G3"
 timezone = "Europe/London"
 
 [teammates]
@@ -62,13 +62,13 @@ old_section = "ignored"
     assert config.paths.watch_folder == Path("C:/Demos")
     assert config.paths.data_dir == Path.home() / "rl-data"
     assert config.db_path == Path.home() / "rl-data" / "rlcoach.db"
-    assert config.preferences == PreferencesConfig("STANDARD", "GC2", "Europe/London")
+    assert config.preferences == PreferencesConfig("STANDARD", "G3", "Europe/London")
     config.validate()
 
 
 def test_missing_settings_take_their_defaults(tmp_path):
     config = load_config(_write(tmp_path, '[identity]\ndisplay_names = ["Me"]\n'))
-    assert config.preferences == PreferencesConfig("DOUBLES", "GC1", None)
+    assert config.preferences == PreferencesConfig("DOUBLES", "P1", None)
     assert config.paths.data_dir == Path.home() / ".rlcoach" / "data"
     assert config.paths.watch_folder.name == "Demos"
 
@@ -107,6 +107,7 @@ def test_a_missing_or_broken_file_is_a_config_error(tmp_path):
             "isn't 'platform:id'",
         ),
         (_config(target_rank="Diamond"), "target_rank 'Diamond'"),
+        (_config(target_rank="GC1"), "isn't one of G1, G2, .* C3, GC"),
         (_config(primary_playlist="HOOPS"), "primary_playlist 'HOOPS'"),
         (_config(timezone="Mars/Olympus"), "timezone 'Mars/Olympus'"),
         (

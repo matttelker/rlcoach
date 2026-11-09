@@ -33,7 +33,7 @@ def config(tmp_path):
             watch_folder=tmp_path / "replays",
             data_dir=tmp_path / "data",
         ),
-        preferences=PreferencesConfig(primary_playlist="STANDARD", target_rank="GC1"),
+        preferences=PreferencesConfig(primary_playlist="STANDARD", target_rank="GC"),
     )
     config.paths.data_dir.mkdir(parents=True, exist_ok=True)
     return config
@@ -336,7 +336,7 @@ def _add_goals_benchmark(playlist):
         Benchmark(
             metric="goals",
             playlist=playlist,
-            rank_tier="GC1",
+            rank_tier="GC",
             median_value=0.5,
             p25_value=0.4,
             p75_value=0.6,
@@ -356,9 +356,9 @@ def _benchmark_titles(client, playlist):
 
 def test_coach_benchmark_strengths_name_the_playlist_only_when_mixed(client):
     _add_goals_benchmark("STANDARD")
-    assert _benchmark_titles(client, "STANDARD") == ["More goals than GC1 players"]
+    assert _benchmark_titles(client, "STANDARD") == ["More goals than GC players"]
     assert _benchmark_titles(client, "DOUBLES,STANDARD") == [
-        "More goals than GC1 players in Standard"
+        "More goals than GC players in Standard"
     ]
 
 

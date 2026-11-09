@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 
 from .. import __version__
-from ..benchmarks import seed_default_benchmarks
+from ..benchmarks import seed_benchmarks
 from ..config import ConfigError, RLCoachConfig, get_default_config_path, load_config
 from ..db.session import create_session, init_db
 from .routers import coach, games, grades, players, stats
@@ -44,7 +44,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         init_db()
     else:
         init_db(config.db_path)
-        seed_default_benchmarks()
+        seed_benchmarks()
         _config = config
         logger.info("Loaded config from %s", path)
     try:

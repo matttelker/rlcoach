@@ -1,10 +1,100 @@
 {
   "metadata": {
     "source": "ballchasing.com population statistics",
-    "collected_date": "2026-11-01",
-    "notes": "Ranked Standard, all seasons. 'median' holds ballchasing's per-game mean, because a player's average is what the dashboard compares it with. p25, p75 and elite (top 10%) come from ballchasing's per-game histograms, so they show game-to-game spread and are wider than the spread of players' long-run averages."
+    "collected_date": "2026-11-09",
+    "notes": "Ranked Standard, all seasons, from ballchasing.com/population/average/stats and /population/distribution/stats with group=rank and playlist=13. Ballchasing's rank ids 7 to 18 are G1 to C3 and 19 is every Grand Champion. bcpm is ballchasing's bcolpm and avg_boost its avg_boost_amount. 'median' holds ballchasing's per-game mean, because a player's average is what the dashboard compares it with. p25, p75 and elite (top 10%) are read off ballchasing's per-game histograms, interpolating inside each bucket: bcolpm buckets start at their value and the others are centred on it, the only reading under which the histogram means match the averages. They show game-to-game spread, so they are wider than the spread of players' long-run averages."
   },
   "benchmarks": [
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "G1",
+      "median": 228.3,
+      "p25": 177.8,
+      "p75": 270.7,
+      "elite": 316.7
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "G2",
+      "median": 239.2,
+      "p25": 187.9,
+      "p75": 281.7,
+      "elite": 328.6
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "G3",
+      "median": 250.0,
+      "p25": 200.6,
+      "p75": 296.2,
+      "elite": 342.9
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "P1",
+      "median": 261.9,
+      "p25": 213.2,
+      "p75": 307.9,
+      "elite": 353.7
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "P2",
+      "median": 270.2,
+      "p25": 223.5,
+      "p75": 314.3,
+      "elite": 358.3
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "P3",
+      "median": 281.5,
+      "p25": 235.7,
+      "p75": 325.2,
+      "elite": 368.8
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "D1",
+      "median": 290.4,
+      "p25": 245.9,
+      "p75": 333.7,
+      "elite": 376.0
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "D2",
+      "median": 299.9,
+      "p25": 257.0,
+      "p75": 341.8,
+      "elite": 382.7
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "D3",
+      "median": 311.5,
+      "p25": 269.7,
+      "p75": 353.0,
+      "elite": 392.8
+    },
+    {
+      "metric": "bcpm",
+      "playlist": "STANDARD",
+      "rank_tier": "C1",
+      "median": 323.3,
+      "p25": 283.0,
+      "p75": 363.7,
+      "elite": 401.9
+    },
     {
       "metric": "bcpm",
       "playlist": "STANDARD",
@@ -26,12 +116,102 @@
     {
       "metric": "bcpm",
       "playlist": "STANDARD",
-      "rank_tier": "GC1",
+      "rank_tier": "GC",
       "median": 366.4,
       "p25": 329.9,
       "p75": 403.6,
       "elite": 437.6,
       "notes": "Ballchasing groups every Grand Champion tier, so this row combines GC1 through SSL."
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "G1",
+      "median": 49.7,
+      "p25": 44.8,
+      "p75": 55.9,
+      "elite": 39.0
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "G2",
+      "median": 50.6,
+      "p25": 45.9,
+      "p75": 56.2,
+      "elite": 40.5
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "G3",
+      "median": 51.2,
+      "p25": 46.6,
+      "p75": 56.5,
+      "elite": 41.6
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "P1",
+      "median": 51.7,
+      "p25": 47.4,
+      "p75": 56.7,
+      "elite": 42.7
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "P2",
+      "median": 52.2,
+      "p25": 47.9,
+      "p75": 56.8,
+      "elite": 43.3
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "P3",
+      "median": 52.5,
+      "p25": 48.2,
+      "p75": 56.9,
+      "elite": 43.8
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "D1",
+      "median": 52.6,
+      "p25": 48.4,
+      "p75": 56.9,
+      "elite": 44.1
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "D2",
+      "median": 52.5,
+      "p25": 48.4,
+      "p75": 56.7,
+      "elite": 44.2
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "D3",
+      "median": 52.4,
+      "p25": 48.4,
+      "p75": 56.5,
+      "elite": 44.3
+    },
+    {
+      "metric": "avg_boost",
+      "playlist": "STANDARD",
+      "rank_tier": "C1",
+      "median": 52.3,
+      "p25": 48.4,
+      "p75": 56.3,
+      "elite": 44.4
     },
     {
       "metric": "avg_boost",
@@ -54,12 +234,102 @@
     {
       "metric": "avg_boost",
       "playlist": "STANDARD",
-      "rank_tier": "GC1",
+      "rank_tier": "GC",
       "median": 50.9,
       "p25": 47.5,
       "p75": 54.8,
       "elite": 43.7,
       "notes": "Ballchasing groups every Grand Champion tier, so this row combines GC1 through SSL."
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "G1",
+      "median": 0.68,
+      "p25": 0.0,
+      "p75": 1.14,
+      "elite": 1.86
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "G2",
+      "median": 0.71,
+      "p25": 0.0,
+      "p75": 1.2,
+      "elite": 1.97
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "G3",
+      "median": 0.71,
+      "p25": 0.0,
+      "p75": 1.21,
+      "elite": 2.01
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "P1",
+      "median": 0.73,
+      "p25": 0.0,
+      "p75": 1.24,
+      "elite": 2.03
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "P2",
+      "median": 0.73,
+      "p25": 0.0,
+      "p75": 1.24,
+      "elite": 2.04
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "P3",
+      "median": 0.73,
+      "p25": 0.0,
+      "p75": 1.25,
+      "elite": 2.04
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "D1",
+      "median": 0.73,
+      "p25": 0.0,
+      "p75": 1.26,
+      "elite": 2.06
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "D2",
+      "median": 0.73,
+      "p25": 0.0,
+      "p75": 1.26,
+      "elite": 2.05
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "D3",
+      "median": 0.73,
+      "p25": 0.0,
+      "p75": 1.26,
+      "elite": 2.05
+    },
+    {
+      "metric": "goals",
+      "playlist": "STANDARD",
+      "rank_tier": "C1",
+      "median": 0.75,
+      "p25": 0.01,
+      "p75": 1.29,
+      "elite": 2.08
     },
     {
       "metric": "goals",
@@ -82,12 +352,102 @@
     {
       "metric": "goals",
       "playlist": "STANDARD",
-      "rank_tier": "GC1",
+      "rank_tier": "GC",
       "median": 0.78,
       "p25": 0.04,
       "p75": 1.33,
       "elite": 2.13,
       "notes": "Ballchasing groups every Grand Champion tier, so this row combines GC1 through SSL."
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "G1",
+      "median": 0.38,
+      "p25": 0.0,
+      "p75": 0.68,
+      "elite": 1.29
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "G2",
+      "median": 0.38,
+      "p25": 0.0,
+      "p75": 0.71,
+      "elite": 1.31
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "G3",
+      "median": 0.4,
+      "p25": 0.0,
+      "p75": 0.76,
+      "elite": 1.34
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "P1",
+      "median": 0.41,
+      "p25": 0.0,
+      "p75": 0.8,
+      "elite": 1.36
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "P2",
+      "median": 0.42,
+      "p25": 0.0,
+      "p75": 0.82,
+      "elite": 1.38
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "P3",
+      "median": 0.43,
+      "p25": 0.0,
+      "p75": 0.83,
+      "elite": 1.39
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "D1",
+      "median": 0.43,
+      "p25": 0.0,
+      "p75": 0.85,
+      "elite": 1.4
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "D2",
+      "median": 0.44,
+      "p25": 0.0,
+      "p75": 0.87,
+      "elite": 1.41
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "D3",
+      "median": 0.46,
+      "p25": 0.0,
+      "p75": 0.9,
+      "elite": 1.43
+    },
+    {
+      "metric": "assists",
+      "playlist": "STANDARD",
+      "rank_tier": "C1",
+      "median": 0.48,
+      "p25": 0.0,
+      "p75": 0.94,
+      "elite": 1.45
     },
     {
       "metric": "assists",
@@ -110,12 +470,102 @@
     {
       "metric": "assists",
       "playlist": "STANDARD",
-      "rank_tier": "GC1",
+      "rank_tier": "GC",
       "median": 0.55,
       "p25": 0.0,
       "p75": 1.05,
       "elite": 1.59,
       "notes": "Ballchasing groups every Grand Champion tier, so this row combines GC1 through SSL."
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "G1",
+      "median": 0.6,
+      "p25": 0.0,
+      "p75": 1.03,
+      "elite": 1.59
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "G2",
+      "median": 0.64,
+      "p25": 0.0,
+      "p75": 1.1,
+      "elite": 1.73
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "G3",
+      "median": 0.69,
+      "p25": 0.0,
+      "p75": 1.18,
+      "elite": 1.91
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "P1",
+      "median": 0.75,
+      "p25": 0.01,
+      "p75": 1.27,
+      "elite": 2.06
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "P2",
+      "median": 0.79,
+      "p25": 0.03,
+      "p75": 1.32,
+      "elite": 2.14
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "P3",
+      "median": 0.84,
+      "p25": 0.05,
+      "p75": 1.37,
+      "elite": 2.2
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "D1",
+      "median": 0.88,
+      "p25": 0.08,
+      "p75": 1.41,
+      "elite": 2.27
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "D2",
+      "median": 0.93,
+      "p25": 0.1,
+      "p75": 1.46,
+      "elite": 2.33
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "D3",
+      "median": 0.98,
+      "p25": 0.14,
+      "p75": 1.54,
+      "elite": 2.4
+    },
+    {
+      "metric": "saves",
+      "playlist": "STANDARD",
+      "rank_tier": "C1",
+      "median": 1.03,
+      "p25": 0.17,
+      "p75": 1.64,
+      "elite": 2.46
     },
     {
       "metric": "saves",
@@ -138,12 +588,102 @@
     {
       "metric": "saves",
       "playlist": "STANDARD",
-      "rank_tier": "GC1",
+      "rank_tier": "GC",
       "median": 1.22,
       "p25": 0.3,
       "p75": 1.94,
       "elite": 2.85,
       "notes": "Ballchasing groups every Grand Champion tier, so this row combines GC1 through SSL."
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "G1",
+      "median": 1.53,
+      "p25": 0.4,
+      "p75": 2.22,
+      "elite": 3.23
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "G2",
+      "median": 1.61,
+      "p25": 0.49,
+      "p75": 2.35,
+      "elite": 3.38
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "G3",
+      "median": 1.68,
+      "p25": 0.55,
+      "p75": 2.44,
+      "elite": 3.49
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "P1",
+      "median": 1.77,
+      "p25": 0.64,
+      "p75": 2.59,
+      "elite": 3.69
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "P2",
+      "median": 1.82,
+      "p25": 0.69,
+      "p75": 2.68,
+      "elite": 3.8
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "P3",
+      "median": 1.89,
+      "p25": 0.75,
+      "p75": 2.77,
+      "elite": 3.91
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "D1",
+      "median": 1.95,
+      "p25": 0.79,
+      "p75": 2.86,
+      "elite": 4.0
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "D2",
+      "median": 1.99,
+      "p25": 0.84,
+      "p75": 2.92,
+      "elite": 4.05
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "D3",
+      "median": 2.06,
+      "p25": 0.89,
+      "p75": 3.01,
+      "elite": 4.16
+    },
+    {
+      "metric": "shots",
+      "playlist": "STANDARD",
+      "rank_tier": "C1",
+      "median": 2.16,
+      "p25": 0.97,
+      "p75": 3.13,
+      "elite": 4.28
     },
     {
       "metric": "shots",
@@ -166,7 +706,7 @@
     {
       "metric": "shots",
       "playlist": "STANDARD",
-      "rank_tier": "GC1",
+      "rank_tier": "GC",
       "median": 2.47,
       "p25": 1.23,
       "p75": 3.46,
