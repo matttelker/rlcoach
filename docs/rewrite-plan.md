@@ -21,8 +21,8 @@ Lines still written by the original author, by `git blame -w -M -C`:
 
 | | Before (2026-11-07) | After phase 1 | After phase 2 | After phase 3 | After phase 4 (2026-11-08) |
 | --- | --- | --- | --- | --- | --- |
-| `src/` and `parsers/` | 22,916 of 27,884 (82%) | 14,260 of 19,292 (74%) | 10,456 of 16,741 (62%) | 4,972 of 11,706 (42%) | 1,178 of 9,560 (12%) |
-| `tests/` | 18,480 of 23,594 (78%) | 10,784 of 15,758 (68%) | 6,544 of 12,947 (51%) | 1,291 of 7,450 (17%) | 398 of 7,345 (5%) |
+| `src/` and `parsers/` | 22,916 of 27,884 (82%) | 14,260 of 19,292 (74%) | 10,456 of 16,741 (62%) | 4,972 of 11,706 (42%) | 1,166 of 9,794 (12%) |
+| `tests/` | 18,480 of 23,594 (78%) | 10,784 of 15,758 (68%) | 6,544 of 12,947 (51%) | 1,291 of 7,450 (17%) | 398 of 7,409 (5%) |
 | `gui/src/` | 1,074 of 3,792 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,054 of 3,772 (28%) | 1,053 of 4,575 (23%) |
 
 The counts leave out the benchmark data files in `src/rlcoach/data/`. Kickoff coaching came between phases 3 and 4, so `main` before phase 4 stood at 4,972 of 12,555 (40%) in `src/` and `parsers/`, and 1,291 of 8,125 (16%) in `tests/`, and the dashboard's new lines are its, not phase 4's. Blame still gives him 639 of the 2,451 lines in the files phase 2 rewrote: lines that came out the same character for character, such as imports, the config's field names, and the API's parameters and response fields, which the dashboard depends on. In the files phase 3 rewrote it gives him 393 of 1,649, nearly all blank lines, closing brackets, docstring quotes and import lines. In the files phase 4 rewrote it gives him 155 of 2,041: blank lines, closing braces, imports, and the field names in `parser/types.py`, which normalize, the events and the stats read.
@@ -77,7 +77,7 @@ Keeping them is small. One game has about 160 touches, 20 challenges, 4 demos an
 
 One use: "Do you lose more 50/50s in your own half when you're last back, and is that getting better?" Each challenge already has its location, depth, both players and the winner, so with them stored this is one query over every game, which Claude can answer in chat and the Coach page could chart.
 
-Phase 3 has rewritten `events/` and left every event as it was, so the definitions are settled. The review still finds contacts its own way (`find_contacts` in `mistakes.py`), apart from the touches.
+Phase 3 rewrote `events/`, and since phase 4 the touches are the game's own and the review's contacts are those touches, so the definitions are settled.
 
 Kickoffs are stored since kickoff coaching (2026-11-07): `review_kickoffs` and `review_kickoff_cars` hold every car's kickoffs with each review, and `rlcoach reviews --redo` fills them in. They went with the review rather than the game because `ingest` skips a stored game, so only the review could fill in the games already loaded. The other kinds could follow the same way.
 
@@ -131,3 +131,30 @@ Checked:
 - Reloading all 42 games into scratch homes, on `main` and on the new code, gave the same value in every shared column of `replays`, `players`, `player_game_stats`, `game_reviews`, `review_mistakes`, `review_goals`, `review_kickoffs` and `review_kickoff_cars`. `main`'s reload matched the live database exactly.
 - Every endpoint the dashboard calls, 228 calls in all, gave the same response on `main` and on the new code against a copy of the real database, apart from `/health`'s timestamp.
 - `tests/analysis/test_ballchasing_parity.py` and every check in `AGENTS.md` pass.
+
+### What changed on purpose (2026-11-09)
+
+After the rewrite you asked for four changes. Each changes stored data, so the live database needs every game loaded again.
+
+- **Player ids.** Every PlayStation, Xbox and Switch player was stored as `steam:<id>`, and one whose header row had no `PlayerID` as `onlineplatform_dingo:<id>`, so one Xbox player could have two ids. Each player now has one account under their own platform: `steam`, `epic`, `psn`, `xbox` or `switch`. 134 of the 180 players' ids change. Your one teammate tag, on LlamaTaboot8416, is on `steam:2533274833789272`, which becomes `xbox:2533274833789272`, so the reload has to carry it over.
+- **Team size** is the header's `TeamSize`, where it was the bigger team's count of rows, which leave out leavers. A 3v3 that both teams finished a player short read as a 2v2. The two agree on all 42 games.
+- **Touches are the game's own.** The parser hands over each player's touch count (`BallTouches`), which says who touched the ball and how often but rises up to a second late, and the ball's `HitTeamNum`, the team that touched it last, sent on the frame of the touch. `events/touches.py` places each counted touch with the ball (see [docs/parser.md](parser.md)). The 200 uu rule and the review's own contacts are gone: the review's contacts are the touches, and its last-touch team is the ball's. Against the ball's record, a touch by that team lands within 0.1 s of 98.9% of its changes of team, where the old contacts managed 90.4%. The touches' last-touch team matches the ball's on 97.0% of frames, against 90.1%, and they match the game's count of each player's touches, which the old contacts missed by 5.8 a player a game. Three of the 42 games are from before the count and get touches from the kicks alone, as the review did, with the ball's team in place of the 200 uu hint.
+- **50/50 scrambles.** A third touch straight after a 50/50 made it nobody's. Now a quick run of touches is one scramble, won by the team that touched last.
+
+What that changed, reloading all 42 games on `main` and on the new code, with `main`'s ids translated: `replays`, `player_game_stats`, `review_kickoffs` and `review_kickoff_cars` are the same, and `players` differs only in the platform and the teammate tag. In the reviews:
+
+| | `main` | Now |
+| --- | --- | --- |
+| Flagged moments | 149 | 150 |
+| Lost 50/50s on low boost | 12 | 13 |
+| Double commits | 15 | 13 |
+| Clears given back | 33 | 34 |
+| Missed clears | 6 | 7 |
+| Your touch turned it in | 3 | 4 |
+| Last back and upfield | 9 | 8 |
+| Clears counted | 205 | 222 |
+| Goals put on you | 35 | 36 |
+
+Every changed call checked by hand against the game's count and the ball's team agrees with the new code. Of the 50/50s on low boost only `main` flagged, in 3 you never touched the ball, in 2 the ball shows your team touched last, and 1 is from a game before the count. Each one only the new code flags in a game with the count shows you touching and an opponent last on the ball. Three goal reviews had a teammate turning the ball in, or you getting a touch on it, where the count shows they never touched it. A clear `main` said went straight to Incursion2169 in E561 had a touch by your teammate Jeyker09 in between, which the old contacts missed.
+
+Reloading all 42 games took 37.7 s. The suite, the Rust tests and every check in `AGENTS.md` pass.
