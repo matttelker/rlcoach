@@ -19,7 +19,7 @@ from tests.api.stored_games import (
     store,
 )
 
-WIN_STATS = {"goals": 3, "saves": 1, "bcpm": 400.0, "avg_boost": 60.0}
+WIN_STATS = {"goals": 3, "saves": 1, "epic_saves": 1, "bcpm": 400.0, "avg_boost": 60.0}
 LOSS_STATS = {"goals": 0, "saves": 1, "bcpm": 300.0, "avg_boost": 60.0}
 
 
@@ -67,6 +67,12 @@ def test_trends_carry_your_ranks_median_when_it_has_one(client):
     assert client.get("/trends?metric=saves").json()["rank_median"] is None
     doubles = client.get("/trends?metric=goals&playlist=DOUBLES").json()
     assert doubles["rank_median"] is None
+
+
+def test_trends_chart_the_games_own_counts_without_a_rank_median(client):
+    body = client.get("/trends?metric=epic_saves").json()
+    assert sorted(v["value"] for v in body["values"]) == [0] * 6 + [1] * 6
+    assert body["rank_median"] is None
 
 
 def test_trends_skip_games_without_the_stat_and_refuse_unknown_ones(client):
