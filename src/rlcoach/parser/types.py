@@ -19,6 +19,7 @@ __all__ = [
     "PlayerFrame",
     "PlayerInfo",
     "Quaternion",
+    "TouchCount",
     "Vec3",
 ]
 
@@ -78,6 +79,11 @@ class PlayerFrame:
     angular_velocity: Vec3 = Vec3(0.0, 0.0, 0.0)  # Radians a second
     quaternion: Quaternion | None = None  # None until the car sends its rotation
     is_demolished: bool = False
+    # Whether the car is jumping or flipping, from the game itself. A jump lasts
+    # about 0.1 s and a flip, from its start until it's done, about 0.7 s
+    is_jumping: bool = False
+    is_double_jumping: bool = False
+    is_dodging: bool = False
 
 
 @dataclass(frozen=True)

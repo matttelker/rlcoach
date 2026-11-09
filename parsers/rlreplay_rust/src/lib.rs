@@ -132,6 +132,11 @@ fn frame_dict<'py>(py: Python<'py>, frame: &FrameOut) -> PyResult<Bound<'py, PyD
             rotation.map(|[x, y, z, w]| (x, y, z, w)),
             car.boost,
             car.demolished,
+            (
+                car.controls.jumping,
+                car.controls.double_jumping,
+                car.controls.dodging,
+            ),
         )
     });
     dict.set_item(intern!(py, "cars"), PyList::new(py, cars)?)?;

@@ -1,6 +1,6 @@
 //! Walk a replay's network frames and say, for each one, where the ball and every
-//! player's car are, and what happened: pickups, flips, touches, first touches and
-//! demolitions.
+//! player's car are, whether each car is jumping or flipping, and what happened:
+//! pickups, flips, touches, first touches and demolitions.
 //!
 //! A frame only carries what changed, so the walk keeps every actor's last state.
 //! Actors are told apart by the object they were made from, and attributes by name.
@@ -28,6 +28,8 @@ const BOOST_AMOUNT: &str = "TAGame.CarComponent_Boost_TA:ReplicatedBoostAmount";
 const FIRST_TOUCHES: &str = "TAGame.PRI_TA:MatchFirstTouches";
 const BALL_TOUCHES: &str = "TAGame.PRI_TA:BallTouches";
 const HIT_TEAM: &str = "TAGame.Ball_TA:HitTeamNum";
+/// A car component in use: jumping, flipping and so on.
+const ACTIVE: &str = "TAGame.CarComponent_TA:ReplicatedActive";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
@@ -38,6 +40,32 @@ enum Kind {
     /// A player's replicated info.
     Pri,
     Other,
+}
+
+/// The car components whose use the walk passes on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Part {
+    Jump,
+    DoubleJump,
+    Dodge,
+}
+
+fn part_of(object_name: &str) -> Option<Part> {
+    match object_name.strip_prefix("Archetypes.CarComponents.CarComponent_")? {
+        "Jump" => Some(Part::Jump),
+        "DoubleJump" => Some(Part::DoubleJump),
+        "Dodge" => Some(Part::Dodge),
+        _ => None,
+    }
+}
+
+/// Whether a car is in the air of its own doing in one frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Controls {
+    pub jumping: bool,
+    pub double_jumping: bool,
+    /// Flipping, from the dodge starting until the flip is done.
+    pub dodging: bool,
 }
 
 fn kind_of(object_name: &str) -> Kind {
@@ -80,6 +108,7 @@ pub struct CarFrame {
     /// 0 to 100.
     pub boost: i64,
     pub demolished: bool,
+    pub controls: Controls,
 }
 
 /// One network frame, with the players by row.
@@ -114,6 +143,10 @@ pub struct Game<'a> {
     cars: BTreeMap<i32, Car>,
     /// Each component's car.
     component_car: HashMap<i32, i32>,
+    /// What each component does, for the ones whose use is passed on.
+    parts: HashMap<i32, Part>,
+    /// The components in use.
+    active: HashSet<i32>,
     ball: Option<i32>,
     ball_position: Spot,
     ball_velocity: Spot,
@@ -137,6 +170,7 @@ struct Attributes {
     first_touches: Option<usize>,
     ball_touches: Option<usize>,
     hit_team: Option<usize>,
+    active: Option<usize>,
 }
 
 impl Attributes {
@@ -151,6 +185,7 @@ impl Attributes {
             first_touches: id(FIRST_TOUCHES),
             ball_touches: id(BALL_TOUCHES),
             hit_team: id(HIT_TEAM),
+            active: id(ACTIVE),
         }
     }
 }
@@ -199,6 +234,8 @@ impl<'a> Game<'a> {
             kinds: HashMap::new(),
             cars: BTreeMap::new(),
             component_car: HashMap::new(),
+            parts: HashMap::new(),
+            active: HashSet::new(),
             ball: None,
             ball_position: BALL_AT_REST,
             ball_velocity: (0.0, 0.0, 0.0),
@@ -241,6 +278,8 @@ impl<'a> Game<'a> {
         self.kinds.remove(&actor);
         self.component_car
             .retain(|component, car| *component != actor && *car != actor);
+        self.parts.remove(&actor);
+        self.active.remove(&actor);
         self.pads.remove_actor(actor);
     }
 
@@ -252,6 +291,11 @@ impl<'a> Game<'a> {
             Kind::Car => {
                 self.cars.entry(actor).or_default();
                 self.roster.add_car(actor);
+            }
+            Kind::Component => {
+                if let Some(part) = part_of(object_name) {
+                    self.parts.insert(actor, part);
+                }
             }
             _ => {}
         }
@@ -340,6 +384,14 @@ impl<'a> Game<'a> {
                     events.touches.push((actor, *count - seen));
                 }
             }
+            Attribute::Byte(state) if attribute == names.active => {
+                // The byte counts each use and each stop, so odd means in use
+                if state % 2 == 1 {
+                    self.active.insert(actor);
+                } else {
+                    self.active.remove(&actor);
+                }
+            }
             Attribute::PickupNew(pickup) => {
                 let car = pickup.instigator.map(|car| self.car_of(i32::from(car)));
                 let at = car
@@ -422,7 +474,25 @@ impl<'a> Game<'a> {
     }
 
     /// The frame as the rest of the code reads it, once every update is in.
+    /// What each car is doing, from its components in use.
+    fn controls(&self) -> HashMap<i32, Controls> {
+        let mut controls: HashMap<i32, Controls> = HashMap::new();
+        for component in &self.active {
+            let Some(part) = self.parts.get(component) else {
+                continue;
+            };
+            let car = controls.entry(self.car_of(*component)).or_default();
+            match part {
+                Part::Jump => car.jumping = true,
+                Part::DoubleJump => car.double_jumping = true,
+                Part::Dodge => car.dodging = true,
+            }
+        }
+        controls
+    }
+
     fn finish(&mut self, time: f32, events: Events) -> FrameOut {
+        let controls = self.controls();
         let mut cars: BTreeMap<usize, CarFrame> = BTreeMap::new();
         let actors: Vec<i32> = self.cars.keys().copied().collect();
         for actor in actors {
@@ -452,6 +522,7 @@ impl<'a> Game<'a> {
                     rotation: car.rotation,
                     boost: car.boost.unwrap_or(KICKOFF_BOOST),
                     demolished: car.demolished,
+                    controls: controls.get(&actor).copied().unwrap_or_default(),
                 },
             );
         }
@@ -519,9 +590,11 @@ mod tests {
     const COMPONENT: i32 = 2;
     const PRI: i32 = 3;
     const PAD: i32 = 4;
+    const JUMP: i32 = 6;
     const BALL_OBJECT: &str = "Archetypes.Ball.Ball_Default";
     const CAR_OBJECT: &str = "Archetypes.Car.Car_Default";
     const COMPONENT_OBJECT: &str = "Archetypes.CarComponents.CarComponent_Boost";
+    const JUMP_OBJECT: &str = "Archetypes.CarComponents.CarComponent_Jump";
     const PRI_OBJECT: &str = "TAGame.Default__PRI_TA";
     const PAD_OBJECT: &str = "Stadium_P.TheWorld:PersistentLevel.VehiclePickup_Boost_TA_1";
     const RIGID_BODY: &str = "TAGame.RBActor_TA:ReplicatedRBState";
@@ -547,6 +620,7 @@ mod tests {
                 BALL_OBJECT,
                 CAR_OBJECT,
                 COMPONENT_OBJECT,
+                JUMP_OBJECT,
                 PRI_OBJECT,
                 PAD_OBJECT,
                 PLAYER_NAME,
@@ -556,6 +630,7 @@ mod tests {
                 FIRST_TOUCHES,
                 BALL_TOUCHES,
                 HIT_TEAM,
+                ACTIVE,
                 RIGID_BODY,
                 BOOST,
                 PICKUP,
@@ -734,6 +809,46 @@ mod tests {
             .set(BALL, HIT_TEAM, Attribute::Byte(255));
         let teams: Vec<_> = script.run().iter().map(|f| f.hit_team).collect();
         assert_eq!(teams, vec![None, Some(1), Some(1), None]);
+    }
+
+    #[test]
+    fn a_car_is_jumping_while_its_jump_is_in_use() {
+        let mut script = Script::new();
+        script
+            .kickoff()
+            .spawn(JUMP, JUMP_OBJECT)
+            .link(JUMP, COMPONENT_CAR, CAR)
+            // The boost component's use isn't passed on
+            .set(COMPONENT, ACTIVE, Attribute::Byte(1))
+            .frame(0.1)
+            .set(JUMP, ACTIVE, Attribute::Byte(1))
+            .frame(0.2)
+            .set(JUMP, ACTIVE, Attribute::Byte(2))
+            .frame(0.3)
+            .set(JUMP, ACTIVE, Attribute::Byte(3))
+            .frame(0.4)
+            .delete(JUMP);
+        let jumping: Vec<_> = script.run().iter().map(|f| f.cars[0].controls).collect();
+        let on = Controls {
+            jumping: true,
+            ..Controls::default()
+        };
+        let off = Controls::default();
+        assert_eq!(jumping, vec![off, on, off, on, off]);
+    }
+
+    #[test]
+    fn components_are_told_apart_by_what_they_do() {
+        assert_eq!(part_of(JUMP_OBJECT), Some(Part::Jump));
+        let double = "Archetypes.CarComponents.CarComponent_DoubleJump";
+        assert_eq!(part_of(double), Some(Part::DoubleJump));
+        let dodge = "Archetypes.CarComponents.CarComponent_Dodge";
+        assert_eq!(part_of(dodge), Some(Part::Dodge));
+        assert_eq!(part_of(COMPONENT_OBJECT), None);
+        assert_eq!(
+            part_of("Archetypes.CarComponents.CarComponent_FlipCar"),
+            None
+        );
     }
 
     #[test]

@@ -74,7 +74,8 @@ class _Timeline:
         return 0.0 if abs(shifted) < 1e-6 else shifted
 
     def car(self, raw: tuple) -> PlayerFrame:
-        row, team, position, velocity, spin, rotation, boost, demolished = raw
+        row, team, position, velocity, spin, rotation, boost, demolished, using = raw
+        jumping, double_jumping, dodging = using
         player_id = self.player(row)
         return PlayerFrame(
             player_id=player_id,
@@ -85,6 +86,9 @@ class _Timeline:
             angular_velocity=Vec3(*spin),
             quaternion=None if rotation is None else Quaternion(*rotation),
             is_demolished=demolished,
+            is_jumping=jumping,
+            is_double_jumping=double_jumping,
+            is_dodging=dodging,
         )
 
     def frame(self, raw: Raw) -> Frame:

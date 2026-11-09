@@ -33,13 +33,34 @@ def test_every_header_player_has_a_car_in_every_frame():
 
 
 def test_a_car_has_its_team_motion_rotation_and_boost():
-    row, team, position, velocity, spin, rotation, boost, demolished = _frames(
+    row, team, position, velocity, spin, rotation, boost, demolished, using = _frames(
         real_replays.REGULATION
     )[3000]["cars"][0]
     assert (row, team) == (0, 1)
     assert all(len(v) == 3 for v in (position, velocity, spin))
     assert math.isclose(sum(q * q for q in rotation), 1.0, abs_tol=1e-3)
     assert 0 <= boost <= 100 and isinstance(demolished, bool)
+    assert len(using) == 3 and all(isinstance(state, bool) for state in using)
+
+
+def test_cars_say_when_they_jump_double_jump_and_flip():
+    frames = _frames(real_replays.REGULATION)
+    starts = [0, 0, 0]
+    flips_seen = 0
+    last: dict[int, tuple[bool, ...]] = {}
+    for index, frame in enumerate(frames):
+        for car in frame["cars"]:
+            row, using = car[0], car[8]
+            was = last.get(row, (False, False, False))
+            for state in range(3):
+                starts[state] += using[state] and not was[state]
+            if using[2] and not was[2]:
+                nearby = frames[max(0, index - 2) : index + 3]
+                flips_seen += any(r == row for f in nearby for r, _ in f["dodges"])
+            last[row] = using
+    assert starts == [246, 29, 179]  # Jumps, double jumps and flips
+    # A flip's start comes with the flip the game sends, but for five
+    assert flips_seen == 174
 
 
 def test_spin_is_in_radians_a_second():

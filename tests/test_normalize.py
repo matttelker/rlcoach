@@ -18,8 +18,9 @@ STILL = (0.0, 0.0, 0.0)
 
 
 def _car(row=0, team=0, *, position=(0.0, 0.0, 17.0), velocity=STILL, spin=STILL,
-         rotation=LEVEL, boost=33, demolished=False):  # fmt: skip
-    return (row, team, position, velocity, spin, rotation, boost, demolished)
+         rotation=LEVEL, boost=33, demolished=False,
+         using=(False, False, False)):  # fmt: skip
+    return (row, team, position, velocity, spin, rotation, boost, demolished, using)
 
 
 def _frame(t, cars=(), ball=((0.0, 0.0, 93.15), STILL), **events):
@@ -137,4 +138,13 @@ def test_pickups_keep_their_own_time_and_team():
         THEM,
         None,
         0.25,
+    )
+
+
+def test_cars_say_when_they_jump_double_jump_and_flip():
+    [car] = _one(_car(using=(True, False, True))).players
+    assert (car.is_jumping, car.is_double_jumping, car.is_dodging) == (
+        True,
+        False,
+        True,
     )

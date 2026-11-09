@@ -23,7 +23,7 @@ A replay the parser can't read raises: `OSError` for a file it can't open, `Valu
 
 ## The frames
 
-`read_frames` gives one dict per network frame, in order. `read_frames`' docstring has the fields. In short: the time, the ball and the team that touched it last, each player's car, and the frame's pickups, flips, touches, first touches and demolitions.
+`read_frames` gives one dict per network frame, in order. `read_frames`' docstring has the fields. In short: the time, the ball and the team that touched it last, each player's car and whether it's jumping or flipping, and the frame's pickups, flips, touches, first touches and demolitions.
 
 ### Players are header rows
 
@@ -37,7 +37,9 @@ Every car is named by a row number: its player's row in `PlayerStats`, or a numb
 
 ### What a car carries
 
-Position, velocity, angular velocity in radians a second, rotation as a quaternion, boost from 0 to 100, and whether it's demolished. A car is listed once it has sent its position, its boost or its team. Until then it isn't on the field. Before it sends its boost it holds 33, the kickoff amount.
+Position, velocity, angular velocity in radians a second, rotation as a quaternion, boost from 0 to 100, whether it's demolished, and whether it's jumping, double jumping or flipping. A car is listed once it has sent its position, its boost or its team. Until then it isn't on the field. Before it sends its boost it holds 33, the kickoff amount.
+
+The jump, double jump and dodge components each send `ReplicatedActive`, a byte that goes up by one when the car starts using it and again when it stops, so an odd byte is in use. A component points at its car through `CarComponent_TA:Vehicle`. On your 42 games a jump lasts a median 0.11 s, a double jump 0.11 s and a flip 0.66 s, and 95% of flips start within two frames of a `DodgeTorque`. A few states stay on for seconds, up to 11 s, so read when one starts, not that it's on.
 
 ### Pickups
 
@@ -59,4 +61,10 @@ Pads never send where they are, only `NewReplicatedPickupData`: the car that too
 
 ## What it leaves out
 
-Normalize and the code after it read only the fields above. The parser doesn't read the cars' inputs, their jump, double jump, flip and boost components' `ReplicatedActive` flags, the ball's spin, the camera settings, loadouts, the game's stat events, the replay's tick marks, or the game's other counters for each player, such as `MatchShots`, `MatchSaves`, `MatchClears`, `MatchCenters` and `MatchAerialHits`. Reading one means adding it to `game.rs`, the frame dict in `lib.rs`, and normalize.
+Normalize and the code after it read only the fields above. The parser doesn't read the cars' inputs, the boost and flip-car components' `ReplicatedActive`, the ball's spin, the camera settings, loadouts, the game's stat events, the replay's tick marks, `bBallHasBeenHit`, or the game's other counters for each player, such as `MatchShots`, `MatchSaves`, `MatchEpicSaves`, `MatchClears`, `MatchCenters` and `MatchAerialHits`. Reading one means adding it to `game.rs`, the frame dict in `lib.rs`, and normalize.
+
+Measured on your 42 games (2026-11-09), for when something wants them:
+
+- The boost component's `ReplicatedActive` is the boost being held. Of 21,760 drops in a tank, 18 came with it off, and a burst's length at 33.3 a second predicts what it spent (median 0.99). Summed over a game it gives boost used within 4% of Ballchasing's. Ballchasing's boost used while supersonic can't be matched: it charges each drop to the car's speed on the frame the tank replicates, at the end of the burst, so it reads 0.45 to 3.1 times the boost held there on the three exported games.
+- The counters are in all 42 games, older ones too, and match Ballchasing's shots, saves, epic saves, clears, centers and aerial hits exactly on the 18 players of the three exported games. Like `BallTouches` they rise after the touch: saves a median 0.5 s after, aerial hits 0.4 s, clears 1.0 s, shots 0.9 s and centers 1.7 s. The game's clear is a touch from deep in front of your goal (a median 40 m from halfway), which is narrower than the review's clears from your half: 75 of yours against the review's 229.
+- `bBallHasBeenHit` first goes true on the frame `events/kickoffs.py` already takes as each kickoff's contact, on all 274 kickoffs, and is sent again many times after.

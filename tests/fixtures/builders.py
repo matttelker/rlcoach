@@ -28,6 +28,9 @@ def create_test_player(
     quaternion: Quaternion | None = None,
     boost: float = 50.0,
     is_demolished: bool = False,
+    is_jumping: bool = False,
+    is_double_jumping: bool = False,
+    is_dodging: bool = False,
 ) -> PlayerFrame:
     """A car, still on the ground at the centre spot unless told otherwise."""
     return PlayerFrame(
@@ -39,6 +42,9 @@ def create_test_player(
         angular_velocity=angular_velocity or STILL,
         quaternion=quaternion,
         is_demolished=is_demolished,
+        is_jumping=is_jumping,
+        is_double_jumping=is_double_jumping,
+        is_dodging=is_dodging,
     )
 
 
