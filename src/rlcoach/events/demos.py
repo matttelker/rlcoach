@@ -7,26 +7,24 @@ and it fills in the attacker if the first left it out.
 
 from __future__ import annotations
 
-from ..parser.types import Frame, Vec3
+from ..parser.types import Frame
 from .types import DemoEvent, distance
 
 REPEAT_WINDOW_S = 5.0
 REPEAT_REACH_UU = 200.0
 
 
-def _is_repeat(
-    earlier: DemoEvent, where_then: Vec3 | None, later: DemoEvent, where: Vec3 | None
-) -> bool:
+def _is_repeat(earlier: DemoEvent, later: DemoEvent) -> bool:
     if later.t - earlier.t > REPEAT_WINDOW_S:
         return False
-    if where_then is None or where is None:
+    if earlier.location is None or later.location is None:
         return True
-    return distance(where_then, where) <= REPEAT_REACH_UU
+    return distance(earlier.location, later.location) <= REPEAT_REACH_UU
 
 
 def detect_demos(frames: list[Frame]) -> list[DemoEvent]:
-    """Each demolition once, in time order."""
-    demos: list[tuple[DemoEvent, Vec3 | None]] = []
+    """Each demolition once, in time order, where the victim's car was."""
+    demos: list[DemoEvent] = []
     seen: set[tuple[float, str]] = set()
     last_of: dict[str, int] = {}  # Each victim's latest demo, by index in demos
     for frame in frames:
@@ -35,16 +33,18 @@ def detect_demos(frames: list[Frame]) -> list[DemoEvent]:
             if key in seen:
                 continue
             seen.add(key)
-            demo = DemoEvent(
-                t=event.timestamp, victim=event.victim_id, attacker=event.attacker_id
-            )
             car = frame.get_player_by_id(event.victim_id)
-            where = car.position if car else None
+            demo = DemoEvent(
+                t=event.timestamp,
+                victim=event.victim_id,
+                attacker=event.attacker_id,
+                location=car.position if car else None,
+            )
             earlier = last_of.get(demo.victim)
-            if earlier is not None and _is_repeat(*demos[earlier], demo, where):
-                if demos[earlier][0].attacker is None and demo.attacker is not None:
-                    demos[earlier] = (demo, where)
+            if earlier is not None and _is_repeat(demos[earlier], demo):
+                if demos[earlier].attacker is None and demo.attacker is not None:
+                    demos[earlier] = demo
                 continue
             last_of[demo.victim] = len(demos)
-            demos.append((demo, where))
-    return sorted((demo for demo, _ in demos), key=lambda demo: demo.t)
+            demos.append(demo)
+    return sorted(demos, key=lambda demo: demo.t)

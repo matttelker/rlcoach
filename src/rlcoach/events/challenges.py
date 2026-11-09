@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..field_constants import Vec3
 from ..parser.types import Frame
 from .types import ChallengeEvent, TouchEvent, distance, team_name
 
@@ -56,12 +57,14 @@ def detect_challenges(
             last += 1
         winner = team_name(teams[ordered[last].player_id])
         step = last - i + 1
+        a, b = first.location, second.location
         challenges.append(
             ChallengeEvent(
                 t=(first.t + second.t) / 2.0,
                 first_player=first.player_id,
                 second_player=second.player_id,
                 winner_team=winner,
+                location=Vec3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2),
             )
         )
         i += step

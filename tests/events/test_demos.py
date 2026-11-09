@@ -52,3 +52,19 @@ def test_a_demo_elsewhere_or_later_is_a_new_one():
 def test_the_same_report_twice_counts_once():
     frames = [_frame(2.0, HERE, _demo(2.0, "attacker"), _demo(2.0, "attacker"))]
     assert len(_found(frames)) == 1
+
+
+def test_a_demo_is_where_the_victims_car_was():
+    [demo] = detect_demos([_frame(2.0, HERE, _demo(2.0, "attacker"))])
+    assert demo.location == HERE
+
+
+def test_a_repeat_that_fills_in_the_attacker_is_where_its_report_saw_the_car():
+    nearby = Vec3(600.0, 0.0, 17.0)
+    frames = [_frame(2.0, HERE, _demo(2.0)), _frame(4.0, nearby, _demo(4.0, "a"))]
+    assert [(d.attacker, d.location) for d in detect_demos(frames)] == [("a", nearby)]
+
+
+def test_a_demo_of_a_car_the_frame_doesnt_show_has_no_location():
+    frame = create_test_frame(2.0, [], demos=[_demo(2.0, "attacker")])
+    assert [d.location for d in detect_demos([frame])] == [None]

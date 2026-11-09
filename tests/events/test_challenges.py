@@ -61,3 +61,10 @@ def test_teammates_too_late_too_close_too_far_or_too_slow_are_no_5050():
 
 def test_a_player_the_frames_never_show_is_in_no_5050():
     assert _found(_touch(1.0, "blue", 0.0), _touch(1.4, "ghost", 500.0)) == []
+
+
+def test_a_5050_is_midway_between_the_two_cars():
+    [challenge] = detect_challenges(
+        FRAMES, [_touch(1.0, "blue", 0.0), _touch(1.4, "orange", 500.0)]
+    )
+    assert challenge.location == Vec3(250.0, 0.0, 17.0)

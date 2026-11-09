@@ -51,19 +51,23 @@ class ChallengeEvent:
     """Two opponents touching the ball one after the other: a 50/50.
 
     The winner is the team of the second touch, or of the last in a scramble of
-    touches straight after it.
+    touches straight after it. The location is midway between the two cars at
+    their touches.
     """
 
     t: float
     first_player: str
     second_player: str
     winner_team: str | None
+    location: Vec3 | None = None
 
 
 @dataclass(frozen=True)
 class DemoEvent:
-    """A demolition. The game doesn't always say who did it."""
+    """A demolition, and where the victim's car was. The game doesn't always say
+    who did it."""
 
     t: float
     victim: str
     attacker: str | None = None
+    location: Vec3 | None = None
