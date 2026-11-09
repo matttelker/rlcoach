@@ -32,6 +32,10 @@ EXACT = [
     ("shooting percentage", "shooting_pct"),
     ("demos inflicted", "demos_inflicted"),
     ("demos taken", "demos_taken"),
+    ("epic saves", "epic_saves"),
+    ("clears", "clears"),
+    ("centers", "centers"),
+    ("aerial hits", "aerial_hits"),
 ]
 
 # Largest allowed |ours / Ballchasing - 1|, set just above what we measure today

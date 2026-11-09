@@ -30,6 +30,10 @@ TREND_METRICS = (
     "behind_ball_pct",
     "demos_inflicted",
     "demos_taken",
+    "epic_saves",
+    "clears",
+    "centers",
+    "aerial_hits",
 )
 # The stats that have benchmarks
 COMPARED_METRICS = ("bcpm", "avg_boost", "goals", "assists", "saves", "shots")

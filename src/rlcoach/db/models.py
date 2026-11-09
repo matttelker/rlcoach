@@ -96,6 +96,12 @@ class PlayerGameStats(Base):
     score: Mapped[int | None] = mapped_column(default=0)
     demos_inflicted: Mapped[int | None] = mapped_column(default=0)
     demos_taken: Mapped[int | None] = mapped_column(default=0)
+    # The game's own counts. Its clear is a touch from deep in front of your goal,
+    # narrower than the review's clears from your half in game_reviews
+    epic_saves: Mapped[int | None] = mapped_column(default=0)
+    clears: Mapped[int | None] = mapped_column(default=0)
+    centers: Mapped[int | None] = mapped_column(default=0)
+    aerial_hits: Mapped[int | None] = mapped_column(default=0)
 
     bcpm: Mapped[float | None]  # Boost used per minute, Ballchasing's BCPM
     avg_boost: Mapped[float | None]

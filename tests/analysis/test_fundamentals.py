@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from rlcoach.analysis.fundamentals import fundamentals, shooting_pct
+from rlcoach.analysis.fundamentals import fundamentals, game_counts, shooting_pct
 from rlcoach.events.types import DemoEvent
-from rlcoach.parser.types import Header, PlayerInfo
+from rlcoach.parser.types import Header, PlayerInfo, StatCount
+from tests.fixtures.builders import create_test_frame
 
 HEADER = Header(
     players=[
@@ -70,3 +71,26 @@ def test_shooting_pct_is_a_share_of_shots_capped_at_100():
     assert shooting_pct(0, 0) == 0.0
     # A goal can count without a shot on the scoreboard
     assert shooting_pct(2, 1) == 100.0
+
+
+def test_the_games_counts_add_up_each_rise():
+    frames = [
+        create_test_frame(1.0, [], stat_counts=[StatCount("epic:me", "clear", 1)]),
+        create_test_frame(
+            2.0,
+            [],
+            stat_counts=[
+                StatCount("epic:me", "clear", 2),
+                StatCount("epic:me", "epic_save", 1),
+                StatCount("steam:1", "aerial_hit", 1),
+            ],
+        ),
+    ]
+    counts = game_counts(frames, {"epic:me": None, "steam:1": None})
+    assert counts["epic:me"] == {
+        "epic_saves": 1,
+        "clears": 3,
+        "centers": 0,
+        "aerial_hits": 0,
+    }
+    assert counts["steam:1"]["aerial_hits"] == 1

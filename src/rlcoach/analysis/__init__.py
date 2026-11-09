@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from .boost import boost_stats
-from .fundamentals import fundamentals
+from .fundamentals import fundamentals, game_counts
 from .movement import movement_stats
 from .positioning import positioning_stats
 from .tracks import player_tracks
@@ -31,6 +31,7 @@ def player_stats(game: Game, player_ids: Iterable[str]) -> dict[str, dict[str, A
     }
     sections = (
         fundamentals(game.header, game.demos, tracks),
+        game_counts(game.frames, tracks),
         boost_stats(game.frames, game.boost_pickups, tracks),
         movement_stats(game.frames, tracks),
         positioning_stats(game.frames, tracks),

@@ -1,17 +1,20 @@
-"""The scoreboard: goals, assists, saves, shots, score and demos.
+"""The scoreboard: goals, assists, saves, shots, score and demos, and the game's
+other counts: epic saves, clears, centers and aerial hits.
 
 The game records the scoreboard in the replay header, so those numbers are the
-game's own. Demos aren't on it, so they're counted from the demo events.
+game's own. Demos aren't on it, so they're counted from the demo events. The other
+counts come from the game too, as they rise during the match.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..events.types import DemoEvent
 from ..identity import build_player_identities
-from ..parser.types import Header
+from ..parser.types import Frame, Header
 
 # Each column, and the header stat that holds it
 SCOREBOARD = {
@@ -20,6 +23,15 @@ SCOREBOARD = {
     "saves": "Saves",
     "shots": "Shots",
     "score": "Score",
+}
+# Each column, and the game's count that holds it. The game's clear is a touch
+# from deep in front of your goal, much narrower than the review's clears from
+# your half
+GAME_COUNTS = {
+    "epic_saves": "epic_save",
+    "clears": "clear",
+    "centers": "center",
+    "aerial_hits": "aerial_hit",
 }
 
 
@@ -59,3 +71,20 @@ def fundamentals(
         row["demos_taken"] = sum(1 for d in demos if d.victim == player_id)
         result[player_id] = row
     return result
+
+
+def game_counts(
+    frames: Sequence[Frame], player_ids: Mapping[str, Any]
+) -> dict[str, dict[str, int]]:
+    """Each player's epic saves, clears, centers and aerial hits, as the game
+    counted them."""
+    totals: Counter[tuple[str, str]] = Counter()
+    for frame in frames:
+        for count in frame.stat_counts:
+            totals[count.player_id, count.stat] += count.count
+    return {
+        player_id: {
+            column: totals[player_id, stat] for column, stat in GAME_COUNTS.items()
+        }
+        for player_id in player_ids
+    }

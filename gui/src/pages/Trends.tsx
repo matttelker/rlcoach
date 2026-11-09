@@ -14,6 +14,10 @@ const METRIC_OPTIONS = [
   { value: 'assists', label: 'Assists' },
   { value: 'saves', label: 'Saves' },
   { value: 'shots', label: 'Shots' },
+  { value: 'epic_saves', label: 'Epic saves' },
+  { value: 'clears', label: 'Clears from in front of your goal' },
+  { value: 'centers', label: 'Centers' },
+  { value: 'aerial_hits', label: 'Aerial hits' },
 ];
 
 export function Trends() {
