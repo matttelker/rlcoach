@@ -25,6 +25,7 @@ The only users are the player, through the dashboard, and Claude, through chats 
 | Stored reviews, training targets and highlights | `src/rlcoach/db/reviews.py`, `src/rlcoach/coaching.py` |
 | Kickoff coaching: how you play kickoffs and the next step to learn | `src/rlcoach/kickoff_coaching.py`, `src/rlcoach/events/kickoffs.py` |
 | Your right or wrong grades on the review's calls | `src/rlcoach/db/grades.py` |
+| Each game's touches, 50/50s and demos, every car's, kept with its review for questions across games | `src/rlcoach/db/models.py`, `src/rlcoach/db/reviews.py` |
 | Your stats against your wins, losses and a rank | `src/rlcoach/compare.py` |
 | Database (SQLite, one file) | `src/rlcoach/db/` |
 | Local API (FastAPI) | `src/rlcoach/api/` |
@@ -131,7 +132,7 @@ The tests that read real replays use your own, which stay out of git. Point `RLC
 - Mirror new source modules with tests under `tests/`. Build synthetic data with `tests/fixtures/builders.py`.
 - `analysis/__init__.py` computes each player's stats, exactly the columns in `STAT_COLUMNS` in `db/games.py`. Add a stat only when the dashboard or the coaching will read it.
 - Changing database models or analysis means reloading replays, because `~/.rlcoach` holds results from the old code. There are no migrations. New tables are the exception: `init_db` creates them in an existing database.
-- After changing the mistake detector or the kickoff detector, run `uv run rlcoach reviews --redo` so stored reviews and kickoffs match the new rules. Each game's kickoffs, every car's, are stored with its review.
+- After changing the mistake detector or an event detector (touches, 50/50s, demos or kickoffs), run `uv run rlcoach reviews --redo` so stored reviews and events match the new rules. Each game's kickoffs, touches, 50/50s and demos, every car's, are stored with its review.
 - Keep analysis local. Nothing in the parser or analyzers may call the network.
 
 ## Git

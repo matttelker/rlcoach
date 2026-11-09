@@ -11,7 +11,7 @@ This started as a fork of treygoff24/rlcoach. That project has never had a licen
 
 ## Checking a phase
 
-1. Back up `~/.rlcoach/data`, reload every game on the new code, and compare every value in `replays`, `player_game_stats`, `game_reviews`, `review_mistakes`, `review_goals`, `review_kickoffs` and `review_kickoff_cars` with the backup. Anything that changed has to be explained.
+1. Back up `~/.rlcoach/data`, reload every game on the new code, and compare every value in `replays`, `player_game_stats`, `game_reviews`, `review_mistakes`, `review_goals`, `review_kickoffs`, `review_kickoff_cars`, `review_touches`, `review_challenges` and `review_demos` with the backup. Anything that changed has to be explained.
 2. Run `tests/analysis/test_ballchasing_parity.py`.
 3. Run every check in `AGENTS.md`.
 
@@ -69,17 +69,57 @@ Checked three ways:
 - Reloading all 42 games on the new code into a scratch home gave the same value in every shared column of `replays`, `players`, `player_game_stats`, `game_reviews`, `review_mistakes` and `review_goals` as the live database, and as a fresh reload on `main`. The only column gone is `replays.match_id`, which was empty in every row.
 - `tests/analysis/test_ballchasing_parity.py` and every check in `AGENTS.md` pass. The suite passes at every commit.
 
-## Proposal: keep each game's events (not built)
+## Keeping each game's events (done 2026-11-09)
 
-The database keeps each player's totals per game, the review's mistakes and every goal. The events behind them, each touch and challenge with its time, players and position, are thrown away after loading, so a question across games means parsing every replay again, about 7.3 s each.
+The database kept each player's totals per game, the review's mistakes, every goal and every kickoff. The touches, 50/50s and demos behind them were thrown away after loading, so a question across games meant reading every replay again. Now each review keeps them next to its kickoffs, and the question is one query.
 
-Keeping them is small. One game has about 160 touches, 20 challenges, 4 demos and 7 kickoffs, so 42 games come to about 8,000 rows, under a megabyte. A table per kind, written in the same transaction as the game, adds milliseconds to a load. Games loaded before it need one reload.
+- **Where.** `review_touches`, `review_challenges` and `review_demos` hang off the review, as `review_kickoffs` does, and `db/reviews.py` writes them with it. They went with the review rather than the game because `ingest` skips a stored game, so `rlcoach reviews --redo` fills them in for games already loaded, without a reload. A game the review doesn't support, the Hoops game, has none, as it has no kickoffs.
+- **What.** Every car's events, as the events give them, each on the game clock:
+  - A touch: its player and team, where the car was, and the ball's speed.
+  - A 50/50: both players, the team that won it (touched last, scramble included), and where it was, midway between the two cars at their touches. Phase 3 had dropped that midpoint from the event because nothing read it. It's back.
+  - A demo: the victim, the attacker when the game says, and where the victim's car was. The demo detector already looked that up to spot repeats, and now keeps it.
+  - One thing the events didn't have: whether each 50/50 player was their team's last back, meaning its car nearest its own goal, of those not demolished. That's how the goal review judges the last player back, and both now use one function.
+- **Size.** 41 games hold 6,360 touches, 741 50/50s and 144 demos, about 155, 18 and 3.5 a game. The database grows from 0.9 MB to 2.9 MB. Redoing all 42 reviews took 28 s.
+- Positions are in uu, with blue defending −y and orange +y. The table docstrings in `db/models.py` say how to tell a team's own half.
 
-One use: "Do you lose more 50/50s in your own half when you're last back, and is that getting better?" Each challenge already has its location, depth, both players and the winner, so with them stored this is one query over every game, which Claude can answer in chat and the Coach page could chart.
+Checked on a copy of the real database:
 
-Phase 3 rewrote `events/`, and since phase 4 the touches are the game's own and the review's contacts are those touches, so the definitions are settled.
+- After `rlcoach reviews --redo`, every column of every existing table (`replays`, `players`, `player_game_stats`, `game_reviews`, `review_mistakes`, `review_goals`, `review_kickoffs`, `review_kickoff_cars`, `review_grades` and `benchmarks`) is unchanged. A second redo stores the same events again.
+- The stored demos give every player's demos inflicted and taken in all 230 of their games. Each of the 13 "lost a 50/50 on low boost" flags has exactly one stored 50/50 of yours that the other team won, within 0.5 s after it.
+- Every check in `AGENTS.md` passes.
 
-Kickoffs are stored since kickoff coaching (2026-11-07): `review_kickoffs` and `review_kickoff_cars` hold every car's kickoffs with each review, and `rlcoach reviews --redo` fills them in. They went with the review rather than the game because `ingest` skips a stored game, so only the review could fill in the games already loaded. The other kinds could follow the same way.
+### The first question it answered
+
+"Do you lose more 50/50s in your own half when you're last back, and is that getting better?" This query lists your 50/50s, whether you lost, whether it was in your own half and whether you were last back:
+
+```sql
+select r.play_date, r.playlist,
+  c.winner_team != r.my_team as lost,
+  case r.my_team when 'ORANGE' then c.y else -c.y end > 0 as own_half,
+  case when c.first_player = r.my_player_id then c.first_last_back
+       else c.second_last_back end as last_back
+from review_challenges c
+join replays r using (replay_id)
+where r.my_player_id in (c.first_player, c.second_player)
+  and r.play_date >= '2026-01-01'
+  -- Leave out kickoffs: the review skips 3 s after a kickoff's first touch
+  and not exists (
+    select 1 from review_kickoffs k
+    where k.replay_id = c.replay_id
+      and c.t >= k.t and c.t < k.t + coalesce(k.time_to_first_touch, 0) + 3.0)
+```
+
+It leaves out the three games from before 2026 and the 93 50/50s at kickoffs, which sit on the halfway line. That leaves 172 in open play over 38 games:
+
+| Your 50/50s | Lost |
+| --- | --- |
+| In your half, last back | 9 of 18 (50%) |
+| In your half, a teammate further back | 30 of 58 (52%) |
+| In their half, last back | 8 of 9 (89%) |
+| In their half, a teammate further back | 43 of 87 (49%) |
+| All | 90 of 172 (52%) |
+
+So no. In your own half you lose them at your usual rate, last back or not. Whether that's getting better can't be told yet: you had 2 to 6 of them a day over five days. One cell stands out, though the question didn't ask about it: going in as last back in their half, you lost 8 of 9. They came from six games, three from one, eight in Doubles, and five were more than 20 m past halfway. Nine is few, and the cell was picked after looking, so it's one to watch rather than a finding. "Lost" here is the event's, the other team touched last. The review's low-boost flag also asks that the ball then head for your goal.
 
 ## Phase 3: the core the mistake detector stands on (done 2026-11-07)
 
