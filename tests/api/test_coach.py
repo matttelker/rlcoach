@@ -131,6 +131,7 @@ def client(config):
                 team="ORANGE",
                 is_me=True,
                 goals=mine,
+                epic_saves=1 if replay_id == "win" else 0,
             )
         )
     session.commit()
@@ -255,6 +256,12 @@ def test_coach_highlights_the_winner(client):
     winner = next(h for h in highlights if h["kind"] == "winner")
     assert winner["replay_id"] == "win"
     assert "0:50 left" in winner["detail"]
+
+
+def test_coach_highlights_an_epic_save(client):
+    highlights = client.get("/coach").json()["highlights"]
+    [save] = [h for h in highlights if h["kind"] == "epic_save"]
+    assert (save["title"], save["replay_id"]) == ("Epic save", "win")
 
 
 def test_coach_period_filters_old_games(client):

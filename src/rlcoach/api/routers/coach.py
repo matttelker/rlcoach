@@ -170,7 +170,7 @@ async def get_coach(
         reviewed: list[ReviewedGame] = []
         by_id: dict[str, ReviewedGame] = {}
         kickoff_games: list[GameKickoffs] = []
-        for replay, _ in rows:
+        for replay, stats in rows:
             review = replay.review
             if review is None or review.status != "ok":
                 continue
@@ -197,6 +197,7 @@ async def get_coach(
                     )
                     for g in review.goals
                 ],
+                epic_saves=(stats.epic_saves or 0) if stats else 0,
             )
             reviewed.append(game)
             by_id[game.replay_id] = game

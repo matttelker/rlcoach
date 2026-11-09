@@ -129,6 +129,21 @@ def test_highlights_call_out_a_winner_and_a_game_with_no_goals_on_me():
     assert winner["detail"] == "2–1 on Stadium, with 1:09 left"
 
 
+def test_epic_saves_in_the_latest_session_are_highlights():
+    games = [_game(n, OCT_31 if n == 1 else NOV_5) for n in range(1, 6)]
+    for game, saves in zip(games, (1, 0, 1, 2, 1), strict=True):
+        game.epic_saves = saves
+    highlights = find_highlights(games, summarize_categories(games))
+    saves = [h for h in highlights if h["kind"] == "epic_save"]
+
+    # Newest first, at most two, and only from the latest session
+    assert [(h["title"], h["replay_id"]) for h in saves] == [
+        ("Epic save", "r5"),
+        ("2 epic saves", "r4"),
+    ]
+    assert saves[0]["detail"] == "In the 2–1 on Stadium"
+
+
 def test_a_habit_that_stopped_showing_up_is_a_highlight():
     miss = _flag("missed_save", "goalkeeping", cost_goal=True)
     games = [_game(1, OCT_31, [miss]), _game(2, NOV_5), _game(3, NOV_5)]

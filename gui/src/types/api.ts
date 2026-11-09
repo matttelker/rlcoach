@@ -176,7 +176,7 @@ export interface CoachSession {
 }
 
 export interface Highlight {
-  kind: 'winner' | 'equalizer' | 'clean' | 'streak' | 'improving' | 'benchmark';
+  kind: 'winner' | 'equalizer' | 'epic_save' | 'clean' | 'streak' | 'improving' | 'benchmark';
   title: string;
   detail: string;
   replay_id: string | null;

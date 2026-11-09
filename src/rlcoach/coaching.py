@@ -52,6 +52,7 @@ class ReviewedGame:
     map: str
     flags: list[FlagRow] = field(default_factory=list)
     goals: list[GoalRow] = field(default_factory=list)
+    epic_saves: int = 0  # As the game counted them
 
     @property
     def conceded(self) -> int:
@@ -171,6 +172,19 @@ def find_highlights(
                     f"{where}, with {goal.clock} left",
                     game.replay_id,
                 )
+
+    for game in reversed(latest):
+        if game.epic_saves:
+            add(
+                "epic_save",
+                (
+                    "Epic save"
+                    if game.epic_saves == 1
+                    else f"{game.epic_saves} epic saves"
+                ),
+                f"In the {_score(game)} on {_pretty_map(game.map)}",
+                game.replay_id,
+            )
 
     for game in reversed(latest):
         if game.conceded and not game.goals_on_me:
