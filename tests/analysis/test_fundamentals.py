@@ -94,3 +94,10 @@ def test_the_games_counts_add_up_each_rise():
         "aerial_hits": 0,
     }
     assert counts["steam:1"]["aerial_hits"] == 1
+
+
+def test_a_replay_without_the_games_counts_has_no_value_for_them():
+    counts = game_counts([create_test_frame(1.0, [])], {"epic:me": None})
+    assert counts["epic:me"] == dict.fromkeys(
+        ("epic_saves", "clears", "centers", "aerial_hits")
+    )

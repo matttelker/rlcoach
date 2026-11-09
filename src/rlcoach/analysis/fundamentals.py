@@ -75,16 +75,22 @@ def fundamentals(
 
 def game_counts(
     frames: Sequence[Frame], player_ids: Mapping[str, Any]
-) -> dict[str, dict[str, int]]:
+) -> dict[str, dict[str, int | None]]:
     """Each player's epic saves, clears, centers and aerial hits, as the game
-    counted them."""
+    counted them.
+
+    Some older replays carry none of these counts (three of your 42 games, from
+    2022 and October 2024). A full game always has some, so a game with none
+    gets no value rather than zeros.
+    """
     totals: Counter[tuple[str, str]] = Counter()
     for frame in frames:
         for count in frame.stat_counts:
             totals[count.player_id, count.stat] += count.count
     return {
         player_id: {
-            column: totals[player_id, stat] for column, stat in GAME_COUNTS.items()
+            column: totals[player_id, stat] if totals else None
+            for column, stat in GAME_COUNTS.items()
         }
         for player_id in player_ids
     }
