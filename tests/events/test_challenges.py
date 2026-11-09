@@ -38,15 +38,16 @@ def test_opponents_touching_one_after_the_other_is_a_5050_won_by_the_second():
     ]
 
 
-def test_a_third_touch_straight_after_makes_it_nobodys():
+def test_touches_straight_after_are_one_scramble_won_by_the_last():
     found = _found(
         _touch(1.0, "blue", 0.0),
         _touch(1.4, "orange", 500.0),
         _touch(1.6, "blue", 400.0),
-        # Used up by the first 50/50, so it starts none of its own
         _touch(1.7, "orange", 0.0),
+        # Too late to be in it, so it starts none of its own with the scramble
+        _touch(2.5, "blue", 400.0),
     )
-    assert found == [(1.2, "blue", "orange", None)]
+    assert found == [(1.2, "blue", "orange", "ORANGE")]
 
 
 def test_teammates_too_late_too_close_too_far_or_too_slow_are_no_5050():

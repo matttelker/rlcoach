@@ -9,13 +9,17 @@ WINDOW_S = 1.2  # The second touch comes this soon after the first
 FARTHEST_UU = 1000.0  # The two cars were this close together, at most
 NEAREST_UU = 200.0  # And at least this far apart, or it's one car's touch
 SLOWEST_KPH = 15.0  # One of the touches moved the ball at least this fast
-RETOUCH_S = 0.25  # A third touch this soon after makes it nobody's
+RETOUCH_S = 0.25  # A touch this soon after carries the 50/50 on
 
 
 def detect_challenges(
     frames: list[Frame], touches: list[TouchEvent]
 ) -> list[ChallengeEvent]:
-    """Pair up opposing touches into 50/50s. Each touch is in one at most."""
+    """Pair up opposing touches into 50/50s. Each touch is in one at most.
+
+    Touches that keep coming this soon after, close by, are the same scramble,
+    which the team of its last touch won.
+    """
     teams: dict[str, int] = {}
     for frame in frames:
         for car in frame.players:
@@ -40,16 +44,18 @@ def detect_challenges(
         ):
             i += 1
             continue
-        winner: str | None = team_name(second_team)
-        step = 2
-        if i + 2 < len(ordered):
-            third = ordered[i + 2]
-            if (
-                third.player_id in teams
-                and third.t - second.t <= RETOUCH_S
-                and distance(second.location, third.location) <= FARTHEST_UU
+        last = i + 1
+        while last + 1 < len(ordered):
+            after, before = ordered[last + 1], ordered[last]
+            if not (
+                after.player_id in teams
+                and after.t - before.t <= RETOUCH_S
+                and distance(before.location, after.location) <= FARTHEST_UU
             ):
-                winner, step = None, 3
+                break
+            last += 1
+        winner = team_name(teams[ordered[last].player_id])
+        step = last - i + 1
         challenges.append(
             ChallengeEvent(
                 t=(first.t + second.t) / 2.0,

@@ -50,8 +50,8 @@ class TouchEvent:
 class ChallengeEvent:
     """Two opponents touching the ball one after the other: a 50/50.
 
-    The winner is the team of the second touch, unless a third came straight
-    after, which makes it nobody's.
+    The winner is the team of the second touch, or of the last in a scramble of
+    touches straight after it.
     """
 
     t: float
