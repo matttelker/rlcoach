@@ -34,7 +34,7 @@ GOAL_HEIGHT = 642.775
 
 @dataclass(frozen=True)
 class BoostPad:
-    pad_id: int  # The parser numbers pads in this table's order
+    pad_id: int  # The parser numbers pickups by this table, which it is given
     position: Vec3
     is_big: bool
 
@@ -43,7 +43,7 @@ def _pads(is_big: bool, z: float, *spots: tuple[float, float]) -> list[tuple]:
     return [(Vec3(x, y, z), is_big) for x, y in spots]
 
 
-# In the parser's order: the corners and the side pads, then the small pads
+# The corners and the side pads, then the small pads
 # from blue's back wall to orange's
 BOOST_PADS = tuple(
     BoostPad(pad_id, position, is_big)

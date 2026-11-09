@@ -4,7 +4,7 @@ from datetime import timedelta, timezone
 
 import pytest
 
-from rlcoach.parser.rust_adapter import parse_replay_date
+from rlcoach.parser.header import parse_replay_date
 from rlcoach.parser.types import Header
 from rlcoach.report import _utc_now_iso
 

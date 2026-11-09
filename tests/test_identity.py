@@ -28,11 +28,7 @@ def test_slugs_are_ascii_words_joined_by_hyphens():
 
 def test_an_account_names_the_player():
     [player] = build_player_identities(
-        [
-            PlayerInfo(
-                name="night.", team=0, platform_id="76", platform_ids={"steam": "76"}
-            )
-        ]
+        [PlayerInfo(name="night.", team=0, platform_ids={"steam": "76"})]
     )
     assert player.canonical_id == "steam:76"
     assert player.display_name == "night."
@@ -47,8 +43,10 @@ def test_steam_comes_before_epic_and_odd_platforms_come_last():
     assert ids == ["steam:s1", "tencent:t1"]
 
 
-def test_a_platform_id_like_epic_colon_id_counts_as_an_account():
-    [player] = build_player_identities([PlayerInfo(name="x", platform_id="Epic|abc")])
+def test_platform_names_are_lower_case_and_empty_accounts_dont_count():
+    [player] = build_player_identities(
+        [PlayerInfo(name="x", platform_ids={"Epic": " abc ", "steam": ""})]
+    )
     assert player.canonical_id == "epic:abc"
     assert player.platform_ids == {"epic": "abc"}
 
@@ -67,7 +65,7 @@ def test_an_unknown_team_counts_as_blue():
 
 def test_aliases_cover_every_name_the_frames_may_use():
     [player] = build_player_identities(
-        [PlayerInfo(name="Jo", platform_id="steam:9", platform_ids={"steam": "9"})]
+        [PlayerInfo(name="Jo", platform_ids={"steam": "9"})]
     )
     assert set(player.aliases) == {
         "steam:9",

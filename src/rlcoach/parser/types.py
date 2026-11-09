@@ -1,22 +1,29 @@
-"""Core data types for the parser layer."""
+"""What a replay holds once read: its header, and its frames as normalize makes them."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
+from ..field_constants import Vec3
 
-class Vec3(NamedTuple):
-    """3D vector with x, y, z components."""
-
-    x: float
-    y: float
-    z: float
+__all__ = [
+    "BallFrame",
+    "BoostPadEventFrame",
+    "Dodge",
+    "Frame",
+    "GoalHeader",
+    "Header",
+    "ParserDemoEvent",
+    "ParserTouchEvent",
+    "PlayerFrame",
+    "PlayerInfo",
+    "Quaternion",
+    "Vec3",
+]
 
 
 class Quaternion(NamedTuple):
-    """Quaternion for representing 3D rotation."""
-
     x: float
     y: float
     z: float
@@ -24,84 +31,20 @@ class Quaternion(NamedTuple):
 
 
 @dataclass(frozen=True)
-class Rotation:
-    """Car rotation with euler angles and optional quaternion.
-
-    Euler angles are in radians:
-    - pitch: rotation around x-axis (nose up/down)
-    - yaw: rotation around z-axis (left/right facing)
-    - roll: rotation around y-axis (car tilt)
-    """
-
-    pitch: float  # radians
-    yaw: float  # radians
-    roll: float  # radians
-    quaternion: Quaternion | None = None
-
-
-@dataclass(frozen=True)
 class PlayerInfo:
-    """Information about a player in the replay."""
+    """One row of the header's player list: someone who finished the match."""
 
     name: str
-    platform_id: str | None = None
-    team: int | None = None  # 0 or 1
-    score: int = 0
+    team: int = 0  # 0 blue, 1 orange
+    # Their accounts, such as {"epic": "abc123"}. See header.py for which
     platform_ids: dict[str, str] = field(default_factory=dict)
-    camera_settings: dict[str, float | int] | None = None
-    loadout: dict[str, int | str | float] = field(default_factory=dict)
-    stats: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class Header:
-    """Header information extracted from replay files.
-
-    This represents the minimal data that can be reliably extracted
-    from replay headers without full network frame parsing.
-    """
-
-    # Match metadata
-    playlist_id: str | None = None
-    map_name: str | None = None
-    team_size: int = 0
-    engine_build: str | None = None
-    match_guid: str | None = None
-    started_at_utc: str | None = None
-    declared_record_fps: float | None = None
-    overtime: bool | None = None
-    mutators: dict[str, str | int | float | bool] = field(default_factory=dict)
-
-    # Match results
-    team0_score: int = 0
-    team1_score: int = 0
-    match_length: float = 0.0  # NumFrames / RecordFPS, shorter than the real span
-
-    # Players
-    players: list[PlayerInfo] = field(default_factory=list)
-
-    # Goals from header (not full event list; minimal info)
-    goals: list[GoalHeader] = field(default_factory=list)
-    highlights: list[Highlight] = field(default_factory=list)
-
-    # Quality and warnings
-    quality_warnings: list[str] = field(default_factory=list)
-
-    def __post_init__(self):
-        """Validate header data after initialization."""
-        if self.team_size < 0:
-            raise ValueError("team_size cannot be negative")
-
-        if self.team0_score < 0 or self.team1_score < 0:
-            raise ValueError("team scores cannot be negative")
-
-        if self.match_length < 0:
-            raise ValueError("match_length cannot be negative")
+    # The scoreboard: Score, Goals, Assists, Saves and Shots
+    stats: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class GoalHeader:
-    """Goal info extracted from the header properties."""
+    """A goal as the header lists it: the frame it was scored on and the scorer."""
 
     frame: int | None = None
     player_name: str | None = None
@@ -109,243 +52,88 @@ class GoalHeader:
 
 
 @dataclass(frozen=True)
-class Highlight:
-    """Replay highlight tick mark information."""
+class Header:
+    """What the replay says about its match before any frame is read."""
 
-    frame: int | None = None
-    ball_name: str | None = None
-    car_name: str | None = None
-
-
-@dataclass(frozen=True)
-class NetworkDiagnostics:
-    """Diagnostics emitted by network parsing.
-
-    status values:
-    - "ok": network parsing succeeded
-    - "degraded": network parsing partially succeeded
-    - "unavailable": network parsing did not produce usable frames
-    """
-
-    status: str
-    error_code: str | None = None
-    error_detail: str | None = None
-    frames_emitted: int | None = None
-    attempted_backends: list[str] = field(default_factory=list)
-
-    def __post_init__(self):
-        """Validate diagnostics data."""
-        if self.frames_emitted is not None and self.frames_emitted < 0:
-            raise ValueError("frames_emitted cannot be negative")
-
-
-@dataclass(frozen=True)
-class NetworkFrames:
-    """Network frame data extracted from replay files.
-
-    Carries the raw per-frame ball/player snapshots plus diagnostics and
-    per-player profile metadata (camera + loadout) decoded from the stream.
-    """
-
-    frame_count: int = 0
-    sample_rate: float = 30.0  # Measured FPS; 30.0 fallback when unmeasurable
-    frames: list = field(default_factory=list)  # Will be list[Frame] when implemented
-    diagnostics: NetworkDiagnostics | None = None
-    # Per-player profile metadata (camera + loadout) keyed by header player
-    # index. Empty dict when the parser could not decode any.
-    player_metadata: dict = field(default_factory=dict)
-
-    def __post_init__(self):
-        """Validate network frame data."""
-        if self.frame_count < 0:
-            raise ValueError("frame_count cannot be negative")
-
-        if self.sample_rate <= 0:
-            raise ValueError("sample_rate must be positive")
+    match_type: str | None = None  # "Online", "Tournament", "Private" and so on
+    map_name: str | None = None
+    team_size: int = 0
+    team0_score: int = 0
+    team1_score: int = 0
+    started_at_utc: str | None = None
+    recorded_by: str | None = None  # The player whose game saved the replay
+    players: list[PlayerInfo] = field(default_factory=list)
+    goals: list[GoalHeader] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class PlayerFrame:
-    """Player state at a specific frame."""
+    """One car in one frame."""
 
     player_id: str
     team: int
     position: Vec3
     velocity: Vec3
-    rotation: (
-        Rotation | Vec3
-    )  # Rotation with quaternion or legacy Vec3 (pitch, yaw, roll)
-    boost_amount: int  # 0-100
-    angular_velocity: Vec3 | None = None
-    sleeping: bool = False
-    throttle: float | None = None
-    steer: float | None = None
-    handbrake: bool | None = None
-    throttle_raw: int | None = None
-    steer_raw: int | None = None
-    boost_active: bool | None = None
-    boost_active_raw: int | None = None
-    boost_amount_raw: int | None = None
-    boost_grant_count: int | None = None
-    jump_active_raw: int | None = None
-    dodge_active_raw: int | None = None
-    double_jump_active_raw: int | None = None
-    is_supersonic: bool = False
-    is_on_ground: bool = True
+    boost_amount: int  # 0 to 100
+    angular_velocity: Vec3 = Vec3(0.0, 0.0, 0.0)  # Radians a second
+    quaternion: Quaternion | None = None  # None until the car sends its rotation
     is_demolished: bool = False
-    # Authoritative component-state flags from parser, when available.
-    # None means unavailable, bool means parser explicitly emitted state.
-    is_jumping: bool | None = None
-    is_dodging: bool | None = None
-    is_double_jumping: bool | None = None
 
 
 @dataclass(frozen=True)
 class BallFrame:
-    """Ball state at a specific frame."""
-
     position: Vec3
     velocity: Vec3
-    angular_velocity: Vec3
-    sleeping: bool = False
 
 
 @dataclass(frozen=True)
 class BoostPadEventFrame:
-    """Boost pad event emitted by the parser layer."""
+    """A boost pad taken. `pad_id` indexes `field_constants.BOOST_PADS`."""
 
     pad_id: int
-    status: str  # "COLLECTED" or "RESPAWNED"
-    is_big: bool
-    player_id: str | None = None
+    player_id: str
     player_team: int | None = None
-    player_index: int | None = None
-    actor_id: int | None = None
-    instigator_actor_id: int | None = None
-    raw_state: int | None = None
-    position: Vec3 | None = None
+    # When it was taken, which can be before the frame that reports it
     timestamp: float | None = None
-    object_name: str | None = None
+
+
+@dataclass(frozen=True)
+class Dodge:
+    """A flip. `torque` is in the car's own axes and points the way the stick did."""
+
+    timestamp: float
+    player_id: str
+    torque: Vec3
 
 
 @dataclass(frozen=True)
 class ParserTouchEvent:
-    """Parser-emitted touch event payload."""
+    """A car within 200 uu of the ball, or the game's first-touch counter rising."""
 
     timestamp: float
     player_id: str
-    team: int
-    frame_index: int | None = None
-    source: str = "parser"
 
 
 @dataclass(frozen=True)
 class ParserDemoEvent:
-    """Parser-emitted demolition event payload."""
-
     timestamp: float
     victim_id: str
     attacker_id: str | None = None
-    victim_team: int | None = None
-    attacker_team: int | None = None
-    frame_index: int | None = None
-    source: str = "parser"
-
-
-@dataclass(frozen=True)
-class ParserComponentEvent:
-    """Parser-emitted car component event payload.
-
-    ``active`` is an instantaneous per-frame parity sample
-    (``raw_value % 2 == 1``), not a debounced activation edge. If a
-    component activates and deactivates between recorded frames, the raw
-    counter advances by an even amount, parity is unchanged, and the
-    activation is invisible in ``active``. On one 2v2 replay,
-    there are 119 ``double_jump_impulse`` vectors but only 43 ``active:true``
-    edges; dodge has 378 vector activations vs 268 active edges.
-
-    Reconstruct activation edges from ``raw_value`` deltas: any change means
-    at least one toggle, odd deltas mean a net state flip, and nonzero even
-    deltas mean at least two sub-frame toggles. ``raw_value`` is a u8 counter
-    (0-255): compute deltas modulo 256 or a wrap (e.g. 254 -> 2) reads as a
-    large negative step instead of +4. Prefer per-activation vector
-    events (``dodge_torque``, ``double_jump_impulse``) when present; they fire
-    once per activation. ``dodge_impulse`` extraction is unverified against
-    real replay data (absent from all committed fixtures); do not build on
-    this signal until a fixture containing it is found.
-    """
-
-    timestamp: float
-    kind: str
-    component: str
-    player_id: str | None = None
-    team: int | None = None
-    actor_id: int | None = None
-    frame_index: int | None = None
-    vector: Vec3 | None = None
-    raw_value: int | None = None
-    active: bool | None = None
-    source: str = "parser"
-
-
-@dataclass(frozen=True)
-class ParserStatEvent:
-    """Parser-emitted replicated stat event payload."""
-
-    timestamp: float
-    object_id: int
-    object_name: str | None = None
-    unknown1: bool | None = None
-    frame_index: int | None = None
-    source: str = "parser"
-
-
-@dataclass(frozen=True)
-class ParserTickmarkEvent:
-    """Parser-emitted timeline marker payload."""
-
-    timestamp: float
-    kind: str
-    frame_index: int | None = None
-    payload: dict[str, Any] | None = None
-    source: str = "parser"
-
-
-@dataclass(frozen=True)
-class ParserKickoffMarker:
-    """Parser-emitted kickoff marker payload."""
-
-    timestamp: float
-    phase: str
-    frame_index: int | None = None
-    source: str = "parser"
 
 
 @dataclass(frozen=True)
 class Frame:
-    """Normalized frame containing all game state at a specific time."""
+    """The ball and every car at one moment, and what the replay says happened then."""
 
-    timestamp: float  # seconds from match start
+    timestamp: float  # Seconds from the first frame
     ball: BallFrame
     players: list[PlayerFrame] = field(default_factory=list)
     boost_pad_events: list[BoostPadEventFrame] = field(default_factory=list)
-    component_events: list[ParserComponentEvent] = field(default_factory=list)
+    dodges: list[Dodge] = field(default_factory=list)
     parser_touch_events: list[ParserTouchEvent] = field(default_factory=list)
-    parser_demo_events: list[ParserDemoEvent] = field(default_factory=list)
-    parser_stat_events: list[ParserStatEvent] = field(default_factory=list)
-    parser_tickmarks: list[ParserTickmarkEvent] = field(default_factory=list)
-    parser_kickoff_markers: list[ParserKickoffMarker] = field(default_factory=list)
-    # When the game's first-touch counter rose, up to a second after the touch itself.
+    # When the game's first-touch counter rose, up to a second after the touch itself
     parser_first_touch_events: list[ParserTouchEvent] = field(default_factory=list)
-    delta: float | None = None  # Seconds since the previous network frame
+    parser_demo_events: list[ParserDemoEvent] = field(default_factory=list)
 
     def get_player_by_id(self, player_id: str) -> PlayerFrame | None:
-        """Get player frame by ID, or None if not found."""
-        for player in self.players:
-            if player.player_id == player_id:
-                return player
-        return None
-
-    def get_players_by_team(self, team: int) -> list[PlayerFrame]:
-        """Get all players on a specific team (0 or 1)."""
-        return [p for p in self.players if p.team == team]
+        return next((p for p in self.players if p.player_id == player_id), None)

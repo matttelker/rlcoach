@@ -15,16 +15,16 @@ from rlcoach.report import _went_to_overtime, report_for
 from tests.fixtures.builders import create_simple_replay_frames
 
 PLAYERS = [
-    PlayerInfo(name="Me", platform_id="Epic|me", team=0, stats={"Goals": 3}),
-    PlayerInfo(name="Them", platform_id="Steam|1", team=1, stats={"Goals": 1}),
-    PlayerInfo(name="Ghost", platform_id="Steam|2", team=1),
+    PlayerInfo(name="Me", platform_ids={"epic": "me"}, team=0, stats={"Goals": 3}),
+    PlayerInfo(name="Them", platform_ids={"steam": "1"}, team=1, stats={"Goals": 1}),
+    PlayerInfo(name="Ghost", platform_ids={"steam": "2"}, team=1),
 ]
 
 
 def _game(**header):
     header = Header(
         **{
-            "playlist_id": "inferred_2",
+            "match_type": "Online",
             "map_name": "Stadium_P",
             "team_size": 2,
             "started_at_utc": "2026-03-01T03:00:00Z",
@@ -85,10 +85,6 @@ def _kickoff(phase):
 
 
 def test_an_overtime_kickoff_means_overtime():
-    assert _went_to_overtime(Header(), [_kickoff("INITIAL"), _kickoff("OT")])
-    assert not _went_to_overtime(Header(), [_kickoff("INITIAL")] * 2)
-
-
-def test_an_old_header_flag_still_counts():
-    assert _went_to_overtime(Header(overtime=True), [])
-    assert not _went_to_overtime(Header(), [])
+    assert _went_to_overtime([_kickoff("INITIAL"), _kickoff("OT")])
+    assert not _went_to_overtime([_kickoff("INITIAL")] * 2)
+    assert not _went_to_overtime([])

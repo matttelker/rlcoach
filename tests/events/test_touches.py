@@ -20,7 +20,7 @@ BALL = create_test_ball(
 
 
 def _touch(t, player_id):
-    return ParserTouchEvent(timestamp=t, player_id=player_id, team=0)
+    return ParserTouchEvent(timestamp=t, player_id=player_id)
 
 
 def test_a_touch_is_placed_at_the_car_with_the_balls_speed():

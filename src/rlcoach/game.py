@@ -23,8 +23,10 @@ from .events import (
     detect_kickoffs,
     detect_touches,
 )
+from .field_constants import BOOST_PADS
+from .modes import mode_of
 from .normalize import build_timeline
-from .parser import read_header, read_network
+from .parser import read_frames, read_header
 from .parser.types import Frame, Header
 
 
@@ -67,7 +69,8 @@ def game_from_frames(path: Path, header: Header, frames: list[Frame]) -> Game:
 def read_game(path: Path, header: Header | None = None) -> Game:
     """Parse a replay once. Pass the header if you've already read it."""
     header = header or read_header(path)
-    raw_frames = read_network(path).frames
+    pads = BOOST_PADS if mode_of(header.map_name).soccar_pads else []
+    raw_frames = read_frames(path, [pad.position for pad in pads])
     if not raw_frames:
         raise NoFramesError(
             f"No frame data could be read from {path.name}. The replay parser may "

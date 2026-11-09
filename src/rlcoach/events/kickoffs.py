@@ -234,11 +234,10 @@ def _spawn_reach(spawn: Vec3) -> float:
 
 def _spin(car: PlayerFrame) -> tuple[float, float] | None:
     """The car's pitch rate in its own frame, and how far its roof points up."""
-    quaternion = getattr(car.rotation, "quaternion", None)
-    spin = car.angular_velocity
-    if quaternion is None or spin is None:
+    if car.quaternion is None:
         return None
-    x, y, z, w = quaternion
+    spin = car.angular_velocity
+    x, y, z, w = car.quaternion
     pitch_rate = (
         spin.x * 2.0 * (x * y - z * w)
         + spin.y * (1.0 - 2.0 * (x * x + z * z))
@@ -440,11 +439,10 @@ class _Kickoff:
                     state.touched = now
                 if self.first_touch is None or now < self.first_touch[2]:
                     self.first_touch = (car.player_id, state.team, now)
-        for event in frame.component_events:
-            if event.kind == "dodge_torque" and event.vector is not None:
-                state = self.cars.get(event.player_id)
-                if state is not None:
-                    state.dodges.append((now, event.vector.x, event.vector.y))
+        for dodge in frame.dodges:
+            state = self.cars.get(dodge.player_id)
+            if state is not None:
+                state.dodges.append((now, dodge.torque.x, dodge.torque.y))
 
     def played(self, frame: Frame) -> None:
         """The ball was played on this frame: credit the car it left away from.
@@ -512,9 +510,9 @@ class _Kickoff:
         self._credit_counter(frame, counter)
         self._settle_level_spawns()
         for later in after:
-            for event in later.component_events:
-                if event.kind == "dodge_torque" and event.player_id in self.cars:
-                    self.cars[event.player_id].late_dodges.append(
+            for dodge in later.dodges:
+                if dodge.player_id in self.cars:
+                    self.cars[dodge.player_id].late_dodges.append(
                         later.timestamp - self.start
                     )
         toucher, team, at = self.first_touch or (None, None, None)

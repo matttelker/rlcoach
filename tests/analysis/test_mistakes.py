@@ -183,7 +183,7 @@ def test_find_contacts_trusts_the_replays_touch_event_over_the_push_fit():
         _car(MATE, ORANGE, -1042.0, 4715.0, z=140.0),
         _car(OPP, BLUE, -978.0, 4529.0, z=119.0),
     ]
-    event = ParserTouchEvent(timestamp=DT, player_id=MATE, team=ORANGE, frame_index=1)
+    event = ParserTouchEvent(timestamp=DT, player_id=MATE)
     frames = [
         create_test_frame(
             0.0, players, _ball(-1030.0, 4638.0, 273.0, vx=1142.0, vy=-440.0)

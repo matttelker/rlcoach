@@ -2,30 +2,7 @@
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-
 from rlcoach.field_constants import BOOST_PADS, Vec3
-
-RUST_PADS = (
-    Path(__file__).resolve().parents[1]
-    / "parsers"
-    / "rlreplay_rust"
-    / "src"
-    / "arena_tables.rs"
-)
-
-
-def test_the_pads_are_numbered_as_the_parser_numbers_them():
-    rust = re.findall(
-        r"id:\s*(\d+),\s*x:\s*(-?[\d.]+),\s*y:\s*(-?[\d.]+),\s*z:\s*(-?[\d.]+),"
-        r"\s*is_big:\s*(true|false)",
-        RUST_PADS.read_text(encoding="utf-8"),
-    )[: len(BOOST_PADS)]
-    assert [
-        (int(i), Vec3(float(x), float(y), float(z)), big == "true")
-        for i, x, y, z, big in rust
-    ] == [(pad.pad_id, pad.position, pad.is_big) for pad in BOOST_PADS]
 
 
 def test_soccar_has_six_big_pads_and_28_small_ones():

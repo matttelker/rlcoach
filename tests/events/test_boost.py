@@ -27,14 +27,9 @@ def _at(pad):
     return Vec3(pad.position.x, pad.position.y, 17.0)
 
 
-def _taken(pad, player_id="me", t=None, team=None, status="COLLECTED"):
+def _taken(pad, player_id="me", t=None, team=None):
     return BoostPadEventFrame(
-        pad_id=pad.pad_id,
-        status=status,
-        is_big=pad.is_big,
-        player_id=player_id,
-        player_team=team,
-        timestamp=t,
+        pad_id=pad.pad_id, player_id=player_id, player_team=team, timestamp=t
     )
 
 
@@ -116,18 +111,9 @@ def test_pickups_come_in_the_order_the_events_happened():
     assert [p.t for p in detect_boost_pickups(frames)] == [0.2, 0.5]
 
 
-def test_events_without_a_car_a_known_pad_or_a_pickup_are_skipped():
-    unknown_pad = BoostPadEventFrame(
-        pad_id=len(BOOST_PADS), status="COLLECTED", is_big=False, player_id="me"
-    )
-    events = {
-        1: [
-            _taken(BLUE_SMALL, player_id=None),
-            _taken(ORANGE_SMALL, status="RESPAWNED"),
-            unknown_pad,
-            _taken(BLUE_CORNER),
-        ]
-    }
+def test_events_for_a_pad_off_the_list_are_skipped():
+    unknown_pad = BoostPadEventFrame(pad_id=len(BOOST_PADS), player_id="me")
+    events = {1: [unknown_pad, _taken(BLUE_CORNER)]}
     frames = _frames([20, 20], events=events)
     assert [p.pad_id for p in detect_boost_pickups(frames)] == [BLUE_CORNER.pad_id]
 

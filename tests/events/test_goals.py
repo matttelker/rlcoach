@@ -12,9 +12,9 @@ from tests.fixtures.builders import (
 )
 
 PLAYERS = [
-    PlayerInfo(name="Me", platform_id="Epic|me", team=0),
-    PlayerInfo(name="Mate", platform_id="Epic|mate", team=0),
-    PlayerInfo(name="Them", platform_id="Steam|1", team=1),
+    PlayerInfo(name="Me", platform_ids={"epic": "me"}, team=0),
+    PlayerInfo(name="Mate", platform_ids={"epic": "mate"}, team=0),
+    PlayerInfo(name="Them", platform_ids={"steam": "1"}, team=1),
 ]
 FAR = Vec3(3000.0, -3000.0, 17.0)
 BALL = create_test_ball(position=Vec3(0.0, 0.0, 93.15))

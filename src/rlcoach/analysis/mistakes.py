@@ -1376,12 +1376,6 @@ def goal_timeline(ctx: Context) -> list[GoalMoment]:
     return moments
 
 
-def _replay_owner(path: Path) -> str | None:
-    import rlreplay_rust  # type: ignore
-
-    return rlreplay_rust.header_property(str(path), "PlayerName")
-
-
 def analyze_replay(
     path: Path, player: str | None = None, *, player_id: str | None = None
 ) -> MistakeReport:
@@ -1406,7 +1400,7 @@ def review_player(
         match = next((i for i in identities if i.canonical_id == player_id), None)
         wanted = player_id
     else:
-        wanted = player or _replay_owner(game.path)
+        wanted = player or header.recorded_by
         match = next(
             (i for i in identities if wanted and i.display_name == wanted), None
         )

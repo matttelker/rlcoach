@@ -96,11 +96,7 @@ def _from_pad_events(frames: list[Frame]) -> list[BoostPickupEvent]:
     for frame in frames:
         cars = {car.player_id: car for car in frame.players}
         for event in frame.boost_pad_events:
-            if (
-                event.status != "COLLECTED"
-                or event.player_id is None
-                or not 0 <= event.pad_id < len(BOOST_PADS)
-            ):
+            if not 0 <= event.pad_id < len(BOOST_PADS):
                 continue
             pad = BOOST_PADS[event.pad_id]
             t = frame.timestamp if event.timestamp is None else event.timestamp

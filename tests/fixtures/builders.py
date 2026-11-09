@@ -1,23 +1,22 @@
-"""Test builder functions for creating synthetic frame and player data.
-
-These functions provide a consistent API for building test fixtures
-across all test files, reducing duplication and ensuring consistency.
-"""
+"""Synthetic frames for tests: cars, the ball, and the parser's events on a frame."""
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 from rlcoach.field_constants import Vec3
 from rlcoach.parser.types import (
     BallFrame,
     BoostPadEventFrame,
+    Dodge,
     Frame,
-    ParserComponentEvent,
     ParserDemoEvent,
     ParserTouchEvent,
     PlayerFrame,
     Quaternion,
-    Rotation,
 )
+
+STILL = Vec3(0.0, 0.0, 0.0)
 
 
 def create_test_player(
@@ -26,114 +25,29 @@ def create_test_player(
     position: Vec3 | None = None,
     velocity: Vec3 | None = None,
     angular_velocity: Vec3 | None = None,
-    rotation: Rotation | Vec3 | None = None,
     quaternion: Quaternion | None = None,
     boost: float = 50.0,
-    boost_active: bool | None = None,
-    boost_active_raw: int | None = None,
-    boost_amount_raw: int | None = None,
-    boost_grant_count: int | None = None,
-    throttle: float | None = None,
-    steer: float | None = None,
-    handbrake: bool | None = None,
-    throttle_raw: int | None = None,
-    steer_raw: int | None = None,
-    is_on_ground: bool = True,
     is_demolished: bool = False,
-    is_jumping: bool | None = None,
-    is_dodging: bool | None = None,
-    is_double_jumping: bool | None = None,
-    jump_active_raw: int | None = None,
-    dodge_active_raw: int | None = None,
-    double_jump_active_raw: int | None = None,
-    sleeping: bool = False,
 ) -> PlayerFrame:
-    """Create a test PlayerFrame with sensible defaults.
-
-    Args:
-        player_id: Unique player identifier
-        team: Team number (0=blue, 1=orange)
-        position: Position vector (defaults to field center at ground level)
-        velocity: Velocity vector (defaults to stationary)
-        rotation: Rotation as Vec3 (pitch, yaw, roll) (defaults to level)
-        boost: Boost amount 0-100 (defaults to 50)
-        is_on_ground: Whether player is on ground (defaults to True)
-        is_demolished: Whether player is demolished (defaults to False)
-
-    Returns:
-        PlayerFrame with specified or default values
-    """
-    if position is None:
-        position = Vec3(0.0, 0.0, 17.0)
-    if velocity is None:
-        velocity = Vec3(0.0, 0.0, 0.0)
-    if angular_velocity is None:
-        angular_velocity = Vec3(0.0, 0.0, 0.0)
-    if rotation is None:
-        rotation = Vec3(0.0, 0.0, 0.0)
-    elif isinstance(rotation, Vec3) and quaternion is not None:
-        rotation = Rotation(
-            pitch=rotation.x,
-            yaw=rotation.y,
-            roll=rotation.z,
-            quaternion=quaternion,
-        )
-
+    """A car, still on the ground at the centre spot unless told otherwise."""
     return PlayerFrame(
         player_id=player_id,
         team=team,
-        position=position,
-        velocity=velocity,
-        rotation=rotation,
+        position=position or Vec3(0.0, 0.0, 17.0),
+        velocity=velocity or STILL,
         boost_amount=boost,
-        angular_velocity=angular_velocity,
-        sleeping=sleeping,
-        throttle=throttle,
-        steer=steer,
-        handbrake=handbrake,
-        throttle_raw=throttle_raw,
-        steer_raw=steer_raw,
-        boost_active=boost_active,
-        boost_active_raw=boost_active_raw,
-        boost_amount_raw=boost_amount_raw,
-        boost_grant_count=boost_grant_count,
-        is_on_ground=is_on_ground,
+        angular_velocity=angular_velocity or STILL,
+        quaternion=quaternion,
         is_demolished=is_demolished,
-        is_jumping=is_jumping,
-        is_dodging=is_dodging,
-        is_double_jumping=is_double_jumping,
-        jump_active_raw=jump_active_raw,
-        dodge_active_raw=dodge_active_raw,
-        double_jump_active_raw=double_jump_active_raw,
     )
 
 
 def create_test_ball(
-    position: Vec3 | None = None,
-    velocity: Vec3 | None = None,
-    angular_velocity: Vec3 | None = None,
+    position: Vec3 | None = None, velocity: Vec3 | None = None
 ) -> BallFrame:
-    """Create a test BallFrame with sensible defaults.
-
-    Args:
-        position: Ball position (defaults to center at ball height)
-        velocity: Ball velocity (defaults to stationary)
-        angular_velocity: Ball spin (defaults to none)
-
-    Returns:
-        BallFrame with specified or default values
-    """
-    if position is None:
-        position = Vec3(0.0, 0.0, 93.15)
-    if velocity is None:
-        velocity = Vec3(0.0, 0.0, 0.0)
-    if angular_velocity is None:
-        angular_velocity = Vec3(0.0, 0.0, 0.0)
-
+    """The ball, at rest on the centre spot unless told otherwise."""
     return BallFrame(
-        position=position,
-        velocity=velocity,
-        angular_velocity=angular_velocity,
+        position=position or Vec3(0.0, 0.0, 93.15), velocity=velocity or STILL
     )
 
 
@@ -141,55 +55,21 @@ def create_test_frame(
     timestamp: float,
     players: list[PlayerFrame],
     ball: BallFrame | None = None,
-    component_events: list[ParserComponentEvent] | None = None,
     *,
+    dodges: list[Dodge] | None = None,
     touches: list[ParserTouchEvent] | None = None,
     demos: list[ParserDemoEvent] | None = None,
     pad_events: list[BoostPadEventFrame] | None = None,
 ) -> Frame:
-    """Create a test Frame with player and ball data, and the parser's events.
-
-    Args:
-        timestamp: Frame timestamp in seconds
-        players: List of PlayerFrame objects
-        ball: BallFrame (defaults to centered stationary ball)
-        touches, demos, pad_events: The parser's events on this frame
-
-    Returns:
-        Frame with specified data
-    """
-    if ball is None:
-        ball = create_test_ball()
-
+    """A frame with these cars and the parser's events on it."""
     return Frame(
         timestamp=timestamp,
-        ball=ball,
+        ball=ball or create_test_ball(),
         players=players,
-        component_events=component_events or [],
+        dodges=dodges or [],
         parser_touch_events=touches or [],
         parser_demo_events=demos or [],
         boost_pad_events=pad_events or [],
-    )
-
-
-def create_component_event(
-    timestamp: float,
-    kind: str,
-    component: str,
-    player_id: str,
-    vector: Vec3 | None = None,
-    raw_value: int | None = None,
-    active: bool | None = None,
-) -> ParserComponentEvent:
-    """Create a parser-authored component event for synthetic tests."""
-    return ParserComponentEvent(
-        timestamp=timestamp,
-        kind=kind,
-        component=component,
-        player_id=player_id,
-        vector=vector,
-        raw_value=raw_value,
-        active=active,
     )
 
 
@@ -199,37 +79,16 @@ def with_flip_at(
     player_id: str,
     direction: Vec3 | None = None,
 ) -> list[Frame]:
-    """Return frames with a dodge torque event attached at the closest timestamp."""
+    """The frames with a flip by `player_id` on the one nearest `timestamp`."""
     if not frames:
         return frames
-    if direction is None:
-        direction = Vec3(1.0, 0.0, 0.0)
-
-    closest = min(
-        range(len(frames)), key=lambda idx: abs(frames[idx].timestamp - timestamp)
+    nearest = min(
+        range(len(frames)), key=lambda i: abs(frames[i].timestamp - timestamp)
     )
+    frame = frames[nearest]
+    dodge = Dodge(frame.timestamp, player_id, direction or Vec3(1.0, 0.0, 0.0))
     updated = list(frames)
-    frame = updated[closest]
-    event = create_component_event(
-        timestamp=frame.timestamp,
-        kind="dodge_torque",
-        component="dodge",
-        player_id=player_id,
-        vector=direction,
-    )
-    updated[closest] = Frame(
-        timestamp=frame.timestamp,
-        ball=frame.ball,
-        players=frame.players,
-        boost_pad_events=frame.boost_pad_events,
-        component_events=[*frame.component_events, event],
-        parser_touch_events=frame.parser_touch_events,
-        parser_demo_events=frame.parser_demo_events,
-        parser_stat_events=frame.parser_stat_events,
-        parser_tickmarks=frame.parser_tickmarks,
-        parser_kickoff_markers=frame.parser_kickoff_markers,
-        parser_first_touch_events=frame.parser_first_touch_events,
-    )
+    updated[nearest] = replace(frame, dodges=[*frame.dodges, dodge])
     return updated
 
 
@@ -238,26 +97,12 @@ def create_simple_replay_frames(
     frame_rate: float = 30.0,
     players: list[tuple[str, int]] | None = None,
 ) -> list[Frame]:
-    """Create a sequence of simple test frames for a replay.
+    """Frames at a steady rate with every car still at the centre spot.
 
-    Args:
-        duration_seconds: Total duration of replay in seconds
-        frame_rate: Frames per second
-        players: List of (player_id, team) tuples (defaults to 2 players)
-
-    Returns:
-        List of Frame objects spanning the duration
+    `players` is (player_id, team) for each car, two by default.
     """
-    if players is None:
-        players = [("player1", 0), ("player2", 1)]
-
-    frames = []
-    num_frames = int(duration_seconds * frame_rate)
-    dt = 1.0 / frame_rate
-
-    for i in range(num_frames):
-        timestamp = i * dt
-        player_frames = [create_test_player(pid, team) for pid, team in players]
-        frames.append(create_test_frame(timestamp, player_frames))
-
-    return frames
+    players = players or [("player1", 0), ("player2", 1)]
+    return [
+        create_test_frame(i / frame_rate, [create_test_player(*p) for p in players])
+        for i in range(int(duration_seconds * frame_rate))
+    ]

@@ -9,7 +9,7 @@ import pytest
 import rlcoach.game as game_module
 from rlcoach.events import detect_touches
 from rlcoach.game import NoFramesError, game_from_frames, read_game
-from rlcoach.parser.types import Header, NetworkFrames, PlayerInfo
+from rlcoach.parser.types import Header, PlayerInfo
 from rlcoach.report import _went_to_overtime
 from tests.fixtures import real_replays
 from tests.fixtures.builders import create_simple_replay_frames
@@ -30,9 +30,9 @@ class Counting:
 def counted():
     with pytest.MonkeyPatch.context() as patch:
         header = Counting(game_module.read_header)
-        network = Counting(game_module.read_network)
+        network = Counting(game_module.read_frames)
         patch.setattr(game_module, "read_header", header)
-        patch.setattr(game_module, "read_network", network)
+        patch.setattr(game_module, "read_frames", network)
         game = read_game(real_replays.replay(real_replays.OVERTIME))
     return game, header.calls, network.calls
 
@@ -53,20 +53,14 @@ def test_a_header_already_read_is_not_read_again(monkeypatch):
     monkeypatch.setattr(
         game_module, "read_header", lambda path: pytest.fail("read the header")
     )
-    monkeypatch.setattr(
-        game_module,
-        "read_network",
-        lambda path: NetworkFrames(frame_count=len(frames), frames=frames),
-    )
+    monkeypatch.setattr(game_module, "read_frames", lambda path, pads: frames)
     monkeypatch.setattr(game_module, "build_timeline", lambda header, raw: raw)
     game = read_game(Path("x.replay"), header)
     assert game.header is header and game.frames == frames
 
 
 def test_a_replay_without_frames_is_an_error(monkeypatch):
-    monkeypatch.setattr(
-        game_module, "read_network", lambda path: NetworkFrames(frame_count=0)
-    )
+    monkeypatch.setattr(game_module, "read_frames", lambda path, pads: [])
     with pytest.raises(NoFramesError, match="No frame data could be read from x"):
         read_game(Path("x.replay"), Header())
 
@@ -99,6 +93,6 @@ def test_real_games_show_whether_they_went_to_overtime(counted, regulation):
     """Regression: current headers carry no overtime flag, so every game said no."""
     # 2-1, settled by an overtime goal
     game = counted[0]
-    assert _went_to_overtime(game.header, game.kickoffs) is True
+    assert _went_to_overtime(game.kickoffs) is True
     # 1-4 in regulation
-    assert _went_to_overtime(regulation.header, regulation.kickoffs) is False
+    assert _went_to_overtime(regulation.kickoffs) is False

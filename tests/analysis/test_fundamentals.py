@@ -10,11 +10,13 @@ HEADER = Header(
     players=[
         PlayerInfo(
             name="Me",
-            platform_id="Epic|me",
+            platform_ids={"epic": "me"},
             team=0,
             stats={"Goals": 2, "Assists": 1, "Saves": 3, "Shots": 4, "Score": 512},
         ),
-        PlayerInfo(name="Them", platform_id="Steam|1", team=1, stats={"Shots": 1}),
+        PlayerInfo(
+            name="Them", platform_ids={"steam": "1"}, team=1, stats={"Shots": 1}
+        ),
     ]
 )
 

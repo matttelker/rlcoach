@@ -10,7 +10,6 @@ from .events import KickoffEvent
 from .game import Game
 from .identity import build_player_identities
 from .modes import playlist_of
-from .parser.types import Header
 
 
 def _utc_now_iso() -> str:
@@ -22,13 +21,12 @@ def _utc_now_iso() -> str:
     )
 
 
-def _went_to_overtime(header: Header, kickoffs: list[KickoffEvent]) -> bool:
-    """Tell if the match went to overtime.
+def _went_to_overtime(kickoffs: list[KickoffEvent]) -> bool:
+    """Tell if the match went to overtime: it had an overtime kickoff.
 
-    Current replay headers carry no overtime flag, so the overtime kickoff decides.
-    An older header that does say so still counts.
+    Replay headers carry no overtime flag.
     """
-    return bool(header.overtime) or any(kickoff.phase == "OT" for kickoff in kickoffs)
+    return any(kickoff.phase == "OT" for kickoff in kickoffs)
 
 
 def report_for(game: Game, replay_id: str) -> dict[str, Any]:
@@ -52,7 +50,7 @@ def report_for(game: Game, replay_id: str) -> dict[str, Any]:
             "playlist": playlist_of(header),
             "map": header.map_name or "unknown",
             "team_size": max(1, int(header.team_size or 1)),
-            "overtime": _went_to_overtime(header, game.kickoffs),
+            "overtime": _went_to_overtime(game.kickoffs),
             "started_at_utc": header.started_at_utc or _utc_now_iso(),
             # Frames start at 0, so the last one's time is the recording's length
             "duration_seconds": float(game.frames[-1].timestamp),

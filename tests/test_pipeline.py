@@ -62,9 +62,9 @@ def test_a_real_replay_is_stored_and_reviewed_from_one_parse(db, monkeypatch, re
     me = build_player_identities(read_header(real).players)[0]
     scores = {"BLUE": 1, "ORANGE": 4}
     header = Counting(pipeline.read_header)
-    network = Counting(game_module.read_network)
+    network = Counting(game_module.read_frames)
     monkeypatch.setattr(pipeline, "read_header", header)
-    monkeypatch.setattr(game_module, "read_network", network)
+    monkeypatch.setattr(game_module, "read_frames", network)
     config = _config(platform_ids=[me.canonical_id])
 
     result = process_replay_file(real, config)
@@ -110,14 +110,14 @@ def fake_replay(tmp_path, monkeypatch):
     path = tmp_path / "fake.replay"
     path.write_bytes(b"fake replay bytes")
     header = Header(
-        playlist_id="inferred_1",
+        match_type="Online",
         map_name="Stadium_P",
         team_size=1,
         started_at_utc="2026-03-01T03:00:00Z",
         team0_score=2,
         players=[
-            PlayerInfo(name="Me", platform_id="Epic|me", team=0),
-            PlayerInfo(name="Smurf", platform_id="Steam|9", team=1),
+            PlayerInfo(name="Me", platform_ids={"epic": "me"}, team=0),
+            PlayerInfo(name="Smurf", platform_ids={"steam": "9"}, team=1),
         ],
     )
     frames = create_simple_replay_frames(

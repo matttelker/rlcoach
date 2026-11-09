@@ -59,27 +59,12 @@ def slugify_display_name(name: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ascii_only).strip("-") or "player"
 
 
-def _split_account(account: str | None) -> tuple[str, str] | None:
-    """Read "epic:abc" or "epic|abc" as ("epic", "abc")."""
-    text = str(account or "").strip()
-    delimiter = ":" if ":" in text else "|" if "|" in text else None
-    if delimiter is None:
-        return None
-    platform, _, value = text.partition(delimiter)
-    platform, value = platform.strip().lower(), value.strip()
-    return (platform, value) if platform and value else None
-
-
 def _accounts(player: PlayerInfo) -> dict[str, str]:
-    accounts = {
+    return {
         str(platform).lower(): str(value).strip()
         for platform, value in (player.platform_ids or {}).items()
         if value and str(value).strip()
     }
-    split = _split_account(player.platform_id)
-    if split is not None:
-        accounts.setdefault(*split)
-    return accounts
 
 
 def _preferred_id(accounts: dict[str, str], slug: str) -> str:
@@ -106,8 +91,6 @@ def build_player_identities(players: Iterable[PlayerInfo]) -> list[PlayerIdentit
         taken.add(player_id)
 
         aliases = {player_id, slug, f"slug:{slug}", f"player_{index}"}
-        if player.platform_id:
-            aliases.add(str(player.platform_id).strip())
         for platform, value in accounts.items():
             aliases.update((value, f"{platform}:{value}"))
         team = player.team if isinstance(player.team, int) else 0

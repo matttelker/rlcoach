@@ -175,7 +175,7 @@ def test_the_ball_leaving_away_from_a_car_says_who_won_a_5050():
 
 def _with_counter(frames, at, player_id):
     index = min(range(len(frames)), key=lambda i: abs(frames[i].timestamp - at))
-    event = ParserTouchEvent(timestamp=at, player_id=player_id, team=0)
+    event = ParserTouchEvent(timestamp=at, player_id=player_id)
     frames[index] = replace(frames[index], parser_first_touch_events=[event])
     return frames
 
@@ -284,7 +284,6 @@ def test_a_cancelled_forward_dodge_is_a_speedflip():
         DIAGONAL,
         BESIDE_BALL,
         quaternion=lambda e: UPSIDE_DOWN if e >= 0.5 else LEVEL,
-        rotation=STILL,
         angular_velocity=STILL,
     )
     assert _approach(spin, dodge=(0.5, Vec3(0.0, 2.24, 0.0))) == "SPEEDFLIP"
@@ -295,7 +294,6 @@ def test_a_flip_that_keeps_its_pitch_is_a_frontflip():
         DIAGONAL,
         BESIDE_BALL,
         quaternion=LEVEL,
-        rotation=STILL,
         angular_velocity=Vec3(0.0, 5.5, 0.0),
     )
     assert _approach(spin, dodge=(0.5, Vec3(0.0, 2.24, 0.0))) == "STANDARD_FRONTFLIP"
