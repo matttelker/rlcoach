@@ -7,7 +7,6 @@ an array such as `PlayerStats` (one entry per player who finished) and `Goals`.
 from __future__ import annotations
 
 import datetime as _dt
-from collections import Counter
 from typing import Any
 
 from .types import GoalHeader, Header, PlayerInfo
@@ -34,13 +33,10 @@ def header_from_properties(properties: dict[str, Any]) -> Header:
         for row in properties.get("PlayerStats") or []
         if isinstance(row.get("Name"), str)
     ]
-    # The team size is the bigger team's row count. Leavers have no row
-    by_team = Counter(player.team for player in players)
-    team_size = max(by_team.values()) if by_team else _int(properties.get("TeamSize"))
     return Header(
         match_type=properties.get("MatchType"),
         map_name=properties.get("MapName"),
-        team_size=team_size,
+        team_size=_team_size(properties, players),
         team0_score=_int(properties.get("Team0Score")),
         team1_score=_int(properties.get("Team1Score")),
         started_at_utc=parse_replay_date(properties.get("Date")),
@@ -55,6 +51,15 @@ def header_from_properties(properties: dict[str, Any]) -> Header:
             for goal in properties.get("Goals") or []
         ],
     )
+
+
+def _team_size(properties: dict[str, Any], players: list[PlayerInfo]) -> int:
+    """The match's team size. Leavers have no row, so the rows can come up short,
+    and only a header without `TeamSize` counts them."""
+    if size := _int(properties.get("TeamSize")):
+        return size
+    rows = [sum(1 for p in players if p.team == team) for team in (0, 1)]
+    return max(rows)
 
 
 def _int(value: Any) -> int:

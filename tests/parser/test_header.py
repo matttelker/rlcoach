@@ -46,13 +46,13 @@ def test_players_keep_their_team_and_scoreboard():
     assert them.stats == {"Score": 100, "Goals": 1}
 
 
-def test_the_team_size_is_the_bigger_teams_rows():
-    # A team a player left counts the rows that finished
-    assert header_from_properties(PROPERTIES).team_size == 2
-    alone = {**PROPERTIES, "PlayerStats": [_row("Me", 0)]}
-    assert header_from_properties(alone).team_size == 1
-    nobody = {**PROPERTIES, "PlayerStats": []}
-    assert header_from_properties(nobody).team_size == 2
+def test_the_team_size_is_the_headers():
+    # Both teams can finish a player short, as here, and it's still a 3v3
+    short = {**PROPERTIES, "TeamSize": 3}
+    assert header_from_properties(short).team_size == 3
+    # Without TeamSize it's the bigger team's rows
+    unsized = {k: v for k, v in PROPERTIES.items() if k != "TeamSize"}
+    assert header_from_properties(unsized).team_size == 2
 
 
 def test_a_row_without_a_name_is_no_player():
