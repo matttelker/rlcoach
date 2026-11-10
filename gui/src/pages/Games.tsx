@@ -13,6 +13,7 @@ const PLAYLIST_FILTERS = [
   { value: 'STANDARD', label: 'Standard' },
   { value: 'DOUBLES', label: 'Doubles' },
   { value: 'DUEL', label: 'Duel' },
+  { value: 'CASUAL', label: 'Casual' },
 ];
 
 const RESULT_FILTERS: { value: GameResult | ''; label: string }[] = [

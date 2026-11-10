@@ -155,6 +155,37 @@ def test_clock_counts_only_live_play():
     assert clock[-1] == pytest.approx(285.0, abs=0.2)
 
 
+def _clock_frames(*clock):
+    """One frame a second, each with the game's (seconds, overtime) or None."""
+    players = [_car(ME, ORANGE, 0.0, 3000.0)]
+    return [
+        create_test_frame(
+            float(t),
+            players,
+            create_test_ball(),
+            seconds_remaining=None if c is None else c[0],
+            overtime=c is not None and c[1],
+        )
+        for t, c in enumerate(clock)
+    ]
+
+
+def test_the_clock_is_the_games_own_where_it_sends_one():
+    frames = _clock_frames(None, (300, False), (299, False), None, (1, False))
+    # Nothing counts as live, which the estimate would need to run the clock
+    assert game_clock(frames, [False] * len(frames)) == [300.0, 300, 299, 299, 1]
+
+
+def test_the_games_clock_goes_negative_in_overtime():
+    frames = _clock_frames((0, False), (0, True), (7, True), None, (8, True))
+    assert game_clock(frames, [True] * len(frames)) == [0.0, -0.0, -7, -7, -8]
+
+
+def test_the_clock_is_estimated_where_no_frame_has_the_games():
+    frames = _clock_frames(None, None, None)
+    assert game_clock(frames, [False] * 3) == [GAME_LENGTH_S] * 3
+
+
 def test_format_clock_shows_minutes_and_overtime():
     assert format_clock(192.4) == "3:12"
     assert format_clock(0.0) == "0:00"
@@ -1609,3 +1640,13 @@ def test_a_whiff_the_opponents_score_from_costs_the_goal():
     reviews, flags = link_goals_to_moments(ctx, [review], flags)
     assert flags[0].cost_goal is True
     assert reviews[0].summary == "You whiffed 7 s before."
+
+
+def test_an_overtime_kickoff_is_at_the_start_of_overtime():
+    game = read_game(real_replays.replay(real_replays.OVERTIME))
+    me = build_player_identities(game.header.players)[0]
+    report = review_player(game, player_id=me.canonical_id)
+    [overtime] = [m for m in report.kickoffs if m.kickoff.phase == "OT"]
+    assert overtime.seconds_left == pytest.approx(0.0, abs=1.0)
+    # Every kickoff before it is in regulation
+    assert all(m.seconds_left > 0 for m in report.kickoffs if m is not overtime)

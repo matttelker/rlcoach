@@ -12,7 +12,6 @@ import {
   getReplay,
   getReplayReview,
   getTrends,
-  getWeaknesses,
   http,
   setGrade,
   tagPlayer,
@@ -76,14 +75,12 @@ describe('the API client', () => {
     await getCoach({ playlist: undefined, period: '30d' });
     await getTrends({ metric: 'bcpm', period: '7d', playlist: 'DOUBLES' });
     await getComparison({ rank: undefined, period: '30d', playlist: undefined });
-    await getWeaknesses({ rank: 'P1', period: '30d', playlist: 'STANDARD' });
     await getPatterns({ period: '30d', playlist: undefined });
     await getGrades();
     expect(sent.map((request) => request.url)).toEqual([
       '/api/coach?period=30d',
       '/api/trends?metric=bcpm&period=7d&playlist=DOUBLES',
       '/api/compare?period=30d',
-      '/api/weaknesses?rank=P1&period=30d&playlist=STANDARD',
       '/api/patterns?period=30d',
       '/api/grades',
     ]);

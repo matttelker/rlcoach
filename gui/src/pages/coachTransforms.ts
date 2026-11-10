@@ -11,7 +11,7 @@ import type {
   RuleGrades,
   SituationSummary,
 } from '../types/api';
-import { parseLocalDate } from './dataTransforms';
+import { parseLocalDate, prettyPlaylist } from './dataTransforms';
 
 export const PERIOD_OPTIONS = [
   { value: '7d', label: 'Last 7 days' },
@@ -35,7 +35,7 @@ export function isMixedPlaylist(playlist: string): boolean {
 const TEAM_SIZES: Record<string, string> = { DUEL: '1v1', DOUBLES: '2v2', STANDARD: '3v3' };
 
 export function teamSizeLabel(playlist: string): string {
-  return TEAM_SIZES[playlist] ?? playlist;
+  return TEAM_SIZES[playlist] ?? prettyPlaylist(playlist);
 }
 
 export const REGULATION_SECONDS = 300;

@@ -104,6 +104,8 @@ class _Timeline:
             timestamp=t,
             ball=BallFrame(position=_on_field(position), velocity=Vec3(*velocity)),
             hit_team=raw["hit_team"],
+            seconds_remaining=raw.get("seconds_remaining"),
+            overtime=bool(raw.get("overtime")),
             players=list(cars.values()),
             boost_pad_events=[
                 BoostPadEventFrame(

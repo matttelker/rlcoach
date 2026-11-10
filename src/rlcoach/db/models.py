@@ -92,7 +92,6 @@ class PlayerGameStats(Base):
     assists: Mapped[int | None] = mapped_column(default=0)
     saves: Mapped[int | None] = mapped_column(default=0)
     shots: Mapped[int | None] = mapped_column(default=0)
-    shooting_pct: Mapped[float | None]
     score: Mapped[int | None] = mapped_column(default=0)
     demos_inflicted: Mapped[int | None] = mapped_column(default=0)
     demos_taken: Mapped[int | None] = mapped_column(default=0)
@@ -104,7 +103,7 @@ class PlayerGameStats(Base):
     centers: Mapped[int | None]
     aerial_hits: Mapped[int | None]
 
-    bcpm: Mapped[float | None]  # Boost used per minute, Ballchasing's BCPM
+    bcpm: Mapped[float | None]  # Boost collected per minute, as the game counts pickups
     avg_boost: Mapped[float | None]
     time_zero_boost_s: Mapped[float | None]
     time_full_boost_s: Mapped[float | None]
@@ -115,9 +114,6 @@ class PlayerGameStats(Base):
     time_supersonic_s: Mapped[float | None]
 
     behind_ball_pct: Mapped[float | None]
-    first_man_pct: Mapped[float | None]
-    second_man_pct: Mapped[float | None]
-    third_man_pct: Mapped[float | None]
 
     replay: Mapped[Replay] = relationship(back_populates="player_stats")
 

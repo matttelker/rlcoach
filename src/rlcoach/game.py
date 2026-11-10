@@ -47,9 +47,13 @@ class Game:
     demos: list[DemoEvent]
     kickoffs: list[KickoffEvent]
     boost_pickups: list[BoostPickupEvent]
+    # The game's own number for the playlist, if the replay carries it
+    playlist_id: int | None = None
 
 
-def game_from_frames(path: Path, header: Header, frames: list[Frame]) -> Game:
+def game_from_frames(
+    path: Path, header: Header, frames: list[Frame], playlist_id: int | None = None
+) -> Game:
     """Find the events in normalized frames."""
     goals = detect_goals(frames, header)
     touches = detect_touches(frames)
@@ -63,6 +67,7 @@ def game_from_frames(path: Path, header: Header, frames: list[Frame]) -> Game:
         demos=detect_demos(frames),
         kickoffs=detect_kickoffs(frames, goals),
         boost_pickups=detect_boost_pickups(frames),
+        playlist_id=playlist_id,
     )
 
 
@@ -76,4 +81,9 @@ def read_game(path: Path, header: Header | None = None) -> Game:
             f"No frame data could be read from {path.name}. The replay parser may "
             "need updating for this game build."
         )
-    return game_from_frames(path, header, build_timeline(header, raw_frames))
+    playlist_id = next(
+        (raw["playlist"] for raw in raw_frames if raw.get("playlist") is not None),
+        None,
+    )
+    frames = build_timeline(header, raw_frames)
+    return game_from_frames(path, header, frames, playlist_id)

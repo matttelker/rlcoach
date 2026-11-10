@@ -210,10 +210,10 @@ describe('labels', () => {
     expect(prettyMap('Stadium_P')).toBe('Stadium');
   });
 
-  it('names modes by team size', () => {
+  it('names modes by team size, and casual by name', () => {
     expect(teamSizeLabel('DOUBLES')).toBe('2v2');
     expect(teamSizeLabel('STANDARD')).toBe('3v3');
-    expect(teamSizeLabel('EXTRA_MODE')).toBe('EXTRA_MODE');
+    expect(teamSizeLabel('CASUAL')).toBe('Casual');
   });
 
   it('tells a combined playlist from a single one', () => {

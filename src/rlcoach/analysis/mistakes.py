@@ -451,7 +451,21 @@ def live_mask(frames: Sequence[Frame], goal_times: Iterable[float]) -> list[bool
 
 
 def game_clock(frames: Sequence[Frame], live: Sequence[bool]) -> list[float]:
-    """Estimate seconds left at each frame. Overtime goes negative."""
+    """Seconds left at each frame. Overtime goes negative.
+
+    The game's own clock, in whole seconds, on any replay that carries it.
+    Otherwise an estimate from the time in open play.
+    """
+    if any(frame.seconds_remaining is not None for frame in frames):
+        clock = []
+        seconds = float(GAME_LENGTH_S)
+        for frame in frames:
+            if frame.seconds_remaining is not None:
+                seconds = float(frame.seconds_remaining)
+                if frame.overtime:
+                    seconds = -seconds
+            clock.append(seconds)
+        return clock
     elapsed = 0.0
     clock: list[float] = []
     previous: float | None = None
@@ -1638,7 +1652,6 @@ def format_report(report: MistakeReport) -> str:
     lines = [
         f"Mistake review for {report.player} ({report.team}) on {report.map_name}",
         f"Final score, your team first: {report.final_score}",
-        "Clock times are estimates, usually within a few seconds.",
         "",
     ]
     if report.goals:

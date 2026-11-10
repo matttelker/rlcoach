@@ -335,39 +335,82 @@ def test_coach_rejects_an_empty_playlist_list(client):
     assert client.get("/coach", params={"playlist": ","}).status_code == 400
 
 
-def _add_goals_benchmark(playlist):
-    """A benchmark your fixture average of 1 goal a game clearly beats."""
-    from rlcoach.db.models import Benchmark
+def _add_benchmark(metric, playlist, average):
     from rlcoach.db.session import create_session
+    from tests.api.stored_games import add_benchmark
 
-    session = create_session()
-    session.add(
-        Benchmark(
-            metric="goals",
-            playlist=playlist,
-            rank_tier="GC",
-            median_value=0.5,
-            p25_value=0.4,
-            p75_value=0.6,
-            source="test",
-        )
-    )
-    session.commit()
-    session.close()
+    with create_session() as session:
+        add_benchmark(session, metric, average, average / 2, average * 1.5, playlist)
+        session.commit()
 
 
-def _benchmark_titles(client, playlist):
+def _add_games_with(playlist, saves, goals=5):
+    """Games of yours in a playlist, one for each count of saves."""
+    from rlcoach.db.session import create_session
+    from tests.api.stored_games import add_game
+
+    with create_session() as session:
+        for n, count in enumerate(saves):
+            add_game(
+                session,
+                f"{playlist}{n}",
+                playlist=playlist,
+                me={"saves": count, "goals": goals},
+            )
+        session.commit()
+
+
+def _benchmark_highlights(client, playlist):
     highlights = client.get("/coach", params={"playlist": playlist}).json()[
         "highlights"
     ]
-    return [h["title"] for h in highlights if h["kind"] == "benchmark"]
+    return [h for h in highlights if h["kind"] == "benchmark"]
+
+
+def _benchmark_titles(client, playlist):
+    return [h["title"] for h in _benchmark_highlights(client, playlist)]
+
+
+def test_coach_names_a_benchmark_strength_with_enough_games_and_a_real_gap(client):
+    _add_games_with("DOUBLES", [2, 3] * 5)
+    _add_benchmark("saves", "DOUBLES", 1.5)
+    [strength] = _benchmark_highlights(client, "DOUBLES")
+    assert strength == {
+        "kind": "benchmark",
+        "title": "More saves than GC players",
+        "detail": "2.5 a game over 10 games, GC average 1.5",
+        "replay_id": None,
+    }
+
+
+def test_coach_names_no_benchmark_strength_from_too_few_games(client):
+    _add_games_with("DOUBLES", [3] * 9)
+    _add_benchmark("saves", "DOUBLES", 1.0)
+    assert _benchmark_titles(client, "DOUBLES") == []
+
+
+def test_coach_names_no_benchmark_strength_from_a_gap_inside_the_margin(client):
+    # 2.5 a game, give or take 1.0 over ten games that swing from 1 to 4
+    _add_games_with("DOUBLES", [1, 4] * 5)
+    _add_benchmark("saves", "DOUBLES", 2.0)
+    assert _benchmark_titles(client, "DOUBLES") == []
+
+
+def test_coach_never_names_goals_or_assists_as_benchmark_strengths(client):
+    # Goals and assists are flat across the ranks, however far above you are
+    _add_games_with("DOUBLES", [1] * 10, goals=5)
+    _add_benchmark("goals", "DOUBLES", 0.5)
+    _add_benchmark("assists", "DOUBLES", 0.1)
+    assert _benchmark_titles(client, "DOUBLES") == []
 
 
 def test_coach_benchmark_strengths_name_the_playlist_only_when_mixed(client):
-    _add_goals_benchmark("STANDARD")
-    assert _benchmark_titles(client, "STANDARD") == ["More goals than GC players"]
+    _add_games_with("DOUBLES", [2, 3] * 5)
+    _add_benchmark("saves", "DOUBLES", 1.5)
+    _add_benchmark("saves", "STANDARD", 0.1)  # The fixture's games have no saves
+    assert _benchmark_titles(client, "DOUBLES") == ["More saves than GC players"]
     assert _benchmark_titles(client, "DOUBLES,STANDARD") == [
-        "More goals than GC players in Standard"
+        "More saves than GC players in Doubles"
     ]
 
 

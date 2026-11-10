@@ -49,7 +49,7 @@ export interface ReplayDetail extends ReplaySummary {
   player_stats: PlayerStats[];
 }
 
-// GET /trends, /compare, /patterns and /weaknesses (stats.py)
+// GET /trends, /compare and /patterns (stats.py)
 
 /** Your value of one stat on one day */
 export interface TrendValue {
@@ -61,27 +61,46 @@ export interface TrendsResponse {
   metric: string;
   period: string;
   playlist: string;
-  /** Your config's rank, and its median for this stat if it has one */
+  /** Your config's rank, and its average for this stat in your units if it has one */
   rank: string;
-  rank_median: number | null;
+  rank_average: number | null;
   values: TrendValue[];
 }
 
-/** Your average of one stat against a rank's median. The gaps are null without a median. */
-export interface Comparison {
+/** One stat that rises with rank, your average placed among the ranks' averages */
+export interface Placement {
+  metric: string;
+  games: number;
+  my_value: number;
+  /** The rank's average, in the same units as yours */
+  target_average: number;
+  /** my_value less target_average */
+  gap: number;
+  /** How big the gap must be to be more than chance. null under min_games */
+  margin: number | null;
+  verdict: 'above' | 'below' | 'level' | 'too_few';
+  /** The ranks your average reaches at the bottom and top of its margin, such as "P2" or "below G1". null under min_games */
+  level_low: string | null;
+  level_high: string | null;
+  /** Whether the rank's average was converted from Ballchasing's way of counting */
+  scaled: boolean;
+}
+
+/** A benchmarked stat that barely changes from rank to rank */
+export interface ContextStat {
   metric: string;
   my_value: number;
-  target_median: number | null;
-  difference: number | null;
-  difference_pct: number | null;
-  direction: 'higher' | 'lower';
+  target_average: number;
 }
 
 export interface CompareResponse {
   target_rank: string;
   playlist: string;
-  comparisons: Comparison[];
   game_count: number;
+  /** The games a stat needs before it is placed */
+  min_games: number;
+  placements: Placement[];
+  context: ContextStat[];
 }
 
 /** A stat that differs between your wins and your losses */
@@ -101,24 +120,6 @@ export interface PatternsResponse {
   loss_count: number;
   /** The wins and the losses it needs before it finds any */
   min_games: number;
-}
-
-/** A stat of yours well below or above a rank's median, in standard deviations */
-export interface Weakness {
-  metric: string;
-  my_value: number;
-  target_median: number;
-  z_score: number;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'strength' | 'neutral';
-}
-
-export interface WeaknessesResponse {
-  weaknesses: Weakness[];
-  strengths: Weakness[];
-  game_count: number;
-  playlist: string;
-  rank: string;
-  has_benchmarks: boolean;
 }
 
 // GET /players, GET /players/{id} and POST /players/{id}/tag (players.py)

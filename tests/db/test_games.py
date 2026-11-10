@@ -105,17 +105,15 @@ def test_each_player_gets_their_stats_with_missing_counts_zero_and_others_empty(
     stats = {
         "steam:1": {
             "goals": 2,
-            "shooting_pct": 50.0,
             "bcpm": 410.0,
-            "first_man_pct": 33.3,
+            "behind_ball_pct": 33.3,
             "clears": 3,
         }
     }
     store_game(make_report(stats=stats), "h", "steam:1", CONFIG)
     mine = _stats("r1", "steam:1")
-    assert (mine.goals, mine.shooting_pct, mine.bcpm, mine.first_man_pct) == (
+    assert (mine.goals, mine.bcpm, mine.behind_ball_pct) == (
         2,
-        50.0,
         410.0,
         33.3,
     )

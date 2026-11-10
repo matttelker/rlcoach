@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,24 @@ def _kickoff(phase):
 
 
 def test_an_overtime_kickoff_means_overtime():
-    assert _went_to_overtime([_kickoff("INITIAL"), _kickoff("OT")])
-    assert not _went_to_overtime([_kickoff("INITIAL")] * 2)
-    assert not _went_to_overtime([])
+    game = _game()
+    assert _went_to_overtime(
+        replace(game, kickoffs=[_kickoff("INITIAL"), _kickoff("OT")])
+    )
+    assert not _went_to_overtime(replace(game, kickoffs=[_kickoff("INITIAL")] * 2))
+    assert not _went_to_overtime(replace(game, kickoffs=[]))
+
+
+def test_a_frame_in_overtime_means_overtime():
+    game = replace(_game(), kickoffs=[])
+    frames = [replace(frame, overtime=True) if i == 50 else frame
+              for i, frame in enumerate(game.frames)]  # fmt: skip
+    assert _went_to_overtime(replace(game, frames=frames))
+    assert report_for(replace(game, frames=frames), "a")["metadata"]["overtime"]
+
+
+def test_the_games_playlist_number_beats_the_header():
+    # The header says doubles; the game says casual
+    assert report_for(_game(), "a")["metadata"]["playlist"] == "DOUBLES"
+    casual = replace(_game(), playlist_id=2)
+    assert report_for(casual, "a")["metadata"]["playlist"] == "CASUAL"

@@ -6,7 +6,16 @@ import math
 
 import pytest
 
-from rlcoach.compare import severity, standings, win_loss_patterns
+from rlcoach.compare import (
+    BELOW_LADDER,
+    FROM_BALLCHASING,
+    MARGIN_SE,
+    MIN_GAMES,
+    RANK_STATS,
+    place,
+    win_loss_patterns,
+)
+from rlcoach.metrics import METRICS as KNOWN_STATS
 
 METRICS = ("goals", "saves", "bcpm")
 
@@ -63,45 +72,98 @@ def test_patterns_come_biggest_first():
     ]
 
 
+def test_rank_stats_are_known_stats():
+    assert set(RANK_STATS) <= KNOWN_STATS
+    assert set(FROM_BALLCHASING) <= set(RANK_STATS)
+
+
+TWOS_AND_THREES = [2.0, 3.0] * 5  # Mean 2.5 over 10 games
+# Two standard errors of their mean: the sd is sqrt(2.5 / 9)
+MARGIN = MARGIN_SE * math.sqrt(2.5 / 9) / math.sqrt(10)
+
+
+def test_under_min_games_says_too_few_and_gives_no_margin_or_level():
+    placed = place("saves", [3.0] * (MIN_GAMES - 1), {"GC": 1.0}, "GC")
+    assert (placed.verdict, placed.margin) == ("too_few", None)
+    assert (placed.level_low, placed.level_high) == (None, None)
+    assert (placed.games, placed.gap) == (MIN_GAMES - 1, 2.0)
+
+
 @pytest.mark.parametrize(
-    ("z", "label"),
-    [
-        (0.67, "strength"),
-        (0.66, "neutral"),
-        (0.0, "neutral"),
-        (-0.5, "low"),
-        (-0.51, "medium"),
-        (-1.0, "medium"),
-        (-2.0, "high"),
-        (-2.01, "critical"),
-    ],
+    ("target_average", "verdict"),
+    [(2.5 - MARGIN - 0.01, "above"), (2.5 + MARGIN + 0.01, "below"), (2.3, "level")],
 )
-def test_severity_steps(z, label):
-    assert severity(z, "higher") == label
-    assert severity(-z, "lower") == label
+def test_the_gap_to_the_target_is_judged_against_its_margin(target_average, verdict):
+    placed = place("saves", TWOS_AND_THREES, {"P1": target_average}, "P1")
+    assert placed.margin == pytest.approx(MARGIN)
+    assert placed.gap == pytest.approx(2.5 - target_average)
+    assert placed.verdict == verdict
 
 
-BENCH = {"p25": 1.0, "median": 2.0, "p75": 3.7, "direction": "higher"}
+def test_a_gap_just_inside_the_margin_is_level():
+    placed = place("saves", TWOS_AND_THREES, {"P1": 2.5 - MARGIN + 0.01}, "P1")
+    assert placed.verdict == "level"
 
 
-def test_standings_measure_in_the_benchmarks_spread():
-    [standing] = standings({"goals": 4.0, "assists": 1.0}, {"goals": BENCH})
-    # p25 to p75 spans 2.7, which is 1.35 standard deviations, so one is 2.0
-    assert standing.z_score == pytest.approx(1.0)
-    assert (standing.metric, standing.median, standing.severity) == (
-        "goals",
-        2.0,
-        "strength",
-    )
+def test_identical_games_have_no_margin_so_any_gap_is_real():
+    placed = place("saves", [2.0] * MIN_GAMES, {"GC": 1.5}, "GC")
+    assert (placed.margin, placed.verdict) == (0.0, "above")
+    assert place("saves", [2.0] * MIN_GAMES, {"GC": 2.0}, "GC").verdict == "level"
 
 
-def test_holding_more_boost_than_the_rank_is_a_weakness():
-    bench = {"p25": 30.0, "median": 40.0, "p75": 50.0, "direction": "lower"}
-    [standing] = standings({"avg_boost": 60.0}, {"avg_boost": bench})
-    assert standing.z_score > 0
-    assert standing.severity == "high"
+LADDER = {"G1": 1.0, "P1": 2.0, "GC": 3.0}
 
 
-def test_a_benchmark_with_no_spread_is_left_out():
-    flat = {"p25": 2.0, "median": 2.0, "p75": 2.0}
-    assert standings({"goals": 3.0}, {"goals": flat}) == []
+def _span(values, averages=LADDER):
+    placed = place("saves", values, averages, "GC")
+    return placed.level_low, placed.level_high
+
+
+def test_a_steady_stat_reaches_one_rank_at_both_ends_of_its_margin():
+    # 2.5 give or take 0.33 sits between P1's 2.0 and GC's 3.0 either way
+    assert _span(TWOS_AND_THREES) == ("P1", "P1")
+    # Reaching an average exactly counts
+    assert _span([2.0] * MIN_GAMES) == ("P1", "P1")
+    assert _span([5.0] * MIN_GAMES) == ("GC", "GC")
+
+
+def test_a_noisy_stat_spans_several_ranks():
+    # 2.5 give or take about 1.67
+    assert _span([0.0, 5.0] * 5) == (BELOW_LADDER, "GC")
+
+
+def test_under_the_lowest_rank_is_below_the_ladder():
+    assert _span([0.5] * MIN_GAMES) == (BELOW_LADDER, BELOW_LADDER)
+    assert BELOW_LADDER == "below G1"
+
+
+def test_ranks_without_an_average_are_skipped():
+    # G2 to D3 are missing, and G1 is the highest present that 2.5 reaches
+    assert _span(TWOS_AND_THREES, {"G1": 1.0, "GC": 3.0}) == ("G1", "G1")
+
+
+def test_the_ranks_boost_collected_is_put_in_our_units():
+    values = [380.0, 400.0] * 5  # Ours average 390
+    placed = place("bcpm", values, {"GC": 350.0}, "GC")
+    assert placed.scaled
+    assert placed.my_value == pytest.approx(390.0)
+    assert placed.target_average == pytest.approx(350.0 * 1.051)
+    assert placed.gap == pytest.approx(390.0 - 350.0 * 1.051)
+    sd = math.sqrt(sum((v - 390.0) ** 2 for v in values) / 9)
+    assert placed.margin == pytest.approx(MARGIN_SE * sd / math.sqrt(10))
+    # Ballchasing's 380 is 399 as we count, which 390 give or take 7 doesn't
+    # reach, though it would reach a bare 380
+    ladder = place("bcpm", values, {"P1": 360.0, "GC": 380.0}, "GC")
+    assert (ladder.level_low, ladder.level_high) == ("P1", "P1")
+
+
+def test_other_stats_are_compared_as_they_are():
+    placed = place("saves", TWOS_AND_THREES, {"GC": 2.0}, "GC")
+    assert not placed.scaled
+    assert (placed.my_value, placed.target_average) == (2.5, 2.0)
+
+
+def test_nothing_is_placed_without_games_or_a_target_average():
+    assert place("saves", [], LADDER, "GC") is None
+    assert place("saves", TWOS_AND_THREES, LADDER, "D1") is None
+    assert place("saves", TWOS_AND_THREES, {}, "GC") is None

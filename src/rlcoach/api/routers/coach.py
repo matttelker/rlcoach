@@ -22,10 +22,9 @@ from ...coaching import (
     pick_targets,
     summarize_categories,
 )
-from ...compare import standings
+from ...compare import RANK_STATS, place
 from ...db.grades import goal_ref, grades_for, mistake_ref
 from ...db.models import (
-    Benchmark,
     GameReview,
     PlayerGameStats,
     Replay,
@@ -41,12 +40,13 @@ from ...kickoff_coaching import (
     summarize_kickoffs,
 )
 from ...modes import COACHED_PLAYLISTS
-from .stats import direction, resolve_playlist, resolve_rank
+from .stats import rank_averages, resolve_playlist, resolve_rank
 
 router = APIRouter(tags=["coach"])
 
-# Per-game counts that read naturally as "more goals than P1 players"
-STRENGTH_METRICS = ("goals", "assists", "saves", "shots")
+# Per-game counts that rise with rank, and read naturally as "more saves than
+# P1 players"
+STRENGTH_METRICS = tuple(m for m in ("saves", "shots") if m in RANK_STATS)
 
 
 def _date_from(period: str) -> date | None:
@@ -88,42 +88,31 @@ def _benchmark_strengths(
     *,
     say_playlist: bool = False,
 ):
-    """Stats where your average beats the target rank's spread.
+    """Stats where your average is above the target rank's by more than chance.
 
     Benchmarks are per playlist, so a view of several playlists compares each
     one on its own and names it.
     """
-    if not stats:
-        return []
-    averages = {}
+    averages = rank_averages(session, playlist)
+    strengths = []
     for metric in STRENGTH_METRICS:
         values = [getattr(s, metric) for s in stats if getattr(s, metric) is not None]
-        if values:
-            averages[metric] = sum(values) / len(values)
-    benchmarks = {
-        b.metric: {
-            "p25": b.p25_value,
-            "median": b.median_value,
-            "p75": b.p75_value,
-            "direction": direction(b.metric),
-        }
-        for b in session.query(Benchmark)
-        .filter(Benchmark.playlist == playlist, Benchmark.rank_tier == rank)
-        .all()
-        if b.metric in STRENGTH_METRICS
-    }
-    results = standings(averages, benchmarks)
-    return [
-        {
-            "kind": "benchmark",
-            "title": f"More {r.metric} than {rank} players"
-            + (f" in {playlist.capitalize()}" if say_playlist else ""),
-            "detail": (f"{r.my_value:.1f} a game, {rank} average {r.median:.1f}"),
-            "replay_id": None,
-        }
-        for r in sorted(results, key=lambda r: -r.z_score)
-        if r.severity == "strength"
-    ]
+        placed = place(metric, values, averages.get(metric, {}), rank)
+        if placed is None or placed.verdict != "above":
+            continue
+        strengths.append(
+            {
+                "kind": "benchmark",
+                "title": f"More {metric} than {rank} players"
+                + (f" in {playlist.capitalize()}" if say_playlist else ""),
+                "detail": (
+                    f"{placed.my_value:.1f} a game over {placed.games} games, "
+                    f"{rank} average {placed.target_average:.1f}"
+                ),
+                "replay_id": None,
+            }
+        )
+    return strengths
 
 
 def _game_kickoffs(replay: Replay, review: GameReview) -> GameKickoffs:

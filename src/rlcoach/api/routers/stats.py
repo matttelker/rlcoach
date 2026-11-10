@@ -1,5 +1,5 @@
-"""Your stats over time and against benchmarks, for the Trends, Compare and
-Benchmarks pages."""
+"""Your stats over time and against the ranks, for the Trends and Compare
+pages."""
 
 from __future__ import annotations
 
@@ -9,17 +9,24 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ...compare import SEVERITY_ORDER, standings, win_loss_patterns
+from ...compare import (
+    MIN_GAMES,
+    RANK_STATS,
+    in_our_units,
+    place,
+    win_loss_patterns,
+)
 from ...config import DEFAULT_RANK
 from ...db.models import Benchmark, PlayerGameStats, Replay
 from ...db.session import create_session
-from ...metrics import MetricDirection, metric_direction
 
 router = APIRouter(tags=["stats"])
 
 TREND_METRICS = (
     "bcpm",
     "avg_boost",
+    "time_zero_boost_s",
+    "boost_stolen",
     "goals",
     "assists",
     "saves",
@@ -37,6 +44,8 @@ TREND_METRICS = (
 )
 # The stats that have benchmarks
 COMPARED_METRICS = ("bcpm", "avg_boost", "goals", "assists", "saves", "shots")
+# The ones that don't rise with rank, shown beside the rank's average and no more
+CONTEXT_METRICS = tuple(m for m in COMPARED_METRICS if m not in RANK_STATS)
 TREND_PERIODS = ("7d", "30d", "90d", "all")
 
 
@@ -62,13 +71,6 @@ def resolve_rank(rank: str | None) -> str:
         return get_config().preferences.target_rank
     except RuntimeError:
         return DEFAULT_RANK
-
-
-def direction(metric: str) -> str:
-    """Which way is better for a stat: "lower" or "higher"."""
-    if metric_direction(metric) is MetricDirection.LOWER_BETTER:
-        return MetricDirection.LOWER_BETTER.value
-    return MetricDirection.HIGHER_BETTER.value
 
 
 def _since(period: str) -> date | None:
@@ -105,12 +107,20 @@ def _averages(rows: list[PlayerGameStats], metrics: tuple[str, ...]) -> dict:
     return averages
 
 
-def _benchmarks(session: Session, playlist: str, rank: str) -> list[Benchmark]:
-    return (
-        session.query(Benchmark)
-        .filter(Benchmark.playlist == playlist, Benchmark.rank_tier == rank)
-        .all()
-    )
+def rank_averages(session: Session, playlist: str) -> dict[str, dict[str, float]]:
+    """Each benchmarked stat's average at every rank, in one playlist.
+
+    The benchmark table calls it a median, but Ballchasing publishes each
+    rank's average.
+    """
+    averages: dict[str, dict[str, float]] = {}
+    for b in session.query(Benchmark).filter(Benchmark.playlist == playlist):
+        averages.setdefault(b.metric, {})[b.rank_tier] = b.median_value
+    return averages
+
+
+def _values(rows: list[PlayerGameStats], metric: str) -> list[float]:
+    return [getattr(r, metric) for r in rows if getattr(r, metric) is not None]
 
 
 @router.get("/trends")
@@ -119,7 +129,8 @@ async def get_trends(
     period: str = Query(default="30d", description="7d, 30d, 90d or all"),
     playlist: str | None = None,
 ) -> dict[str, Any]:
-    """One stat of yours game by game, oldest first, and your rank's median."""
+    """One stat of yours game by game, oldest first, and the target rank's
+    average in the same units as yours."""
     if metric not in TREND_METRICS:
         raise HTTPException(
             status_code=400, detail=f"Invalid metric. Allowed: {sorted(TREND_METRICS)}"
@@ -151,43 +162,14 @@ async def get_trends(
         "period": period,
         "playlist": playlist,
         "rank": rank,
-        "rank_median": benchmark.median_value if benchmark else None,
+        "rank_average": (
+            in_our_units(metric, benchmark.median_value) if benchmark else None
+        ),
         "values": [
             {"date": day.isoformat() if day else None, "value": value}
             for day, value in rows
             if value is not None
         ],
-    }
-
-
-@router.get("/benchmarks")
-async def list_benchmarks(
-    metric: str | None = None, playlist: str | None = None, rank: str | None = None
-) -> dict[str, Any]:
-    """The bundled rank benchmarks, filtered by any of stat, playlist and rank."""
-    with create_session() as session:
-        query = session.query(Benchmark)
-        if metric:
-            query = query.filter(Benchmark.metric == metric)
-        if playlist:
-            query = query.filter(Benchmark.playlist == playlist)
-        if rank:
-            query = query.filter(Benchmark.rank_tier == rank)
-        rows = query.order_by(Benchmark.metric, Benchmark.rank_tier).all()
-    return {
-        "items": [
-            {
-                "metric": b.metric,
-                "playlist": b.playlist,
-                "rank_tier": b.rank_tier,
-                "median_value": b.median_value,
-                "p25_value": b.p25_value,
-                "p75_value": b.p75_value,
-                "elite_threshold": b.elite_threshold,
-                "source": b.source,
-            }
-            for b in rows
-        ]
     }
 
 
@@ -197,44 +179,55 @@ async def get_comparison(
     playlist: str | None = None,
     period: str = Query(default="30d"),
 ) -> dict[str, Any]:
-    """Your averages next to a rank's medians."""
+    """Where your stats sit among the ranks.
+
+    `placements` are the stats that rise with rank, each with the span of ranks
+    your average sits among and whether the gap to the target is more than
+    chance. `context` are the benchmarked stats that don't separate ranks.
+    """
     playlist = resolve_playlist(playlist)
     rank = resolve_rank(rank)
     with create_session() as session:
         rows = _my_stats(session, playlist, period).all()
-        if not rows:
-            return {
-                "target_rank": rank,
-                "playlist": playlist,
-                "comparisons": [],
-                "game_count": 0,
-            }
-        medians = {
-            b.metric: b.median_value for b in _benchmarks(session, playlist, rank)
-        }
-    comparisons = []
-    for metric, mine in _averages(rows, COMPARED_METRICS).items():
-        median = medians.get(metric)
-        gap = None if median is None else mine - median
-        comparisons.append(
+        averages = rank_averages(session, playlist)
+    placements = []
+    for metric in RANK_STATS:
+        placed = place(metric, _values(rows, metric), averages.get(metric, {}), rank)
+        if placed is None:
+            continue
+        placements.append(
             {
                 "metric": metric,
-                "my_value": round(mine, 2),
-                "target_median": median,
-                "difference": None if gap is None else round(gap, 2),
-                "difference_pct": (
-                    None
-                    if gap is None
-                    else round(gap / median * 100 if median else 0, 1)
-                ),
-                "direction": direction(metric),
+                "games": placed.games,
+                "my_value": round(placed.my_value, 2),
+                "target_average": round(placed.target_average, 2),
+                "gap": round(placed.gap, 2),
+                "margin": None if placed.margin is None else round(placed.margin, 2),
+                "verdict": placed.verdict,
+                "level_low": placed.level_low,
+                "level_high": placed.level_high,
+                "scaled": placed.scaled,
             }
         )
+    context = []
+    for metric in CONTEXT_METRICS:
+        values = _values(rows, metric)
+        target = averages.get(metric, {}).get(rank)
+        if values and target is not None:
+            context.append(
+                {
+                    "metric": metric,
+                    "my_value": round(sum(values) / len(values), 2),
+                    "target_average": round(in_our_units(metric, target), 2),
+                }
+            )
     return {
         "target_rank": rank,
         "playlist": playlist,
-        "comparisons": comparisons,
         "game_count": len(rows),
+        "min_games": MIN_GAMES,
+        "placements": placements,
+        "context": context,
     }
 
 
@@ -271,61 +264,4 @@ async def get_patterns(
         "win_count": len(games["WIN"]),
         "loss_count": len(games["LOSS"]),
         "min_games": min_games,
-    }
-
-
-@router.get("/weaknesses")
-async def get_weaknesses(
-    playlist: str | None = None,
-    rank: str | None = Query(default=None, description="Such as P1. Default: config"),
-    period: str = Query(default="30d"),
-) -> dict[str, Any]:
-    """Your stats furthest below a rank's spread, and the ones well above it."""
-    playlist = resolve_playlist(playlist)
-    rank = resolve_rank(rank)
-    with create_session() as session:
-        rows = _my_stats(session, playlist, period).all()
-        if not rows:
-            return {
-                "weaknesses": [],
-                "strengths": [],
-                "game_count": 0,
-                "playlist": playlist,
-                "rank": rank,
-                "has_benchmarks": False,
-            }
-        benchmarks = _benchmarks(session, playlist, rank)
-    spreads = {
-        b.metric: {
-            "p25": b.p25_value,
-            "median": b.median_value,
-            "p75": b.p75_value,
-            "direction": direction(b.metric),
-        }
-        for b in benchmarks
-    }
-    items = [
-        {
-            "metric": s.metric,
-            "my_value": round(s.my_value, 2),
-            "target_median": round(s.median, 2),
-            "z_score": round(s.z_score, 2),
-            "severity": s.severity,
-        }
-        for s in standings(_averages(rows, COMPARED_METRICS), spreads)
-    ]
-    weaknesses = [i for i in items if i["severity"] not in ("strength", "neutral")]
-    return {
-        "weaknesses": sorted(
-            weaknesses,
-            key=lambda i: (-abs(i["z_score"]), SEVERITY_ORDER.index(i["severity"])),
-        ),
-        "strengths": sorted(
-            (i for i in items if i["severity"] == "strength"),
-            key=lambda i: -i["z_score"],
-        ),
-        "game_count": len(rows),
-        "playlist": playlist,
-        "rank": rank,
-        "has_benchmarks": bool(benchmarks),
     }

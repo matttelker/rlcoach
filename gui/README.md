@@ -63,7 +63,7 @@ http://localhost:5173 that reloads on every edit and sends `/api` to the server 
   you've graded some, the Coach page tallies them per rule, so you can see which rules to trust
   and which to fix. Grades outlast `rlcoach reviews --redo`, but a grade only counts while the
   review still makes the call you graded.
-- **Stats** holds the trends, the rank comparison and the benchmarks.
+- **Stats** holds the trends, and the rank comparison with your wins against your losses.
 - **Players** lists the people you've played with and against.
 
 Ingest reviews your mistakes in every new game. Games loaded before reviews existed have none,

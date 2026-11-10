@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from rlcoach.modes import COACHED_PLAYLISTS, MODES, SOCCAR, mode_of, playlist_of
+from rlcoach.modes import (
+    CASUAL,
+    COACHED_PLAYLISTS,
+    MODES,
+    SOCCAR,
+    mode_of,
+    playlist_of,
+)
 from rlcoach.parser.types import Header
 
 
@@ -74,3 +81,24 @@ def test_the_coached_playlists_are_soccars_team_sizes():
 )
 def test_hoops_and_dropshot_have_pads_of_their_own(map_name, pads):
     assert mode_of(map_name).soccar_pads is pads
+
+
+@pytest.mark.parametrize(
+    ("playlist_id", "playlist"), [(10, "DUEL"), (11, "DOUBLES"), (13, "STANDARD")]
+)
+def test_the_games_ranked_numbers_name_the_playlist(playlist_id, playlist):
+    # Even where the header would say otherwise
+    assert playlist_of(_header("Private", 2), playlist_id) == playlist
+
+
+@pytest.mark.parametrize("playlist_id", [1, 2, 3, 4])
+def test_casual_games_are_casual_at_any_team_size(playlist_id):
+    assert playlist_of(_header("Online", 3), playlist_id) == CASUAL
+    assert CASUAL not in COACHED_PLAYLISTS
+
+
+@pytest.mark.parametrize("playlist_id", [None, 27, 34, 999])
+def test_other_numbers_go_by_the_header(playlist_id):
+    assert playlist_of(_header("Online", 2), playlist_id) == "DOUBLES"
+    hoops = _header("Online", 2, "HoopsStadium_P")
+    assert playlist_of(hoops, playlist_id) == "EXTRA_MODE"

@@ -23,13 +23,52 @@ def _all(name, key, pads=True):
     return [item for frame in _frames(name, pads) for item in frame[key]]
 
 
-def test_every_header_player_has_a_car_in_every_frame():
+def test_every_header_player_has_a_car_but_while_it_respawns():
     frames = _frames(real_replays.REGULATION)
-    assert all(
-        sorted(car[0] for car in frame["cars"]) == list(range(6)) for frame in frames
-    )
+    rows = [sorted(car[0] for car in frame["cars"]) for frame in frames]
+    assert rows[0] == list(range(6))
+    assert all(set(frame_rows) <= set(range(6)) for frame_rows in rows)
+    # A car is gone for a frame or few after a goal or its own demo, until the
+    # new one sends where it is
+    for row in range(6):
+        gap = longest = 0
+        for frame_rows in rows:
+            gap = 0 if row in frame_rows else gap + 1
+            longest = max(longest, gap)
+        assert longest <= 3
     times = [frame["time"] for frame in frames]
     assert times == sorted(times) and times[0] >= 0.0
+
+
+def test_no_car_is_listed_before_it_sends_a_position():
+    """Regression: a car with only a team or boost was put at (0, 0, 17)."""
+    for name in (real_replays.REGULATION, real_replays.WITH_LEAVERS):
+        assert not any(
+            tuple(car[2]) == (0.0, 0.0, 17.0)
+            for frame in _frames(name)
+            for car in frame["cars"]
+        )
+
+
+def test_the_clock_starts_at_five_minutes_and_never_rises_in_regulation():
+    for name in (real_replays.REGULATION, real_replays.OVERTIME):
+        frames = _frames(name)
+        assert frames[0]["seconds_remaining"] == 300
+        clock = [f["seconds_remaining"] for f in frames if not f["overtime"]]
+        assert all(b <= a for a, b in zip(clock, clock[1:], strict=False))
+
+
+def test_overtime_frames_are_flagged_and_count_up():
+    overtime = [f for f in _frames(real_replays.OVERTIME) if f["overtime"]]
+    assert overtime and overtime[0]["seconds_remaining"] == 0
+    clock = [f["seconds_remaining"] for f in overtime]
+    assert clock == sorted(clock) and clock[-1] > 0
+    assert not any(f["overtime"] for f in _frames(real_replays.REGULATION))
+
+
+def test_the_game_names_its_playlist():
+    assert {f["playlist"] for f in _frames(real_replays.REGULATION)} == {13}
+    assert {f["playlist"] for f in _frames(real_replays.HOOPS, pads=False)} == {27}
 
 
 def test_a_car_has_its_team_motion_rotation_and_boost():

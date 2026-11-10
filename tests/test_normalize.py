@@ -166,3 +166,13 @@ def test_cars_say_when_they_jump_double_jump_and_flip():
         False,
         True,
     )
+
+
+def test_frames_carry_the_games_clock_and_overtime():
+    frame = _one(seconds_remaining=12, overtime=True)
+    assert (frame.seconds_remaining, frame.overtime) == (12, True)
+    # A frame the game sent neither on
+    plain = _one()
+    assert (plain.seconds_remaining, plain.overtime) == (None, False)
+    unsent = _one(seconds_remaining=None, overtime=False)
+    assert (unsent.seconds_remaining, unsent.overtime) == (None, False)
