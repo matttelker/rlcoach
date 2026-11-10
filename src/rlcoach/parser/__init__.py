@@ -43,6 +43,11 @@ def read_frames(
     - "ball": its position and velocity, each (x, y, z)
     - "hit_team": the team that touched the ball last, or None before a kickoff's
       first touch
+    - "seconds_remaining": the game clock in whole seconds, or None before the
+      game sends it. In overtime it counts up from zero
+    - "overtime": whether the game is in overtime
+    - "playlist": the game's number for the playlist it was made in, or None
+      before the game sends it
     - "cars": (row, team, position, velocity, angular velocity, rotation, boost,
       demolished, (jumping, double jumping, flipping)) for each player's car. The
       row is the player's in the header, or a number past them for someone who

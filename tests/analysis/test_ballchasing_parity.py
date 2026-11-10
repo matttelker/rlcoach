@@ -29,7 +29,6 @@ EXACT = [
     ("saves", "saves"),
     ("shots", "shots"),
     ("score", "score"),
-    ("shooting percentage", "shooting_pct"),
     ("demos inflicted", "demos_inflicted"),
     ("demos taken", "demos_taken"),
     ("epic saves", "epic_saves"),
@@ -55,8 +54,7 @@ def game(request) -> list[tuple[dict[str, str], dict]]:
     """Each player's Ballchasing row in a game, with our stats for them.
 
     Where we knowingly differ, the row is changed to what we say: Ballchasing
-    gives two goals from one shot 200% where we stop at 100%, and doesn't count
-    a demo with no attacker at the very end of a game.
+    gives two goals from one shot 200% where we stop at 100%.
     """
     name = request.param
     with real_replays.players_csv(name).open(encoding="utf-8-sig") as handle:
@@ -67,16 +65,10 @@ def game(request) -> list[tuple[dict[str, str], dict]]:
         for identity in build_player_identities(loaded.header.players)
     }
     stats = player_stats(loaded, ids.values())
-    last = loaded.demos[-1] if loaded.demos else None
-    ending = last.victim if last and last.attacker is None else None
-    if ending and loaded.frames[-1].timestamp - last.t > 1.0:
-        ending = None
     players = []
     for row in rows:
         row = dict(row)
         row["shooting percentage"] = str(min(100.0, float(row["shooting percentage"])))
-        if ids[row["player name"]] == ending:
-            row["demos taken"] = str(int(row["demos taken"]) + 1)
         players.append((row, stats[ids[row["player name"]]]))
     return players
 

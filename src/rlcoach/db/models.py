@@ -92,7 +92,6 @@ class PlayerGameStats(Base):
     assists: Mapped[int | None] = mapped_column(default=0)
     saves: Mapped[int | None] = mapped_column(default=0)
     shots: Mapped[int | None] = mapped_column(default=0)
-    shooting_pct: Mapped[float | None]
     score: Mapped[int | None] = mapped_column(default=0)
     demos_inflicted: Mapped[int | None] = mapped_column(default=0)
     demos_taken: Mapped[int | None] = mapped_column(default=0)
@@ -104,7 +103,7 @@ class PlayerGameStats(Base):
     centers: Mapped[int | None]
     aerial_hits: Mapped[int | None]
 
-    bcpm: Mapped[float | None]  # Boost used per minute, Ballchasing's BCPM
+    bcpm: Mapped[float | None]  # Boost collected per minute, as the game counts pickups
     avg_boost: Mapped[float | None]
     time_zero_boost_s: Mapped[float | None]
     time_full_boost_s: Mapped[float | None]
@@ -115,9 +114,6 @@ class PlayerGameStats(Base):
     time_supersonic_s: Mapped[float | None]
 
     behind_ball_pct: Mapped[float | None]
-    first_man_pct: Mapped[float | None]
-    second_man_pct: Mapped[float | None]
-    third_man_pct: Mapped[float | None]
 
     replay: Mapped[Replay] = relationship(back_populates="player_stats")
 
@@ -178,6 +174,40 @@ class GameReview(Base):
         cascade="all, delete-orphan",
         order_by="ReviewDemo.t",
     )
+    situations: Mapped[list[ReviewSituation]] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewSituation.t",
+    )
+
+
+class ReviewSituation(Base):
+    """One choice a car faced in a game, every car's, and whether a goal against
+    followed (see `analysis.situations`).
+
+    `kind` is the situation, `bad` whether the car made the choice the review
+    warns against, and `zone` where the ball was, from that car's side:
+    "own_third", "own_half" or "their_half".
+    """
+
+    __tablename__ = "review_situations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE")
+    )
+    kind: Mapped[str]
+    player_id: Mapped[str]
+    is_me: Mapped[bool]
+    t: Mapped[float]
+    seconds_left: Mapped[float]
+    zone: Mapped[str]
+    bad: Mapped[bool]
+    conceded: Mapped[bool]
+
+    review: Mapped[GameReview] = relationship(back_populates="situations")
+
+    __table_args__ = (Index("ix_review_situations_replay", "replay_id"),)
 
 
 class ReviewMistake(Base):

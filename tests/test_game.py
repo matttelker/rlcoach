@@ -9,6 +9,7 @@ import pytest
 import rlcoach.game as game_module
 from rlcoach.events import detect_touches
 from rlcoach.game import NoFramesError, game_from_frames, read_game
+from rlcoach.modes import EXTRA_MODE, playlist_of
 from rlcoach.parser.types import Header, PlayerInfo
 from rlcoach.report import _went_to_overtime
 from tests.fixtures import real_replays
@@ -50,13 +51,23 @@ def test_a_real_replay_is_parsed_once_into_frames_and_events(counted):
 def test_a_header_already_read_is_not_read_again(monkeypatch):
     header = Header(map_name="Stadium_P", team_size=1)
     frames = create_simple_replay_frames(duration_seconds=1.0)
+    raw = [{"playlist": None}, {"playlist": 11}, {"playlist": 13}]
     monkeypatch.setattr(
         game_module, "read_header", lambda path: pytest.fail("read the header")
     )
-    monkeypatch.setattr(game_module, "read_frames", lambda path, pads: frames)
-    monkeypatch.setattr(game_module, "build_timeline", lambda header, raw: raw)
+    monkeypatch.setattr(game_module, "read_frames", lambda path, pads: raw)
+    monkeypatch.setattr(game_module, "build_timeline", lambda header, raw: frames)
     game = read_game(Path("x.replay"), header)
     assert game.header is header and game.frames == frames
+    # The first playlist the game sends
+    assert game.playlist_id == 11
+
+
+def test_a_replay_without_a_playlist_has_no_id(monkeypatch):
+    frames = create_simple_replay_frames(duration_seconds=1.0)
+    monkeypatch.setattr(game_module, "read_frames", lambda path, pads: [{}])
+    monkeypatch.setattr(game_module, "build_timeline", lambda header, raw: frames)
+    assert read_game(Path("x.replay"), Header()).playlist_id is None
 
 
 def test_a_replay_without_frames_is_an_error(monkeypatch):
@@ -93,6 +104,23 @@ def test_real_games_show_whether_they_went_to_overtime(counted, regulation):
     """Regression: current headers carry no overtime flag, so every game said no."""
     # 2-1, settled by an overtime goal
     game = counted[0]
-    assert _went_to_overtime(game.kickoffs) is True
+    assert _went_to_overtime(game) is True
+    assert any(frame.overtime for frame in game.frames)
     # 1-4 in regulation
-    assert _went_to_overtime(regulation.kickoffs) is False
+    assert _went_to_overtime(regulation) is False
+    assert not any(frame.overtime for frame in regulation.frames)
+
+
+def test_real_games_carry_the_games_own_clock(counted, regulation):
+    for game in (counted[0], regulation):
+        assert game.frames[0].seconds_remaining == 300
+
+
+def test_real_games_name_their_playlist(regulation):
+    # Ranked standard
+    assert regulation.playlist_id == 13
+    assert playlist_of(regulation.header, regulation.playlist_id) == "STANDARD"
+    hoops = read_game(real_replays.replay(real_replays.HOOPS))
+    # Hoops has a number of its own, so it stays an extra mode
+    assert hoops.playlist_id == 27
+    assert playlist_of(hoops.header, hoops.playlist_id) == EXTRA_MODE

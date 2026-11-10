@@ -69,12 +69,16 @@ def create_test_frame(
     demos: list[ParserDemoEvent] | None = None,
     pad_events: list[BoostPadEventFrame] | None = None,
     stat_counts: list[StatCount] | None = None,
+    seconds_remaining: int | None = None,
+    overtime: bool = False,
 ) -> Frame:
     """A frame with these cars and the parser's events on it."""
     return Frame(
         timestamp=timestamp,
         ball=ball or create_test_ball(),
         hit_team=hit_team,
+        seconds_remaining=seconds_remaining,
+        overtime=overtime,
         players=players,
         dodges=dodges or [],
         touch_counts=touches or [],

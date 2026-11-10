@@ -3,7 +3,6 @@ import { NavLink, Outlet } from 'react-router-dom';
 const TABS = [
   { to: 'trends', label: 'Trends' },
   { to: 'compare', label: 'Compare' },
-  { to: 'benchmarks', label: 'Benchmarks' },
 ];
 
 export function Stats() {

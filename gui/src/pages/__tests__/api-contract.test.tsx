@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 
-import { Benchmarks } from '../Benchmarks';
 import { Coach, GradesTable } from '../Coach';
 import { Compare } from '../Compare';
 import { GameDetail } from '../GameDetail';
@@ -20,7 +19,6 @@ import type {
   ReplayDetail,
   ReplayReview,
   TrendsResponse,
-  WeaknessesResponse,
 } from '../../types/api';
 
 // These payloads mirror real API responses. Pages once rendered against a
@@ -32,8 +30,39 @@ const LAST_BACK: CategorySummary = {
   goals_cost: 4,
   games: 10,
   per_game: 0.4,
-  latest_per_game: 0.67,
-  before_per_game: 0.29,
+  recent_per_game: 0.5,
+  earlier_per_game: 1.4,
+  trend_games: 10,
+  cost_per_game: 0.2,
+  cost_measured: true,
+  situations: [
+    {
+      kind: 'shot_last_back',
+      what: 'shots at your goal with you last back',
+      bad_label: 'out of position',
+      count: 106,
+      bad: 19,
+      bad_share: 0.179,
+      others_bad_share: 0.124,
+      conceded_after_bad: 9,
+      extra_risk: 0.2269,
+      proven: true,
+      goals_per_game: 0.105,
+    },
+    {
+      kind: 'last_back_challenge',
+      what: '50/50s as the last player back',
+      bad_label: 'lost',
+      count: 0,
+      bad: 0,
+      bad_share: null,
+      others_bad_share: 0.48,
+      conceded_after_bad: 0,
+      extra_risk: 0.14,
+      proven: true,
+      goals_per_game: 0,
+    },
+  ],
   sessions: [
     { play_date: '2026-10-31', games: 7, flags: 2 },
     { play_date: '2026-11-05', games: 3, flags: 2 },
@@ -51,8 +80,12 @@ const GOALKEEPING: CategorySummary = {
   flags: 0,
   goals_cost: 0,
   per_game: 0,
-  latest_per_game: 0,
-  before_per_game: 0,
+  recent_per_game: null,
+  earlier_per_game: null,
+  trend_games: 0,
+  cost_per_game: 0.05,
+  cost_measured: false,
+  situations: [],
   kinds: {},
   top_kind: null,
   cue: null,
@@ -122,19 +155,6 @@ const KICKOFFS: KickoffSummary = {
       status: 'later',
     },
     {
-      key: 'one_goes',
-      title: 'One goes, the rest support',
-      level: 'Platinum to Diamond',
-      measure: 'Kickoffs where only one of you went',
-      count: 251,
-      of: 270,
-      value: 0.93,
-      target: 0.95,
-      why: 'Two cars on the ball leave nobody for where it goes next.',
-      how: 'Only one of you goes.',
-      status: 'later',
-    },
-    {
       key: 'speedflip',
       title: 'Learn the speedflip',
       level: 'Diamond to Champion',
@@ -196,7 +216,7 @@ const COACH: CoachResponse = {
       },
     ],
   },
-  targets: [LAST_BACK],
+  targets: [LAST_BACK, GOALKEEPING],
   categories: [LAST_BACK, GOALKEEPING],
   highlights: [
     {
@@ -383,12 +403,43 @@ describe('Coach', () => {
   it('renders no placeholder text', () => {
     expect(html).not.toContain('NaN');
     expect(html).not.toContain('undefined');
+    expect(html).not.toContain('null');
+    expect(html).not.toContain('Infinity');
   });
 
-  it('leads with the target that cost the most goals, and its cue', () => {
-    expect(html).toContain('Cost you 4 goals in 10 games');
+  it('leads with what is holding you back, what it costs and its cue', () => {
+    expect(html).toContain('holding you back');
+    expect(html).toContain('Costs you about 1 goal every 5 games');
     expect(html).toContain('keep the ball in front of you');
     expect(html).toContain('Last back upfield ×2');
+  });
+
+  it('backs a measured target with its evidence', () => {
+    expect(html).toContain(
+      'Shots at your goal with you last back: 19 of 106 out of position (18%). Players in your games: 12%.',
+    );
+    expect(html).toContain('When that happens, a goal against follows 23 points more often.');
+    expect(html).toContain('No 50/50s as the last player back in these games yet.');
+  });
+
+  it('says an unmeasured target is an estimate', () => {
+    expect(html).toContain('Costs you about 1 goal every 20 games');
+    expect(html).toContain('Estimated from the goals it led to.');
+  });
+
+  it('words the trend over your last games, and shows none without enough games', () => {
+    expect(html).toContain('0.5 a game over your last 10 games, 1.4 over the 10 before');
+    expect(html).toContain('too few games yet to see a trend');
+  });
+
+  it('shows the cost a game in the category table', () => {
+    expect(html).toContain('Goals a game');
+    expect(html).toContain('0.20');
+    expect(html).toContain('estimated');
+  });
+
+  it('never presents both going for a kickoff as a mistake', () => {
+    expect(html).not.toContain('One goes');
   });
 
   it('shows the session and says which games still need a review', () => {
@@ -440,7 +491,7 @@ describe('Coach from an API without kickoffs', () => {
 
   it('leaves the kickoffs out', () => {
     expect(html).not.toContain('When you go');
-    expect(html).toContain('Training targets');
+    expect(html).toContain('holding you back');
   });
 });
 
@@ -561,18 +612,42 @@ describe('GameDetail', () => {
   });
 });
 
-// From GET /api/weaknesses and GET /api/patterns on real games
-const WEAKNESSES: WeaknessesResponse = {
-  game_count: 30,
-  has_benchmarks: true,
+// Built from stats.py's shape: a scaled stat's rank average is Ballchasing's times 1.051
+const COMPARISON: CompareResponse = {
+  target_rank: 'P1',
   playlist: 'STANDARD',
-  rank: 'P1',
-  strengths: [],
-  weaknesses: [
-    { metric: 'bcpm', my_value: 206.69, severity: 'critical', target_median: 261.9, z_score: -1.5 },
+  game_count: 31,
+  min_games: 10,
+  placements: [
+    {
+      metric: 'bcpm',
+      games: 31,
+      my_value: 206.69,
+      target_average: 275.26,
+      gap: -68.57,
+      margin: 12.4,
+      verdict: 'below',
+      level_low: 'below G1',
+      level_high: 'below G1',
+      scaled: true,
+    },
+    {
+      metric: 'saves',
+      games: 31,
+      my_value: 1.32,
+      target_average: 1.4,
+      gap: -0.08,
+      margin: 0.36,
+      verdict: 'level',
+      level_low: 'G3',
+      level_high: 'GC',
+      scaled: false,
+    },
   ],
+  context: [{ metric: 'goals', my_value: 0.71, target_average: 0.68 }],
 };
 
+// From GET /api/patterns on real games
 const PATTERNS: PatternsResponse = {
   loss_count: 12,
   min_games: 5,
@@ -584,16 +659,49 @@ const PATTERNS: PatternsResponse = {
   ],
 };
 
-describe('Benchmarks', () => {
+const TRENDS: TrendsResponse = {
+  metric: 'bcpm',
+  period: '30d',
+  playlist: 'STANDARD',
+  rank: 'P1',
+  rank_average: 275.26,
+  values: [{ date: '2026-11-07', value: 206.69 }],
+};
+
+describe('Compare', () => {
   const html = renderWithCache(
     [
-      [['weaknesses', '30d', undefined, undefined], WEAKNESSES],
+      [['compare', undefined, '30d', undefined], COMPARISON],
       [['patterns', '30d', undefined], PATTERNS],
     ],
     '/',
-    <Benchmarks />,
+    <Compare />,
   );
-  const row = (metric: string) => html.split('<li').find((item) => item.includes(`>${metric}<`)) ?? '';
+  const row = (name: string) => html.split('<li').find((item) => item.includes(`>${name}<`)) ?? '';
+
+  it('opens on the rank the API chose from your config, by name', () => {
+    expect(html).toMatch(/Against (<!-- -->)?Platinum 1/);
+    expect(html).toContain('<option value="P1" selected="">Platinum 1</option>');
+  });
+
+  it('says when the rank average was converted from Ballchasing', () => {
+    const bcpm = row('Boost collected per minute');
+    expect(bcpm).toMatch(/You (<!-- -->)?207(<!-- -->)?, (<!-- -->)?Platinum 1(<!-- -->)? average (<!-- -->)?275/);
+    expect(bcpm).toContain('Below Platinum 1&#x27;s average. You&#x27;re below Gold 1 level.');
+    expect(bcpm).toContain('raised 5%');
+  });
+
+  it('says when chance covers the gap, and the ranks it spans', () => {
+    const saves = row('Saves');
+    expect(saves).toContain('About level with Platinum 1. The gap is within what chance gives over 31 games.');
+    expect(saves).toContain('Somewhere between Gold 3 and Grand Champion');
+    expect(saves).not.toContain('raised 5%');
+  });
+
+  it('shows the flat stats beside the rank average with no verdict', () => {
+    expect(html).toContain('barely change from rank to rank');
+    expect(html).toMatch(/Platinum 1(<!-- -->)? average<\/th>/);
+  });
 
   it('shows a stat that is higher in wins in green with a plus sign', () => {
     expect(row('SHOTS')).toContain('--color-success');
@@ -605,54 +713,17 @@ describe('Benchmarks', () => {
     expect(row('SAVES')).toContain('-1.78');
     expect(row('SAVES')).not.toContain('+');
   });
-
-  it('compares you with the rank the API chose from your config', () => {
-    expect(html).toMatch(/against (<!-- -->)?P1(<!-- -->)? players/);
-    expect(row('BCPM')).toMatch(/P1(<!-- -->)? median/);
-    expect(html).toContain('<option value="P1" selected="">P1</option>');
-  });
-});
-
-// From GET /api/compare and GET /api/trends without a rank
-const COMPARISON: CompareResponse = {
-  target_rank: 'P1',
-  playlist: 'STANDARD',
-  game_count: 30,
-  comparisons: [
-    {
-      metric: 'bcpm',
-      my_value: 206.69,
-      target_median: 261.9,
-      difference: -55.21,
-      difference_pct: -21.1,
-      direction: 'higher',
-    },
-  ],
-};
-
-const TRENDS: TrendsResponse = {
-  metric: 'bcpm',
-  period: '30d',
-  playlist: 'STANDARD',
-  rank: 'P1',
-  rank_median: 261.9,
-  values: [{ date: '2026-11-07', value: 206.69 }],
-};
-
-describe('Compare', () => {
-  const html = renderWithCache([[['compare', undefined, '30d', undefined], COMPARISON]], '/', <Compare />);
-
-  it('opens on the rank the API chose from your config', () => {
-    expect(html).toMatch(/Gap to (<!-- -->)?P1/);
-    expect(html).toContain('<option value="P1" selected="">P1</option>');
-    expect(html).not.toContain('GC1');
-  });
 });
 
 describe('Trends', () => {
   const html = renderWithCache([[['trends', 'bcpm', '30d', undefined], TRENDS]], '/', <Trends />);
 
-  it('offers the median of the rank in your config', () => {
-    expect(html).toMatch(/Show the (<!-- -->)?P1(<!-- -->)? median/);
+  it('offers the average of the rank in your config, by name', () => {
+    expect(html).toMatch(/Show the (<!-- -->)?Platinum 1(<!-- -->)? average/);
+  });
+
+  it('calls bcpm boost collected', () => {
+    expect(html).toContain('Boost collected per minute');
+    expect(html).not.toContain('Boost used');
   });
 });

@@ -1,31 +1,46 @@
-"""How your stats compare: in wins against losses, and against a rank.
+"""How your stats compare: in wins against losses, and against the ranks.
 
-Both measure a gap in standard deviations, so a stat that swings a lot from
-game to game needs a bigger gap to count. A stat with no spread at all can't
-be measured that way, so it's left out rather than given an infinite gap.
+Against the ranks, only the stats that rise from rank to rank say anything:
+boost collected per minute, saves and shots. Goals and assists a game are
+nearly flat from Gold to Grand Champion, because everyone plays their own
+rank, and average boost rises to Diamond and falls again. So those three are
+the ones placed on the ladder.
+
+A placement says which ranks' averages yours has reached, and whether the gap
+to the rank you're aiming at is real. Your average over a handful of games
+moves by chance, so both are judged with its margin: twice the standard error
+of your average, from how much the stat swings between your games. The level
+is a span of ranks, from the one your average less the margin reaches to the
+one your average plus the margin does. Saves and shots rise so little from
+rank to rank that 30 games span most of the ladder, and the span says so
+instead of naming one rank. Under `MIN_GAMES` games nothing is said.
+
+The benchmarks are Ballchasing's, so where it counts a stat differently its
+averages are put in our units first, and every page shows one number for a
+rank. It counts about 5% less boost collected than the
+game does: on three games and 18 players ours read 0.8% to 7.4% over, 5.1% on
+average, all of it in small pads, where ours matches the game's own pickup
+counter and Ballchasing's count is 15% lower.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-# The middle half of a normal distribution spans 1.35 standard deviations
-IQR_PER_SD = 1.35
+from .metrics import RANKS
 
-# How far past the median, in standard deviations, earns each label. The
-# first threshold a stat clears names it, so 0.67 means above about p75.
-SEVERITIES = (
-    (0.67, "strength"),
-    (0.0, "neutral"),
-    (-0.5, "low"),
-    (-1.0, "medium"),
-    (-2.0, "high"),
-)
-WORST = "critical"
-SEVERITY_ORDER = (WORST, "high", "medium", "low", "neutral", "strength")
+# The stats that rise with rank, which a placement means something for
+RANK_STATS = ("bcpm", "saves", "shots")
+# What to multiply Ballchasing's figure for a stat by to put it in our units
+FROM_BALLCHASING = {"bcpm": 1.051}
+# Fewer games than this say too little about your average
+MIN_GAMES = 10
+# How many standard errors the gap to the target must clear to be called real
+MARGIN_SE = 2.0
+BELOW_LADDER = "below " + RANKS[0]
 
 
 @dataclass(frozen=True)
@@ -47,14 +62,26 @@ class Pattern:
 
 
 @dataclass(frozen=True)
-class Standing:
-    """Your average for one stat against a rank's spread."""
+class Placement:
+    """Your average for one stat, placed among the ranks' averages."""
 
     metric: str
+    games: int
     my_value: float
-    median: float
-    z_score: float  # Standard deviations above the median
-    severity: str  # One of SEVERITY_ORDER
+    target_average: float  # In our units, as is everything here
+    gap: float  # my_value less target_average
+    margin: float | None  # The gap has to clear this to be real. None under MIN_GAMES
+    # "above", "below" or "level" with the target, or "too_few" games to say
+    verdict: str
+    # The highest ranks whose averages yours reaches at the bottom and the top
+    # of its margin, each a rank or "below G1". None under MIN_GAMES
+    level_low: str | None
+    level_high: str | None
+
+    @property
+    def scaled(self) -> bool:
+        """Whether the rank's average was converted from Ballchasing's units."""
+        return self.metric in FROM_BALLCHASING
 
 
 def _mean_and_sd(values: list[float]) -> tuple[float, float]:
@@ -92,29 +119,43 @@ def win_loss_patterns(
     return sorted(patterns, key=lambda p: -abs(p.effect_size))
 
 
-def severity(z_score: float, direction: str) -> str:
-    """Label a gap, flipping it for stats where lower is better."""
-    better = z_score if direction == "higher" else -z_score
-    return next((label for floor, label in SEVERITIES if better >= floor), WORST)
+def in_our_units(metric: str, value: float) -> float:
+    """A Ballchasing figure for a stat, as we count the stat."""
+    return value * FROM_BALLCHASING.get(metric, 1.0)
 
 
-def standings(
-    averages: Mapping[str, float], benchmarks: Mapping[str, Mapping[str, Any]]
-) -> list[Standing]:
-    """Your averages against benchmarks of {"p25", "median", "p75", "direction"}.
+def place(
+    metric: str, values: Sequence[float], averages: Mapping[str, float], target: str
+) -> Placement | None:
+    """Place one stat's games among the ranks. `averages` is each rank's
+    average as Ballchasing publishes it.
 
-    The spread comes from the benchmark's p25 to p75. Stats without a
-    benchmark are left out.
+    None without any games, or without an average for the target rank.
     """
-    results = []
-    for metric, value in averages.items():
-        bench = benchmarks.get(metric)
-        if bench is None:
-            continue
-        spread = (bench["p75"] - bench["p25"]) / IQR_PER_SD
-        if spread == 0:
-            continue
-        z = (value - bench["median"]) / spread
-        label = severity(z, bench.get("direction", "higher"))
-        results.append(Standing(metric, value, bench["median"], z, label))
-    return results
+    if not values or target not in averages:
+        return None
+    averages = {rank: in_our_units(metric, a) for rank, a in averages.items()}
+    mine, sd = _mean_and_sd(list(values))
+    gap = mine - averages[target]
+
+    def reached(value: float) -> str:
+        ranks = [r for r in RANKS if r in averages and averages[r] <= value]
+        return ranks[-1] if ranks else BELOW_LADDER
+
+    if len(values) < MIN_GAMES:
+        margin, verdict, low, high = None, "too_few", None, None
+    else:
+        margin = MARGIN_SE * sd / math.sqrt(len(values))
+        verdict = "level" if abs(gap) <= margin else "above" if gap > 0 else "below"
+        low, high = reached(mine - margin), reached(mine + margin)
+    return Placement(
+        metric=metric,
+        games=len(values),
+        my_value=mine,
+        target_average=averages[target],
+        gap=gap,
+        margin=margin,
+        verdict=verdict,
+        level_low=low,
+        level_high=high,
+    )

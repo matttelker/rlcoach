@@ -14,7 +14,6 @@ import type {
   ReplayReview,
   TagRequest,
   TrendsResponse,
-  WeaknessesResponse,
 } from '../types/api';
 
 /** The one connection every call goes through. Tests swap its adapter. */
@@ -57,8 +56,6 @@ export const getCoach = (query: StatsQuery) => get<CoachResponse>('/coach', quer
 export const getTrends = (query: StatsQuery & { metric: string }) => get<TrendsResponse>('/trends', query);
 
 export const getComparison = (query: StatsQuery & { rank?: string }) => get<CompareResponse>('/compare', query);
-
-export const getWeaknesses = (query: StatsQuery & { rank?: string }) => get<WeaknessesResponse>('/weaknesses', query);
 
 export const getPatterns = (query: StatsQuery) => get<PatternsResponse>('/patterns', query);
 

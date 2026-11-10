@@ -8,7 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from rlcoach.api.app import create_app, get_config
-from rlcoach.db.session import reset_engine
+from rlcoach.db.models import Benchmark
+from rlcoach.db.session import create_session, reset_engine
 
 
 @pytest.fixture
@@ -33,11 +34,12 @@ def test_starting_opens_your_database_and_loads_the_benchmarks(home):
     with TestClient(create_app()) as client:
         assert get_config().identity.display_names == ["Me"]
         health = client.get("/health").json()
-        benchmarks = client.get("/benchmarks").json()["items"]
+        with create_session() as session:
+            playlists = {b.playlist for b in session.query(Benchmark)}
     assert (home / "data" / "rlcoach.db").exists()
     assert health["status"] == "healthy"
     assert health["checks"] == {"database": "connected"}
-    assert {b["playlist"] for b in benchmarks} == {"DOUBLES", "STANDARD"}
+    assert playlists == {"DOUBLES", "STANDARD"}
     with pytest.raises(RuntimeError):
         get_config()
 

@@ -3,6 +3,11 @@
 The game can report one demolition more than once, first without the attacker.
 A report of the same car within 5 s and 200 uu of the last one is a repeat,
 and it fills in the attacker if the first left it out.
+
+A car can also be destroyed with nobody demolishing it: several at once just
+after a goal, or a leaver's car where it stood. Those never name an attacker
+and aren't demos: the scoreboard doesn't count them, nor does Ballchasing. On
+42 games they were 30 of 144.
 """
 
 from __future__ import annotations
@@ -47,4 +52,6 @@ def detect_demos(frames: list[Frame]) -> list[DemoEvent]:
                 continue
             last_of[demo.victim] = len(demos)
             demos.append(demo)
-    return sorted(demos, key=lambda demo: demo.t)
+    return sorted(
+        (demo for demo in demos if demo.attacker is not None), key=lambda demo: demo.t
+    )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rlcoach.field_constants import Vec3
+from rlcoach.field_constants import BACK_WALL_Y, Vec3
 from rlcoach.normalize import X_LIMIT, Y_LIMIT, Z_RANGE, build_timeline
 from rlcoach.parser.types import Header, PlayerInfo, Quaternion
 
@@ -93,6 +93,15 @@ def test_positions_are_held_to_the_field_but_speeds_are_not():
     assert frame.ball.velocity == Vec3(*far)
 
 
+def test_a_car_deep_in_the_net_keeps_its_position():
+    """A net is 880 uu deep, so a car inside it reads past the back wall."""
+    for y in (BACK_WALL_Y + 800.0, -BACK_WALL_Y - 800.0):
+        car = _one(_car(position=(0.0, y, 17.0))).players[0]
+        assert car.position == Vec3(0.0, y, 17.0)
+        ball = _one(ball=((0.0, y, 93.15), STILL)).ball
+        assert ball.position.y == y
+
+
 def test_boost_is_held_from_0_to_100():
     boosts = [_one(_car(boost=raw)).players[0].boost_amount for raw in (-5, 33, 250)]
     assert boosts == [0, 33, 100]
@@ -157,3 +166,13 @@ def test_cars_say_when_they_jump_double_jump_and_flip():
         False,
         True,
     )
+
+
+def test_frames_carry_the_games_clock_and_overtime():
+    frame = _one(seconds_remaining=12, overtime=True)
+    assert (frame.seconds_remaining, frame.overtime) == (12, True)
+    # A frame the game sent neither on
+    plain = _one()
+    assert (plain.seconds_remaining, plain.overtime) == (None, False)
+    unsent = _one(seconds_remaining=None, overtime=False)
+    assert (unsent.seconds_remaining, unsent.overtime) == (None, False)

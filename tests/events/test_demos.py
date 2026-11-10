@@ -68,3 +68,17 @@ def test_a_repeat_that_fills_in_the_attacker_is_where_its_report_saw_the_car():
 def test_a_demo_of_a_car_the_frame_doesnt_show_has_no_location():
     frame = create_test_frame(2.0, [], demos=[_demo(2.0, "attacker")])
     assert [d.location for d in detect_demos([frame])] == [None]
+
+
+def test_a_demolition_that_never_names_an_attacker_is_no_demo():
+    """A car destroyed after a goal, or a leaver's, isn't demolished by anyone."""
+    assert _found([_frame(2.0, HERE, _demo(2.0)), _frame(4.0, HERE, _demo(4.0))]) == []
+
+
+def test_a_real_demo_is_kept_beside_one_with_no_attacker():
+    frames = [
+        _frame(2.0, HERE, _demo(2.0)),
+        _frame(10.0, HERE, _demo(10.0, "attacker")),
+        _frame(12.0, ELSEWHERE, _demo(12.0)),
+    ]
+    assert _found(frames) == [(10.0, "victim", "attacker")]

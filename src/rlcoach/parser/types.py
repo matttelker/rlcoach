@@ -157,6 +157,10 @@ class Frame:
     # The team that touched the ball last, from the ball itself, which sends it on
     # the frame of a touch that changes it. None before a kickoff's first touch
     hit_team: int | None = None
+    # The game clock in whole seconds, on any replay that carries it. In overtime
+    # it counts up from zero
+    seconds_remaining: int | None = None
+    overtime: bool = False
     players: list[PlayerFrame] = field(default_factory=list)
     boost_pad_events: list[BoostPadEventFrame] = field(default_factory=list)
     dodges: list[Dodge] = field(default_factory=list)

@@ -34,6 +34,9 @@ def _games(session):
     add_benchmark(session, "goals", 1.0, 0.5, 1.5)
     add_benchmark(session, "avg_boost", 40.0, 30.0, 50.0)
     add_benchmark(session, "goals", 0.8, 0.4, 1.2, rank="C3")
+    add_benchmark(session, "bcpm", 290.0, 250.0, 330.0)
+    add_benchmark(session, "bcpm", 250.0, 210.0, 290.0, rank="C1")
+    add_benchmark(session, "saves", 1.0, 0.5, 1.5)
 
 
 @pytest.fixture
@@ -61,18 +64,25 @@ def test_trends_list_your_games_oldest_first_in_your_playlist(client):
     assert doubles["values"] == [{"date": doubles["values"][0]["date"], "value": 5}]
 
 
-def test_trends_carry_your_ranks_median_when_it_has_one(client):
+def test_trends_carry_your_ranks_average_when_it_has_one(client):
     goals = client.get("/trends?metric=goals").json()
-    assert (goals["rank"], goals["rank_median"]) == ("GC", 1.0)
-    assert client.get("/trends?metric=saves").json()["rank_median"] is None
+    assert (goals["rank"], goals["rank_average"]) == ("GC", 1.0)
+    assert "rank_median" not in goals
+    assert client.get("/trends?metric=shots").json()["rank_average"] is None
     doubles = client.get("/trends?metric=goals&playlist=DOUBLES").json()
-    assert doubles["rank_median"] is None
+    assert doubles["rank_average"] is None
 
 
-def test_trends_chart_the_games_own_counts_without_a_rank_median(client):
+def test_trends_put_the_ranks_boost_collected_in_your_units(client):
+    # Ballchasing counts about 5% less boost collected than we do
+    body = client.get("/trends?metric=bcpm").json()
+    assert body["rank_average"] == pytest.approx(290.0 * 1.051)
+
+
+def test_trends_chart_the_games_own_counts_without_a_rank_average(client):
     body = client.get("/trends?metric=epic_saves").json()
     assert sorted(v["value"] for v in body["values"]) == [0] * 6 + [1] * 6
-    assert body["rank_median"] is None
+    assert body["rank_average"] is None
 
 
 def test_trends_skip_games_without_the_stat_and_refuse_unknown_ones(client):
@@ -81,59 +91,77 @@ def test_trends_skip_games_without_the_stat_and_refuse_unknown_ones(client):
     assert client.get("/trends?metric=goals&period=14d").status_code == 400
 
 
-def test_benchmarks_filter_by_rank(client):
-    items = client.get("/benchmarks?rank=GC").json()["items"]
-    assert [b["metric"] for b in items] == ["avg_boost", "goals"]
-    assert items[1] == {
-        "metric": "goals",
-        "playlist": "STANDARD",
-        "rank_tier": "GC",
-        "median_value": 1.0,
-        "p25_value": 0.5,
-        "p75_value": 1.5,
-        "elite_threshold": pytest.approx(1.8),
-        "source": "test",
-    }
-
-
-def test_compare_gives_each_stats_gap_and_which_way_is_better(client):
+def test_compare_places_the_stats_that_rise_with_rank(client):
     body = client.get("/compare").json()
-    assert (body["game_count"], body["target_rank"]) == (12, "GC")
-    by_metric = {c["metric"]: c for c in body["comparisons"]}
-    assert list(by_metric) == [
-        "bcpm",
-        "avg_boost",
-        "goals",
-        "assists",
-        "saves",
-        "shots",
-    ]
-    assert by_metric["goals"] == {
-        "metric": "goals",
-        "my_value": 1.75,
-        "target_median": 1.0,
-        "difference": 0.75,
-        "difference_pct": 75.0,
-        "direction": "higher",
+    assert (body["game_count"], body["target_rank"], body["playlist"]) == (
+        12,
+        "GC",
+        "STANDARD",
+    )
+    assert body["min_games"] == 10
+    # No game has shots, so they aren't placed
+    by_metric = {p["metric"]: p for p in body["placements"]}
+    assert list(by_metric) == ["bcpm", "saves"]
+    # Ballchasing's 290 is 304.79 as we count, and the games swing 300 to 400
+    assert by_metric["bcpm"] == {
+        "metric": "bcpm",
+        "games": 12,
+        "my_value": 350.0,
+        "target_average": 304.79,
+        "gap": 45.21,
+        "margin": 30.15,
+        "verdict": "above",
+        "level_low": "GC",
+        "level_high": "GC",
+        "scaled": True,
     }
-    assert by_metric["avg_boost"]["direction"] == "lower"
-    assert by_metric["bcpm"]["target_median"] is None
-    assert by_metric["bcpm"]["difference_pct"] is None
+    # One save every game, the GC average exactly
+    saves = by_metric["saves"]
+    assert (saves["gap"], saves["margin"], saves["verdict"]) == (0.0, 0.0, "level")
+    assert saves["scaled"] is False
+
+
+def test_compare_shows_flat_stats_beside_the_ranks_average_only(client):
+    context = client.get("/compare").json()["context"]
+    # No game has assists
+    assert context == [
+        {"metric": "avg_boost", "my_value": 60.0, "target_average": 40.0},
+        {"metric": "goals", "my_value": 1.75, "target_average": 1.0},
+    ]
 
 
 def test_compare_without_games_and_with_a_bad_period(client):
     empty = client.get("/compare?playlist=DUEL").json()
-    assert (empty["comparisons"], empty["game_count"]) == ([], 0)
+    assert (empty["placements"], empty["context"], empty["game_count"]) == (
+        [],
+        [],
+        0,
+    )
     assert client.get("/compare?period=soon").status_code == 400
 
 
-def test_compare_and_weaknesses_take_another_rank(client):
+def test_compare_takes_another_rank(client):
     compare = client.get("/compare?rank=C3").json()
-    goals = next(c for c in compare["comparisons"] if c["metric"] == "goals")
-    assert (compare["target_rank"], goals["target_median"]) == ("C3", 0.8)
-    weaknesses = client.get("/weaknesses?rank=C3").json()
-    assert (weaknesses["rank"], weaknesses["has_benchmarks"]) == ("C3", True)
-    assert [s["target_median"] for s in weaknesses["strengths"]] == [0.8]
+    assert compare["target_rank"] == "C3"
+    # Only goals have a C3 average, and goals aren't placed
+    assert compare["placements"] == []
+    assert compare["context"] == [
+        {"metric": "goals", "my_value": 1.75, "target_average": 0.8}
+    ]
+
+
+def test_too_few_games_place_a_stat_without_a_verdict(client):
+    [bcpm, _] = client.get("/compare?period=3d").json()["placements"]
+    assert (bcpm["games"], bcpm["verdict"]) == (8, "too_few")
+    assert (bcpm["margin"], bcpm["level_low"], bcpm["level_high"]) == (
+        None,
+        None,
+        None,
+    )
+
+
+def test_weaknesses_are_gone(client):
+    assert client.get("/weaknesses").status_code == 404
 
 
 def test_patterns_find_what_differs_in_wins(client):
@@ -144,28 +172,6 @@ def test_patterns_find_what_differs_in_wins(client):
     assert goals["direction"] == "higher_in_wins"
     assert (goals["win_avg"], goals["loss_avg"], goals["delta"]) == (3.5, 0.0, 3.5)
     assert client.get("/patterns?min_games=7").json()["patterns"] == []
-
-
-def test_holding_too_much_boost_is_a_weakness_and_goals_a_strength(client):
-    body = client.get("/weaknesses").json()
-    assert (body["rank"], body["has_benchmarks"]) == ("GC", True)
-    assert [w["metric"] for w in body["weaknesses"]] == ["avg_boost"]
-    assert body["weaknesses"][0]["severity"] == "high"
-    assert body["strengths"] == [
-        {
-            "metric": "goals",
-            "my_value": 1.75,
-            "target_median": 1.0,
-            "z_score": 1.01,
-            "severity": "strength",
-        }
-    ]
-
-
-def test_weaknesses_say_when_there_are_no_benchmarks(client):
-    assert client.get("/weaknesses?rank=G1").json()["has_benchmarks"] is False
-    empty = client.get("/weaknesses?playlist=DUEL").json()
-    assert (empty["game_count"], empty["has_benchmarks"]) == (0, False)
 
 
 def test_playlist_and_rank_fall_back_to_defaults_without_a_config(tmp_path):

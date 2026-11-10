@@ -15,8 +15,6 @@ use crate::roster::Roster;
 
 /// Where the ball sits for a kickoff, which is where it starts.
 const BALL_AT_REST: Spot = (0.0, 0.0, 93.15);
-/// Where a car is taken to be before it sends a position.
-const CAR_UNPLACED: Spot = (0.0, 0.0, 17.0);
 /// What a car holds before it sends its boost: the kickoff amount.
 const KICKOFF_BOOST: i64 = 33;
 
@@ -29,6 +27,11 @@ const BOOST_AMOUNT: &str = "TAGame.CarComponent_Boost_TA:ReplicatedBoostAmount";
 const FIRST_TOUCHES: &str = "TAGame.PRI_TA:MatchFirstTouches";
 const BALL_TOUCHES: &str = "TAGame.PRI_TA:BallTouches";
 const HIT_TEAM: &str = "TAGame.Ball_TA:HitTeamNum";
+/// The game clock, in whole seconds. In overtime it counts up from zero.
+const SECONDS_REMAINING: &str = "TAGame.GameEvent_Soccar_TA:SecondsRemaining";
+const OVERTIME: &str = "TAGame.GameEvent_Soccar_TA:bOverTime";
+/// The playlist the match was made in, by the game's own number.
+const PLAYLIST: &str = "ProjectX.GRI_X:ReplicatedGamePlaylist";
 /// A car component in use: jumping, flipping and so on.
 const ACTIVE: &str = "TAGame.CarComponent_TA:ReplicatedActive";
 /// The game's own per-player counts that the header's scoreboard leaves out, by the
@@ -129,6 +132,12 @@ pub struct FrameOut {
     /// The team that touched the ball last, which the ball sends on the frame of a
     /// touch that changes it. None before the kickoff's first touch.
     pub hit_team: Option<i64>,
+    /// The game clock in whole seconds, once the game has sent it. In overtime it
+    /// counts up from zero.
+    pub seconds_remaining: Option<i64>,
+    pub overtime: bool,
+    /// The game's number for the playlist, once it has sent one.
+    pub playlist: Option<i64>,
     pub cars: Vec<CarFrame>,
     /// A pad taken: its index, the player and their team, and when.
     pub pickups: Vec<(usize, usize, Option<i64>, f32)>,
@@ -163,6 +172,9 @@ pub struct Game<'a> {
     ball_position: Spot,
     ball_velocity: Spot,
     hit_team: Option<i64>,
+    seconds_remaining: Option<i64>,
+    overtime: bool,
+    playlist: Option<i64>,
     roster: Roster,
     pads: Pads,
     /// Each PRI's first-touch count. The game keeps re-sending it.
@@ -184,6 +196,9 @@ struct Attributes {
     first_touches: Option<usize>,
     ball_touches: Option<usize>,
     hit_team: Option<usize>,
+    seconds_remaining: Option<usize>,
+    overtime: Option<usize>,
+    playlist: Option<usize>,
     active: Option<usize>,
     counters: [Option<usize>; COUNTERS.len()],
 }
@@ -200,6 +215,9 @@ impl Attributes {
             first_touches: id(FIRST_TOUCHES),
             ball_touches: id(BALL_TOUCHES),
             hit_team: id(HIT_TEAM),
+            seconds_remaining: id(SECONDS_REMAINING),
+            overtime: id(OVERTIME),
+            playlist: id(PLAYLIST),
             active: id(ACTIVE),
             counters: COUNTERS.map(|(name, _)| id(name)),
         }
@@ -262,6 +280,9 @@ impl<'a> Game<'a> {
             ball_position: BALL_AT_REST,
             ball_velocity: (0.0, 0.0, 0.0),
             hit_team: None,
+            seconds_remaining: None,
+            overtime: false,
+            playlist: None,
             roster: Roster::new(rows, stream_names),
             pads: Pads::new(pad_spots),
             first_touch_counts: HashMap::new(),
@@ -391,6 +412,15 @@ impl<'a> Game<'a> {
             }
             Attribute::Location(torque) if attribute == names.dodge_torque => {
                 events.dodges.push((self.car_of(actor), spot(*torque)));
+            }
+            Attribute::Int(seconds) if attribute == names.seconds_remaining => {
+                self.seconds_remaining = Some(i64::from(*seconds));
+            }
+            Attribute::Boolean(overtime) if attribute == names.overtime => {
+                self.overtime = *overtime;
+            }
+            Attribute::Int(playlist) if attribute == names.playlist => {
+                self.playlist = Some(i64::from(*playlist));
             }
             Attribute::Int(count) if attribute == names.first_touches => {
                 // Only a step of one is a new first touch. A PRI's first count is the
@@ -529,10 +559,10 @@ impl<'a> Game<'a> {
         for actor in actors {
             let car = &self.cars[&actor];
             let team = self.roster.team(actor);
-            if car.position.is_none() && car.boost.is_none() && team.is_none() {
-                continue; // Nothing sent yet
-            }
-            let position = car.position.unwrap_or(CAR_UNPLACED);
+            // A car isn't on the field until it has sent where it is
+            let Some(position) = car.position else {
+                continue;
+            };
             let team = team.unwrap_or(if position.1 > 0.0 { 1 } else { 0 });
             let row = match self.roster.row(actor) {
                 Some(row) => Some(row),
@@ -563,6 +593,9 @@ impl<'a> Game<'a> {
             ball_position: self.ball_position,
             ball_velocity: self.ball_velocity,
             hit_team: self.hit_team,
+            seconds_remaining: self.seconds_remaining,
+            overtime: self.overtime,
+            playlist: self.playlist,
             cars: cars.into_values().collect(),
             pickups: events
                 .pickups
@@ -622,7 +655,7 @@ mod tests {
     use super::*;
     use boxcars::{
         ActiveActor, ActorId, DemolishFx, NewActor, ObjectId, PickupNew, Quaternion,
-        ReplicatedBoost, StreamId, Trajectory, UpdatedAttribute,
+        ReplicatedBoost, StreamId, TeamPaint, Trajectory, UpdatedAttribute,
     };
 
     const BALL: i32 = 0;
@@ -641,6 +674,9 @@ mod tests {
     const BOOST: &str = "TAGame.CarComponent_Boost_TA:ReplicatedBoost";
     const PICKUP: &str = "TAGame.VehiclePickup_TA:NewReplicatedPickupData";
     const DEMOLISH: &str = "TAGame.Car_TA:ReplicatedDemolishGoalExplosion";
+    const TEAM_PAINT: &str = "TAGame.Car_TA:TeamPaint";
+    const GAME_EVENT: i32 = 7;
+    const GRI: i32 = 8;
     const PAD_SPOT: Spot = (150.0, 0.0, 70.0);
     const ZERO: Vector3f = Vector3f {
         x: 0.0,
@@ -677,6 +713,10 @@ mod tests {
                 BOOST,
                 PICKUP,
                 DEMOLISH,
+                TEAM_PAINT,
+                SECONDS_REMAINING,
+                OVERTIME,
+                PLAYLIST,
             ];
             Script {
                 objects: objects.map(String::from).to_vec(),
@@ -820,6 +860,73 @@ mod tests {
         assert!(out[0].cars.is_empty(), "a car that has sent nothing");
         let car = &out[1].cars[0];
         assert_eq!((car.row, car.team, car.boost), (1, 1, KICKOFF_BOOST));
+    }
+
+    #[test]
+    fn a_car_isnt_listed_until_it_sends_where_it_is() {
+        let paint = TeamPaint {
+            team: 1,
+            primary_color: 0,
+            accent_color: 0,
+            primary_finish: 0,
+            accent_finish: 0,
+        };
+        let some = ReplicatedBoost {
+            grant_count: 0,
+            boost_amount: 51,
+            unused1: 0,
+            unused2: 0,
+        };
+        let mut script = Script::new();
+        script
+            .frame(0.0)
+            .spawn(CAR, CAR_OBJECT)
+            .spawn(COMPONENT, COMPONENT_OBJECT)
+            .link(COMPONENT, COMPONENT_CAR, CAR)
+            .set(CAR, TEAM_PAINT, Attribute::TeamPaint(paint))
+            .set(COMPONENT, BOOST, Attribute::ReplicatedBoost(some));
+        // Placed in blue's half, so the team and boost can only be what it sent
+        script.frame(0.1).place(CAR, (0.0, -3000.0, 17.0));
+        let out = script.run();
+        assert!(out[0].cars.is_empty(), "a car with a team and boost only");
+        let car = &out[1].cars[0];
+        assert_eq!((car.row, car.team, car.boost), (1, 1, 20));
+        assert_eq!(car.position, (0.0, -3000.0, 17.0));
+    }
+
+    #[test]
+    fn the_clock_overtime_and_playlist_are_held_once_sent() {
+        let mut script = Script::new();
+        script
+            .kickoff()
+            .spawn(GAME_EVENT, PRI_OBJECT)
+            .spawn(GRI, PRI_OBJECT)
+            .frame(0.1)
+            .set(GAME_EVENT, SECONDS_REMAINING, Attribute::Int(300))
+            .set(GRI, PLAYLIST, Attribute::Int(13))
+            .frame(0.2)
+            .frame(0.3)
+            .set(GAME_EVENT, SECONDS_REMAINING, Attribute::Int(0))
+            .set(GAME_EVENT, OVERTIME, Attribute::Boolean(true))
+            .frame(0.4)
+            .set(GAME_EVENT, SECONDS_REMAINING, Attribute::Int(1))
+            .frame(0.5);
+        let states: Vec<_> = script
+            .run()
+            .iter()
+            .map(|f| (f.seconds_remaining, f.overtime, f.playlist))
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                (None, false, None),
+                (Some(300), false, Some(13)),
+                (Some(300), false, Some(13)),
+                (Some(0), true, Some(13)),
+                (Some(1), true, Some(13)),
+                (Some(1), true, Some(13)),
+            ]
+        );
     }
 
     #[test]

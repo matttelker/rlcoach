@@ -22,6 +22,7 @@ The only users are the player, through the dashboard, and Claude, through chats 
 | Loading a replay into the database | `src/rlcoach/pipeline.py`, `src/rlcoach/db/games.py` |
 | Game modes and playlists | `src/rlcoach/modes.py` |
 | Mistake detector | `src/rlcoach/analysis/mistakes.py` |
+| Situations: how often each judged choice came up, for every car, and whether a goal followed. The evidence each rule stands on | `src/rlcoach/analysis/situations.py` |
 | Stored reviews, training targets and highlights | `src/rlcoach/db/reviews.py`, `src/rlcoach/coaching.py` |
 | Kickoff coaching: how you play kickoffs and the next step to learn | `src/rlcoach/kickoff_coaching.py`, `src/rlcoach/events/kickoffs.py` |
 | Your right or wrong grades on the review's calls | `src/rlcoach/db/grades.py` |
@@ -132,7 +133,8 @@ The tests that read real replays use your own, which stay out of git. Point `RLC
 - Mirror new source modules with tests under `tests/`. Build synthetic data with `tests/fixtures/builders.py`.
 - `analysis/__init__.py` computes each player's stats, exactly the columns in `STAT_COLUMNS` in `db/games.py`. Add a stat only when the dashboard or the coaching will read it.
 - Changing database models or analysis means reloading replays, because `~/.rlcoach` holds results from the old code. There are no migrations. New tables are the exception: `init_db` creates them in an existing database.
-- After changing the mistake detector or an event detector (touches, 50/50s, demos or kickoffs), run `uv run rlcoach reviews --redo` so stored reviews and events match the new rules. Each game's kickoffs, touches, 50/50s and demos, every car's, are stored with its review.
+- After changing the mistake detector or an event detector (touches, 50/50s, demos or kickoffs), run `uv run rlcoach reviews --redo` so stored reviews and events match the new rules. Each game's kickoffs, touches, 50/50s, demos and situations, every car's, are stored with its review.
+- A coaching rule has to earn its place. Before adding or changing one, give it a situation in `analysis/situations.py` and compare how often a goal against follows the bad choice and the good one, across every player, where the ball was in the same part of the field. Keep a rule the outcomes support, and drop one they contradict. The player can't judge a call themselves, so outcomes are the check.
 - Keep analysis local. Nothing in the parser or analyzers may call the network.
 
 ## Git

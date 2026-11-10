@@ -19,11 +19,11 @@ A replay the parser can't read raises: `OSError` for a file it can't open, `Valu
 
 - `PlayerStats` lists the players who finished, so leavers have no row. The team size is the header's `TeamSize`, so a 3v3 that both teams finished a player short is still a 3v3. Only a header without it counts the bigger team's rows.
 - A player's account is filed under their platform, from the row's `Platform`: `steam`, `epic`, `psn`, `xbox` (`OnlinePlatform_Dingo`) or `switch` (`OnlinePlatform_NNX`), the names the config takes. An Epic account is `PlayerID.EpicAccountId`. Every other platform's is a number, `PlayerID.Uid`, which `OnlineID` repeats, so a row without `PlayerID` still has it. Bots, and Epic rows without `PlayerID`, have no account and go by their name.
-- `modes.playlist_of` turns the match type, team size and arena into a playlist.
+- `modes.playlist_of` turns the frames' playlist number, or failing that the match type and team size, and the arena into a playlist.
 
 ## The frames
 
-`read_frames` gives one dict per network frame, in order. `read_frames`' docstring has the fields. In short: the time, the ball and the team that touched it last, each player's car and whether it's jumping or flipping, and the frame's pickups, flips, touches, first touches and demolitions.
+`read_frames` gives one dict per network frame, in order. `read_frames`' docstring has the fields. In short: the time, the game clock, the playlist number, the ball and the team that touched it last, each player's car and whether it's jumping or flipping, and the frame's pickups, flips, touches, first touches and demolitions.
 
 ### Players are header rows
 
@@ -37,7 +37,7 @@ Every car is named by a row number: its player's row in `PlayerStats`, or a numb
 
 ### What a car carries
 
-Position, velocity, angular velocity in radians a second, rotation as a quaternion, boost from 0 to 100, whether it's demolished, and whether it's jumping, double jumping or flipping. A car is listed once it has sent its position, its boost or its team. Until then it isn't on the field. Before it sends its boost it holds 33, the kickoff amount.
+Position, velocity, angular velocity in radians a second, rotation as a quaternion, boost from 0 to 100, whether it's demolished, and whether it's jumping, double jumping or flipping. A car is listed once it has sent its position. Until then it isn't on the field, and listing it would put it at the centre spot. Before it sends its boost it holds 33, the kickoff amount.
 
 The jump, double jump and dodge components each send `ReplicatedActive`, a byte that goes up by one when the car starts using it and again when it stops, so an odd byte is in use. A component points at its car through `CarComponent_TA:Vehicle`. On your 42 games a jump lasts a median 0.11 s, a double jump 0.11 s and a flip 0.66 s, and 95% of flips start within two frames of a `DodgeTorque`. A few states stay on for seconds, up to 11 s, so read when one starts, not that it's on.
 
@@ -58,7 +58,13 @@ Pads never send where they are, only `NewReplicatedPickupData`: the car that too
 - `events/touches.py` places the counted touches with the ball. A change of the ball's team is a touch on that frame by that team's player whose count rose next. Every other touch goes at a kick, a frame where the ball's speed changed by more than gravity explains with the player's car within 350 uu, or failing that where the car came nearest. Kicks where the ball names the other team, bounces off a surface and kicks another player took come last. On your 42 games a touch by that team lands within 0.1 s of 98.9% of the ball's changes of team. A replay without the count gets touches from the kicks alone.
 - A first touch is the game's own count, `MatchFirstTouches`, rising by one. It replicates up to a second after the touch, so its time isn't the contact's. The game keeps re-sending the total, so only a rise counts. Replays before net version 12 have no counter, and `events/kickoffs.py` then finds the first touch from the frames.
 - The game's own counts that the header's scoreboard leaves out, `MatchEpicSaves`, `MatchClears`, `MatchCenters` and `MatchAerialHits`, come as `(row, name, rise)` when one rises, named `epic_save`, `clear`, `center` and `aerial_hit`. Like the touch count they only grow, are sent again unchanged, and rise after the touch: aerial hits a median 0.4 s after, clears 1.0 s (up to 3.3 s) and centers 1.7 s. Summed per player they are the stats of the same names. Three of your 42 games, from 2022 and October 2024, carry none of them, so those games store no value. They match Ballchasing exactly on the 18 players of the three exported games (`tests/analysis/test_ballchasing_parity.py`). The game's clear is a touch from deep in front of your goal (a median 40 m from halfway), narrower than the review's clears from your half: 75 of yours on the 42 games against the review's 229.
-- A demolition names the car demolished and the one that did it, if any.
+- A demolition names the car demolished and the one that did it, if any. One with no attacker isn't a demo on the scoreboard: on your 42 games all 30 came 1.1 to 1.5 s after a goal, when the game clears the cars, or from a leaver's car at its spawn. `events/demos.py` drops them, which leaves demos taken equal to demos inflicted.
+
+### The clock and the playlist
+
+- `seconds_remaining` is the game's own clock, `GameEvent_Soccar_TA:SecondsRemaining`, whole seconds. It counts down in regulation and up from 0 in overtime, and holds while play is stopped. None until the game sends it.
+- `overtime` is `GameEvent_Soccar_TA:bOverTime`.
+- `playlist` is `ProjectX.GRI_X:ReplicatedGamePlaylist`, the game's playlist number: 1 to 4 are the casual playlists, 10 ranked duel, 11 ranked doubles, 13 ranked standard, 27 Hoops, 34 a tournament. The header's match type says `Online` for ranked and casual alike, so this is the only thing that tells them apart. None in a replay that never sends it.
 
 ## What it leaves out
 

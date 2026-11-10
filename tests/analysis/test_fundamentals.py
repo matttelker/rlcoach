@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rlcoach.analysis.fundamentals import fundamentals, game_counts, shooting_pct
+from rlcoach.analysis.fundamentals import fundamentals, game_counts
 from rlcoach.events.types import DemoEvent
 from rlcoach.parser.types import Header, PlayerInfo, StatCount
 from tests.fixtures.builders import create_test_frame
@@ -30,7 +30,6 @@ def test_the_scoreboard_is_the_headers():
         "saves": 3,
         "shots": 4,
         "score": 512,
-        "shooting_pct": 50.0,
         "demos_inflicted": 0,
         "demos_taken": 0,
     }
@@ -44,7 +43,7 @@ def test_a_stat_the_header_leaves_out_is_zero():
 def test_a_player_with_no_header_row_scores_nothing():
     """Leavers and replaced bots are in the frames but not in the header."""
     stats = fundamentals(HEADER, [], {"player_5": None})["player_5"]
-    assert stats["goals"] == stats["score"] == stats["shooting_pct"] == 0
+    assert stats["goals"] == stats["score"] == stats["shots"] == 0
 
 
 def test_demos_count_for_the_attacker_and_against_the_victim():
@@ -64,13 +63,6 @@ def test_demos_count_for_the_attacker_and_against_the_victim():
         1,
         2,
     )
-
-
-def test_shooting_pct_is_a_share_of_shots_capped_at_100():
-    assert shooting_pct(1, 3) == 33.33
-    assert shooting_pct(0, 0) == 0.0
-    # A goal can count without a shot on the scoreboard
-    assert shooting_pct(2, 1) == 100.0
 
 
 def test_the_games_counts_add_up_each_rise():

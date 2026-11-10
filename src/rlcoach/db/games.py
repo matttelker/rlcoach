@@ -22,7 +22,6 @@ STAT_COLUMNS = (
     "assists",
     "saves",
     "shots",
-    "shooting_pct",
     "score",
     "demos_inflicted",
     "demos_taken",
@@ -39,9 +38,6 @@ STAT_COLUMNS = (
     "avg_speed_kph",
     "time_supersonic_s",
     "behind_ball_pct",
-    "first_man_pct",
-    "second_man_pct",
-    "third_man_pct",
 )
 
 

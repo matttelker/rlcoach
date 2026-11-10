@@ -42,16 +42,6 @@ def _whole(value: Any) -> int:
         return 0
 
 
-def shooting_pct(goals: int, shots: int) -> float:
-    """Goals as a share of shots, out of 100.
-
-    A goal can count without a shot on the scoreboard, so it's capped at 100.
-    """
-    if shots <= 0:
-        return 0.0
-    return round(min(goals / shots * 100.0, 100.0), 2)
-
-
 def fundamentals(
     header: Header, demos: list[DemoEvent], player_ids: Mapping[str, Any]
 ) -> dict[str, dict[str, Any]]:
@@ -66,7 +56,6 @@ def fundamentals(
         row: dict[str, Any] = {
             column: _whole(stats.get(key)) for column, key in SCOREBOARD.items()
         }
-        row["shooting_pct"] = shooting_pct(row["goals"], row["shots"])
         row["demos_inflicted"] = sum(1 for d in demos if d.attacker == player_id)
         row["demos_taken"] = sum(1 for d in demos if d.victim == player_id)
         result[player_id] = row

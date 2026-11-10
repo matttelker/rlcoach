@@ -8,6 +8,7 @@ from rlcoach.events.kickoffs import KickoffEvent, KickoffPlayer
 from rlcoach.kickoff_coaching import (
     MIN_KICKOFFS,
     GameKickoffs,
+    kickoff_situations,
     read_kickoff,
     summarize_kickoffs,
 )
@@ -170,7 +171,7 @@ def _ladder(*kickoffs):
 
 def test_the_ladder_goes_in_a_coachs_order():
     keys = [s["key"] for s in summarize_kickoffs([])["ladder"]]
-    assert keys == ["flip_in", "on_time", "one_goes", "speedflip"]
+    assert keys == ["flip_in", "on_time", "speedflip"]
 
 
 def test_the_first_step_you_havent_got_is_the_focus():
@@ -183,7 +184,6 @@ def test_the_first_step_you_havent_got_is_the_focus():
     assert ladder["flip_in"]["status"] == "solid"
     assert ladder["on_time"]["status"] == "focus"
     assert (ladder["on_time"]["count"], ladder["on_time"]["of"]) == (2, 6)
-    assert ladder["one_goes"]["status"] == "solid"
     assert ladder["speedflip"]["status"] == "later"
 
 
@@ -196,17 +196,13 @@ def _going_with_a_teammate(t):
     )
 
 
-def test_a_step_with_too_few_kickoffs_is_unknown_and_doesnt_block():
-    # Too few GO kickoffs to judge the flip, but enough kickoffs in all
+def test_every_step_with_too_few_kickoffs_you_went_for_is_unknown():
+    # Too few GO kickoffs to judge the flip, though enough kickoffs in all
     ladder = _ladder(
         *[_going(0.1, t=float(n)) for n in range(MIN_KICKOFFS - 1)],
         *[_going_with_a_teammate(10.0 + n) for n in range(3)],
     )
-    assert ladder["flip_in"]["status"] == "unknown"
-    assert ladder["on_time"]["status"] == "unknown"
-    assert ladder["one_goes"]["status"] == "focus"
-    assert (ladder["one_goes"]["count"], ladder["one_goes"]["of"]) == (4, 7)
-    assert ladder["speedflip"]["status"] == "unknown"
+    assert [s["status"] for s in ladder.values()] == ["unknown"] * 3
 
 
 def test_the_speedflip_step_says_what_one_is():
@@ -215,7 +211,8 @@ def test_the_speedflip_step_says_what_one_is():
     assert "speedflip is a kickoff" in ladder["speedflip"]["why"]
 
 
-def test_a_double_commit_from_level_spawns_counts_for_one_goes():
+def test_a_double_commit_from_level_spawns_is_still_counted():
+    """No longer a ladder step, but still counted and shown."""
     level = _kickoff(
         _car(flip_lead=0.1),
         _car(MATE, "WING", "STANDARD_BOOST"),
@@ -236,3 +233,47 @@ def test_the_why_quotes_your_own_kickoffs():
     )
     assert "2 of 2 (100%) kickoffs with no flip" in ladder["flip_in"]["why"]
     assert "0 of 3 (0%) with one on time" in ladder["flip_in"]["why"]
+
+
+# Kickoffs as situations
+
+
+def _situations(*kickoffs, goals=()):
+    return kickoff_situations(_game(*kickoffs, goals=goals))
+
+
+def test_each_go_car_that_went_is_a_situation_and_yours_is_marked():
+    kickoff = _kickoff(
+        _car(flip_lead=0.1),
+        _car(MATE, role="BACK", approach="SUPPORT_HOLD", spot="BACK"),
+        _car(OPP, team=ORANGE, flip_lead=-0.05),
+    )
+    rows = _situations(kickoff)
+    assert [(r.kind, r.zone, r.mine, r.bad) for r in rows] == [
+        ("kickoff", "", True, False),
+        ("kickoff", "", False, True),
+    ]
+
+
+def test_a_kickoff_without_a_flip_on_time_is_the_bad_choice():
+    for lead, bad in ((None, True), (-0.05, True), (0.1, False)):
+        [row] = _situations(_kickoff(_car(flip_lead=lead)))
+        assert row.bad is bad
+
+
+def test_a_fake_or_a_kickoff_you_werent_in_is_no_situation():
+    faked = _car(OPP, "GO", "FAKE_STATIONARY", team=ORANGE)
+    assert [r.mine for r in _situations(_kickoff(_car(flip_lead=0.1), faked))] == [True]
+    assert _situations(_kickoff(_car(OPP, team=ORANGE, flip_lead=0.1))) == []
+
+
+def test_a_goal_soon_after_counts_against_the_team_that_conceded_it():
+    kickoff = _kickoff(_car(flip_lead=0.1), _car(OPP, team=ORANGE, flip_lead=0.1))
+    # Played 2 s after the release at 4 s, so 6 s; a goal against you at 11 s
+    mine, theirs = _situations(kickoff, goals=[(11.0, False)])
+    assert (mine.conceded, theirs.conceded) == (True, False)
+    mine, theirs = _situations(kickoff, goals=[(11.0, True)])
+    assert (mine.conceded, theirs.conceded) == (False, True)
+    # Past the 10 s, or before the ball was played, it followed from nothing
+    for t in (17.0, 5.0):
+        assert not any(r.conceded for r in _situations(kickoff, goals=[(t, False)]))

@@ -24,13 +24,14 @@ from rlcoach.analysis.mistakes import (
     detect_caught_upfield,
     detect_clears_given_back,
     detect_double_commits,
-    detect_low_boost_challenges,
+    detect_last_back_challenges,
     detect_whiffs,
     format_clock,
     game_clock,
     goal_timeline,
     is_last_back,
     last_back_car,
+    last_back_challenges,
     link_goals_to_moments,
     live_mask,
     own_depth,
@@ -41,6 +42,7 @@ from rlcoach.analysis.mistakes import (
     review_kickoffs,
     review_player,
 )
+from rlcoach.analysis.situations import Situation
 from rlcoach.events.kickoffs import KickoffEvent, KickoffPlayer
 from rlcoach.events.types import ChallengeEvent, DemoEvent, GoalEvent, TouchEvent
 from rlcoach.field_constants import Vec3
@@ -151,6 +153,37 @@ def test_clock_counts_only_live_play():
     clock = game_clock(frames, live)
 
     assert clock[-1] == pytest.approx(285.0, abs=0.2)
+
+
+def _clock_frames(*clock):
+    """One frame a second, each with the game's (seconds, overtime) or None."""
+    players = [_car(ME, ORANGE, 0.0, 3000.0)]
+    return [
+        create_test_frame(
+            float(t),
+            players,
+            create_test_ball(),
+            seconds_remaining=None if c is None else c[0],
+            overtime=c is not None and c[1],
+        )
+        for t, c in enumerate(clock)
+    ]
+
+
+def test_the_clock_is_the_games_own_where_it_sends_one():
+    frames = _clock_frames(None, (300, False), (299, False), None, (1, False))
+    # Nothing counts as live, which the estimate would need to run the clock
+    assert game_clock(frames, [False] * len(frames)) == [300.0, 300, 299, 299, 1]
+
+
+def test_the_games_clock_goes_negative_in_overtime():
+    frames = _clock_frames((0, False), (0, True), (7, True), None, (8, True))
+    assert game_clock(frames, [True] * len(frames)) == [0.0, -0.0, -7, -7, -8]
+
+
+def test_the_clock_is_estimated_where_no_frame_has_the_games():
+    frames = _clock_frames(None, None, None)
+    assert game_clock(frames, [False] * 3) == [GAME_LENGTH_S] * 3
 
 
 def test_format_clock_shows_minutes_and_overtime():
@@ -312,54 +345,75 @@ def test_caught_upfield_in_a_tied_overtime():
     assert flags[0].clock.startswith("+")
 
 
-def _challenge(winner, my_boost, ball_vy=1500.0):
-    """A 50/50 at halfway. The ball leaves at `ball_vy`, towards my goal by default."""
+def _challenge(winner, ball_vy=1500.0, mate_y=None, played=0.0):
+    """A 50/50 at halfway, with my teammate at `mate_y` if there is one. The
+    ball leaves at `ball_vy`, towards my goal by default."""
 
     def players(t):
-        return [
-            _car(ME, ORANGE, 0.0, 0.0, boost=my_boost),
-            _car(OPP, BLUE, 200.0, 0.0),
-        ]
+        cars = [_car(ME, ORANGE, 0.0, 0.0), _car(OPP, BLUE, 200.0, 0.0)]
+        if mate_y is not None:
+            cars.append(_car(MATE, ORANGE, -1500.0, mate_y))
+        return cars
 
     def ball(t):
         if t < 0.5:
             return _ball(500.0, 0.0, 300.0)
         return _ball(500.0, ball_vy * (t - 0.5), 300.0, vy=ball_vy)
 
-    frames, origin = _play(1.2, players, ball)
+    frames, origin = _play(1.2, players, ball, played=played)
     event = ChallengeEvent(
         t=origin + 0.5, first_player=ME, second_player=OPP, winner_team=winner
     )
     return frames, event
 
 
-def test_lost_challenge_on_low_boost_is_flagged():
-    frames, event = _challenge("BLUE", 10.0)
-    flags = detect_low_boost_challenges(_ctx(frames, challenges=[event]))
-    assert [f.kind for f in flags] == ["low_boost_challenge"]
+def test_a_5050_lost_as_the_last_player_back_is_flagged():
+    frames, event = _challenge("BLUE")
+    [flag] = detect_last_back_challenges(_ctx(frames, challenges=[event]))
+    assert (flag.kind, flag.category) == ("last_back_challenge", "last_back")
+    assert "with opp as your team's last player back" in flag.what
+    assert flag.instead == INSTEAD["last_back_challenge"]
+
+
+def test_a_5050_won_as_the_last_player_back_is_not_flagged():
+    frames, event = _challenge("ORANGE")
+    assert detect_last_back_challenges(_ctx(frames, challenges=[event])) == []
+
+
+def test_a_5050_lost_with_a_teammate_deeper_is_not_flagged():
+    frames, event = _challenge("BLUE", mate_y=4000.0)
+    assert detect_last_back_challenges(_ctx(frames, challenges=[event])) == []
+
+
+def test_a_5050_lost_with_a_teammate_further_up_is_still_flagged():
+    frames, event = _challenge("BLUE", mate_y=-3000.0)
+    flags = detect_last_back_challenges(_ctx(frames, challenges=[event]))
+    assert [f.kind for f in flags] == ["last_back_challenge"]
+
+
+def test_a_lost_kickoff_is_not_a_last_back_challenge():
+    frames, event = _challenge("BLUE")
+    # Live, but inside the kickoff grace
+    event = replace(event, t=2.0)
+    ctx = _ctx(frames, challenges=[event])
+    assert ctx.live[ctx.index_at(event.t - 0.3)]
+    assert list(last_back_challenges(ctx)) == []
+    assert detect_last_back_challenges(ctx) == []
 
 
 def test_challenge_that_sends_the_ball_upfield_was_not_lost():
     """From a real game: the event said lost, but the ball flew at their goal."""
-    frames, event = _challenge("BLUE", 10.0, ball_vy=-2400.0)
-    assert detect_low_boost_challenges(_ctx(frames, challenges=[event])) == []
+    frames, event = _challenge("BLUE", ball_vy=-2400.0)
+    assert detect_last_back_challenges(_ctx(frames, challenges=[event])) == []
 
 
-def test_lost_kickoff_is_not_a_low_boost_challenge():
-    """Boost reads 0 on kickoff frames, which must not look like being empty."""
-    frames, event = _challenge("BLUE", 0.0)
-    event = replace(event, t=frames[12].timestamp)
-    assert detect_low_boost_challenges(_ctx(frames, challenges=[event])) == []
-
-
-def test_won_challenge_on_low_boost_is_not_flagged():
-    frames, event = _challenge("ORANGE", 10.0)
-    assert detect_low_boost_challenges(_ctx(frames, challenges=[event])) == []
-
-
-def test_lost_challenge_with_boost_is_not_flagged():
-    frames, event = _challenge("BLUE", 60.0)
-    assert detect_low_boost_challenges(_ctx(frames, challenges=[event])) == []
+def test_a_last_back_5050_is_not_flagged_while_chasing_a_late_goal():
+    frames, event = _challenge("BLUE", played=_played_for(10.0))
+    ctx = _ctx(frames, goals=[_already("BLUE")], challenges=[event])
+    assert detect_last_back_challenges(ctx) == []
+    # Level, the same 50/50 late on is still flagged
+    ctx = _ctx(frames, challenges=[event])
+    assert [f.kind for f in detect_last_back_challenges(ctx)] == ["last_back_challenge"]
 
 
 def _clear_scene(returned=True, reply_y=2300.0):
@@ -1328,26 +1382,16 @@ def test_an_on_time_flip_a_fake_or_support_is_not_flagged(me):
     assert review_kickoffs(ctx, [_kickoff(origin, me)])[1] == []
 
 
-def test_going_from_behind_a_teammate_who_went_is_a_double_commit():
+def test_two_of_you_going_for_a_kickoff_is_not_flagged():
+    """Two cars going lost the ball less often than one, so it isn't coached."""
     ctx, origin = _kickoff_ctx()
     me = _going("STANDARD_FRONTFLIP", flip_lead=0.1, role="BACK", spot="BACK")
     mate = KickoffPlayer(MATE, "GO", "STANDARD_DIAGONAL", 33.0, 2.0, team=ORANGE)
-    _, [flag] = review_kickoffs(ctx, [_kickoff(origin, me, mate)])
-    assert flag.kind == "kickoff_double_commit"
-    assert "You and mate both went" in flag.what
-
-
-def test_a_teammate_coming_from_behind_your_go_is_their_mistake():
-    ctx, origin = _kickoff_ctx()
-    me = _going("STANDARD_FRONTFLIP", flip_lead=0.1)
-    mate = KickoffPlayer(
-        MATE, "BACK", "STANDARD_BOOST", 33.0, 2.0, team=ORANGE, spot="BACK"
-    )
     assert review_kickoffs(ctx, [_kickoff(origin, me, mate)])[1] == []
-    # From level spawns, it's on both of you
     level = replace(mate, role="WING", spot="DIAGONAL")
-    _, [flag] = review_kickoffs(ctx, [_kickoff(origin, me, level)])
-    assert flag.kind == "kickoff_double_commit"
+    assert (
+        review_kickoffs(ctx, [_kickoff(origin, _going(flip_lead=0.1), level)])[1] == []
+    )
 
 
 def test_every_kickoff_is_placed_on_the_clock():
@@ -1487,9 +1531,10 @@ def test_the_reviews_json_leaves_out_the_games_events():
         clears={"clears": 0, "given_back": 0},
         touches=[TouchMoment(299.0, TouchEvent(1.0, ME, Vec3(0.0, 0.0, 17.0)))],
         challenges=[ChallengeMoment(299.0, challenge, True, True)],
+        situations=[Situation("clear", ME, 1.0, 299.0, "own_third", True, False)],
     )
     data = report.to_dict()
-    assert not {"touches", "challenges", "demos"} & set(data)
+    assert not {"touches", "challenges", "demos", "situations"} & set(data)
     assert data["kickoffs"] == [] and data["player"] == "me"
 
 
@@ -1595,3 +1640,13 @@ def test_a_whiff_the_opponents_score_from_costs_the_goal():
     reviews, flags = link_goals_to_moments(ctx, [review], flags)
     assert flags[0].cost_goal is True
     assert reviews[0].summary == "You whiffed 7 s before."
+
+
+def test_an_overtime_kickoff_is_at_the_start_of_overtime():
+    game = read_game(real_replays.replay(real_replays.OVERTIME))
+    me = build_player_identities(game.header.players)[0]
+    report = review_player(game, player_id=me.canonical_id)
+    [overtime] = [m for m in report.kickoffs if m.kickoff.phase == "OT"]
+    assert overtime.seconds_left == pytest.approx(0.0, abs=1.0)
+    # Every kickoff before it is in regulation
+    assert all(m.seconds_left > 0 for m in report.kickoffs if m is not overtime)

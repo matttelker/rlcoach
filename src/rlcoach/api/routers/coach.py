@@ -16,29 +16,37 @@ from ...coaching import (
     FlagRow,
     GoalRow,
     ReviewedGame,
+    SituationRow,
     find_highlights,
+    measure_risks,
     pick_targets,
     summarize_categories,
 )
-from ...compare import standings
+from ...compare import RANK_STATS, place
 from ...db.grades import goal_ref, grades_for, mistake_ref
 from ...db.models import (
-    Benchmark,
     GameReview,
     PlayerGameStats,
     Replay,
     ReviewKickoff,
+    ReviewSituation,
 )
 from ...db.reviews import stored_kickoffs
 from ...db.session import create_session
-from ...kickoff_coaching import GameKickoffs, read_kickoff, summarize_kickoffs
+from ...kickoff_coaching import (
+    GameKickoffs,
+    kickoff_situations,
+    read_kickoff,
+    summarize_kickoffs,
+)
 from ...modes import COACHED_PLAYLISTS
-from .stats import direction, resolve_playlist, resolve_rank
+from .stats import rank_averages, resolve_playlist, resolve_rank
 
 router = APIRouter(tags=["coach"])
 
-# Per-game counts that read naturally as "more goals than P1 players"
-STRENGTH_METRICS = ("goals", "assists", "saves", "shots")
+# Per-game counts that rise with rank, and read naturally as "more saves than
+# P1 players"
+STRENGTH_METRICS = tuple(m for m in ("saves", "shots") if m in RANK_STATS)
 
 
 def _date_from(period: str) -> date | None:
@@ -80,42 +88,31 @@ def _benchmark_strengths(
     *,
     say_playlist: bool = False,
 ):
-    """Stats where your average beats the target rank's spread.
+    """Stats where your average is above the target rank's by more than chance.
 
     Benchmarks are per playlist, so a view of several playlists compares each
     one on its own and names it.
     """
-    if not stats:
-        return []
-    averages = {}
+    averages = rank_averages(session, playlist)
+    strengths = []
     for metric in STRENGTH_METRICS:
         values = [getattr(s, metric) for s in stats if getattr(s, metric) is not None]
-        if values:
-            averages[metric] = sum(values) / len(values)
-    benchmarks = {
-        b.metric: {
-            "p25": b.p25_value,
-            "median": b.median_value,
-            "p75": b.p75_value,
-            "direction": direction(b.metric),
-        }
-        for b in session.query(Benchmark)
-        .filter(Benchmark.playlist == playlist, Benchmark.rank_tier == rank)
-        .all()
-        if b.metric in STRENGTH_METRICS
-    }
-    results = standings(averages, benchmarks)
-    return [
-        {
-            "kind": "benchmark",
-            "title": f"More {r.metric} than {rank} players"
-            + (f" in {playlist.capitalize()}" if say_playlist else ""),
-            "detail": (f"{r.my_value:.1f} a game, {rank} average {r.median:.1f}"),
-            "replay_id": None,
-        }
-        for r in sorted(results, key=lambda r: -r.z_score)
-        if r.severity == "strength"
-    ]
+        placed = place(metric, values, averages.get(metric, {}), rank)
+        if placed is None or placed.verdict != "above":
+            continue
+        strengths.append(
+            {
+                "kind": "benchmark",
+                "title": f"More {metric} than {rank} players"
+                + (f" in {playlist.capitalize()}" if say_playlist else ""),
+                "detail": (
+                    f"{placed.my_value:.1f} a game over {placed.games} games, "
+                    f"{rank} average {placed.target_average:.1f}"
+                ),
+                "replay_id": None,
+            }
+        )
+    return strengths
 
 
 def _game_kickoffs(replay: Replay, review: GameReview) -> GameKickoffs:
@@ -126,6 +123,33 @@ def _game_kickoffs(replay: Replay, review: GameReview) -> GameKickoffs:
         kickoffs=stored_kickoffs(review),
         goals=[(g.t, bool(g.ours)) for g in review.goals],
     )
+
+
+def _risks(session) -> dict[str, float | None]:
+    """Each situation's extra risk, measured on every reviewed game there is,
+    whatever the playlist or period: the more games, the surer the number."""
+    rows = [
+        SituationRow(kind, zone, bool(bad), bool(conceded), bool(is_me))
+        for kind, zone, bad, conceded, is_me in session.query(
+            ReviewSituation.kind,
+            ReviewSituation.zone,
+            ReviewSituation.bad,
+            ReviewSituation.conceded,
+            ReviewSituation.is_me,
+        )
+    ]
+    reviews = (
+        session.query(GameReview)
+        .filter(GameReview.status == "ok")
+        .options(
+            selectinload(GameReview.replay),
+            selectinload(GameReview.goals),
+            selectinload(GameReview.kickoffs).selectinload(ReviewKickoff.cars),
+        )
+    )
+    for review in reviews:
+        rows += kickoff_situations(_game_kickoffs(review.replay, review))
+    return measure_risks(rows)
 
 
 @router.get("/coach")
@@ -157,6 +181,7 @@ async def get_coach(
             .options(
                 selectinload(Replay.review).selectinload(GameReview.mistakes),
                 selectinload(Replay.review).selectinload(GameReview.goals),
+                selectinload(Replay.review).selectinload(GameReview.situations),
                 selectinload(Replay.review)
                 .selectinload(GameReview.kickoffs)
                 .selectinload(ReviewKickoff.cars),
@@ -174,7 +199,8 @@ async def get_coach(
             review = replay.review
             if review is None or review.status != "ok":
                 continue
-            kickoff_games.append(_game_kickoffs(replay, review))
+            game_kickoffs = _game_kickoffs(replay, review)
+            kickoff_games.append(game_kickoffs)
             game = ReviewedGame(
                 replay_id=replay.replay_id,
                 play_date=replay.play_date,
@@ -198,11 +224,16 @@ async def get_coach(
                     for g in review.goals
                 ],
                 epic_saves=(stats.epic_saves or 0) if stats else 0,
+                situations=[
+                    SituationRow(s.kind, s.zone, s.bad, s.conceded, s.is_me)
+                    for s in review.situations
+                ]
+                + kickoff_situations(game_kickoffs),
             )
             reviewed.append(game)
             by_id[game.replay_id] = game
 
-        categories = summarize_categories(reviewed)
+        categories = summarize_categories(reviewed, _risks(session))
         highlights = find_highlights(reviewed, categories)
         stats_by_playlist: dict[str, list[PlayerGameStats]] = defaultdict(list)
         for replay, stats in rows:

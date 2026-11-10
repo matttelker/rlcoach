@@ -4,40 +4,42 @@ import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Too
 import { getTrends } from '../api/client';
 import { Card, ErrorState, NoDataEmpty, PageHeader, PlaylistSelect, SelectField, SkeletonChart } from '../components';
 import { PERIOD_OPTIONS } from './coachTransforms';
-import { parseLocalDate } from './dataTransforms';
+import { parseLocalDate, rankName, statName } from './dataTransforms';
 import { AXIS_PROPS, TOOLTIP_PROPS } from './chartStyle';
 
 // The stats you can follow, each one the API keeps per game
 const STATS = [
-  { value: 'bcpm', label: 'Boost used per minute' },
-  { value: 'avg_boost', label: 'Average boost' },
-  { value: 'goals', label: 'Goals' },
-  { value: 'assists', label: 'Assists' },
-  { value: 'saves', label: 'Saves' },
-  { value: 'shots', label: 'Shots' },
-  { value: 'epic_saves', label: 'Epic saves' },
-  { value: 'clears', label: 'Clears from in front of your goal' },
-  { value: 'centers', label: 'Centers' },
-  { value: 'aerial_hits', label: 'Aerial hits' },
-];
+  'bcpm',
+  'avg_boost',
+  'time_zero_boost_s',
+  'boost_stolen',
+  'goals',
+  'assists',
+  'saves',
+  'shots',
+  'epic_saves',
+  'clears',
+  'centers',
+  'aerial_hits',
+].map((metric) => ({ value: metric, label: statName(metric) }));
 
-/** One stat of yours day by day, against your rank's median. */
+/** One stat of yours day by day, against your rank's average. */
 export function Trends() {
   const [metric, setMetric] = useState('bcpm');
   const [period, setPeriod] = useState('30d');
   // Unset until you pick one, so the API opens on the playlist of your latest game
   const [playlist, setPlaylist] = useState<string>();
-  const [showMedian, setShowMedian] = useState(true);
+  const [showAverage, setShowAverage] = useState(true);
 
   const trend = useQuery({
     queryKey: ['trends', metric, period, playlist],
     queryFn: () => getTrends({ metric, period, playlist }),
   });
 
-  const rank = trend.data?.rank ?? 'rank';
-  const label = STATS.find((stat) => stat.value === metric)?.label;
-  // A median of 0 is still a median to draw
-  const median = showMedian ? (trend.data?.rank_median ?? null) : null;
+  const rank = trend.data?.rank ? rankName(trend.data.rank) : 'rank';
+  const label = statName(metric);
+  // An average of 0 is still an average to draw
+  const average = showAverage ? (trend.data?.rank_average ?? null) : null;
   const days = (trend.data?.values ?? []).map(({ date, value }) => ({
     date: parseLocalDate(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     value,
@@ -59,13 +61,13 @@ export function Trends() {
             <XAxis dataKey="date" {...AXIS_PROPS} />
             <YAxis {...AXIS_PROPS} />
             <Tooltip {...TOOLTIP_PROPS} />
-            {median !== null && (
+            {average !== null && (
               <ReferenceLine
-                y={median}
+                y={average}
                 ifOverflow="extendDomain"
                 stroke="var(--color-text-muted)"
                 strokeDasharray="4 4"
-                label={{ value: `${rank} median`, position: 'insideTopRight', fill: 'var(--color-text-muted)', fontSize: 13 }}
+                label={{ value: `${rank} average`, position: 'insideTopRight', fill: 'var(--color-text-muted)', fontSize: 13 }}
               />
             )}
             <Line
@@ -93,10 +95,10 @@ export function Trends() {
           <input
             type="checkbox"
             className="w-4 h-4 accent-[var(--color-primary)]"
-            checked={showMedian}
-            onChange={(e) => setShowMedian(e.target.checked)}
+            checked={showAverage}
+            onChange={(e) => setShowAverage(e.target.checked)}
           />
-          Show the {rank} median
+          Show the {rank} average
         </label>
       </PageHeader>
 
