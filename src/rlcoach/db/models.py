@@ -178,6 +178,40 @@ class GameReview(Base):
         cascade="all, delete-orphan",
         order_by="ReviewDemo.t",
     )
+    situations: Mapped[list[ReviewSituation]] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewSituation.t",
+    )
+
+
+class ReviewSituation(Base):
+    """One choice a car faced in a game, every car's, and whether a goal against
+    followed (see `analysis.situations`).
+
+    `kind` is the situation, `bad` whether the car made the choice the review
+    warns against, and `zone` where the ball was, from that car's side:
+    "own_third", "own_half" or "their_half".
+    """
+
+    __tablename__ = "review_situations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    replay_id: Mapped[str] = mapped_column(
+        ForeignKey("game_reviews.replay_id", ondelete="CASCADE")
+    )
+    kind: Mapped[str]
+    player_id: Mapped[str]
+    is_me: Mapped[bool]
+    t: Mapped[float]
+    seconds_left: Mapped[float]
+    zone: Mapped[str]
+    bad: Mapped[bool]
+    conceded: Mapped[bool]
+
+    review: Mapped[GameReview] = relationship(back_populates="situations")
+
+    __table_args__ = (Index("ix_review_situations_replay", "replay_id"),)
 
 
 class ReviewMistake(Base):

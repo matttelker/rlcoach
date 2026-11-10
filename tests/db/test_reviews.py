@@ -18,6 +18,7 @@ from rlcoach.analysis.mistakes import (
     MistakeReport,
     TouchMoment,
 )
+from rlcoach.analysis.situations import Situation
 from rlcoach.db.models import (
     GameReview,
     Player,
@@ -28,6 +29,7 @@ from rlcoach.db.models import (
     ReviewKickoff,
     ReviewKickoffCar,
     ReviewMistake,
+    ReviewSituation,
     ReviewTouch,
 )
 from rlcoach.db.reviews import games_to_review, review_game, save_review
@@ -318,4 +320,56 @@ def test_a_database_from_before_the_events_gets_them_on_the_next_review(tmp_path
         1,
         2,
     )
+    session.close()
+
+
+def _with_situations() -> MistakeReport:
+    return replace(
+        _report(),
+        situations=[
+            Situation("clear", "epic:me", 12.0, 288.0, "own_third", True, False),
+            Situation("jump", "epic:them", 30.5, 269.5, "their_half", False, True),
+        ],
+    )
+
+
+def test_save_review_stores_every_cars_situations():
+    save_review("r0", "epic:me", _with_situations())
+
+    session = create_session()
+    review = session.get(GameReview, "r0")
+    assert [
+        (s.kind, s.player_id, s.is_me, s.t, s.seconds_left, s.zone, s.bad, s.conceded)
+        for s in review.situations
+    ] == [
+        ("clear", "epic:me", True, 12.0, 288.0, "own_third", True, False),
+        ("jump", "epic:them", False, 30.5, 269.5, "their_half", False, True),
+    ]
+    session.close()
+
+
+def test_saving_again_replaces_the_situations_too():
+    save_review("r0", "epic:me", _with_situations())
+    save_review("r0", "epic:me", _with_situations())
+    session = create_session()
+    assert session.query(ReviewSituation).count() == 2
+    save_review("r0", "epic:me", status="unsupported", error="Hoops")
+    assert session.query(ReviewSituation).count() == 0
+    assert session.get(GameReview, "r0").situations == []
+    session.close()
+
+
+def test_a_database_from_before_situations_gets_them_on_the_next_review(tmp_path):
+    save_review("r0", "epic:me", _report())
+    session = create_session()
+    engine = session.get_bind()
+    session.close()
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE review_situations")
+    reset_engine()
+
+    init_db(tmp_path / "test.db")
+    save_review("r0", "epic:me", _with_situations())
+    session = create_session()
+    assert len(session.get(GameReview, "r0").situations) == 2
     session.close()

@@ -9,6 +9,7 @@ import type {
   ReviewKickoff,
   ReviewMistake,
   RuleGrades,
+  SituationSummary,
 } from '../types/api';
 import { parseLocalDate } from './dataTransforms';
 
@@ -75,11 +76,21 @@ export type Trend = 'worse' | 'better' | 'same' | 'new';
 
 // Fewer flags per game is better. Small wobbles read as "same".
 export function categoryTrend(category: CategorySummary): Trend {
-  const { before_per_game: before, latest_per_game: latest } = category;
-  if (before === null || latest === null) return 'new';
-  if (latest - before >= 0.2) return 'worse';
-  if (before - latest >= 0.2) return 'better';
+  const { earlier_per_game: earlier, recent_per_game: recent, trend_games: games } = category;
+  if (!games || earlier === null || recent === null) return 'new';
+  if (recent - earlier >= 0.2) return 'worse';
+  if (earlier - recent >= 0.2) return 'better';
   return 'same';
+}
+
+/** "0.5 a game over your last 10 games, 1.4 over the 10 before", or null with no trend */
+export function trendText(category: CategorySummary): string | null {
+  if (categoryTrend(category) === 'new') return null;
+  const n = category.trend_games;
+  return (
+    `${formatRate(category.recent_per_game)} a game over your last ${n} games, ` +
+    `${formatRate(category.earlier_per_game)} over the ${n} before`
+  );
 }
 
 export function kindLabel(kind: string): string {
@@ -87,13 +98,59 @@ export function kindLabel(kind: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-export function headline(target: CategorySummary): string {
-  const games = `${target.games} game${target.games === 1 ? '' : 's'}`;
-  if (target.goals_cost > 0) {
-    const goals = `${target.goals_cost} goal${target.goals_cost === 1 ? '' : 's'}`;
-    return `Cost you ${goals} in ${games}`;
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// Past this, "1 goal every N games" stops meaning much
+const RAREST_COST_GAMES = 50;
+
+/** What a habit costs, in goals: "Costs you about 1 goal every 5 games" */
+export function costText(category: Pick<CategorySummary, 'cost_per_game'>): string {
+  const cost = category.cost_per_game;
+  if (!(cost > 0)) return 'Costs you no goals that can be measured yet';
+  const every = Math.round(1 / cost);
+  if (every > RAREST_COST_GAMES) return `Costs you less than 1 goal every ${RAREST_COST_GAMES} games`;
+  if (every > 1) return `Costs you about 1 goal every ${every} games`;
+  const goals = Math.round(cost * 10) / 10;
+  return goals <= 1 ? 'Costs you about 1 goal a game' : `Costs you about ${goals} goals a game`;
+}
+
+/** How the cost was found */
+export function costNote(category: Pick<CategorySummary, 'cost_measured' | 'cost_per_game'>): string | null {
+  if (!category.cost_measured) return category.cost_per_game > 0 ? 'Estimated from the goals it led to.' : null;
+  return 'Measured from how often a goal followed each choice, yours and the other players in your games.';
+}
+
+/** A share of 0 to 1 as a whole percent */
+function wholePercent(share: number): string {
+  return `${Math.round(share * 100)}%`;
+}
+
+/**
+ * One situation in plain words, such as "Shots at your goal with you last back:
+ * 19 of 106 out of position (18%). Players in your games: 12%."
+ */
+export function situationText(s: SituationSummary): string {
+  if (s.count === 0) return `No ${s.what} in these games yet.`;
+  const share = s.bad_share === null ? '' : ` (${wholePercent(s.bad_share)})`;
+  let text = `${capitalize(s.what)}: ${s.bad} of ${s.count} ${s.bad_label}${share}.`;
+  if (s.others_bad_share !== null) text += ` Players in your games: ${wholePercent(s.others_bad_share)}.`;
+  if (s.bad > 0) {
+    const followed = s.conceded_after_bad;
+    text += ` A goal against followed ${followed} of your ${s.bad}.`;
   }
-  return `${target.flags} flagged in ${games}`;
+  return text;
+}
+
+/** How much more often a goal follows the bad choice, or why that can't be said */
+export function riskText(s: SituationSummary): string | null {
+  if (s.count === 0) return null;
+  if (s.extra_risk === null) return 'Too few of these yet to say how much more often a goal follows.';
+  if (!s.proven) return "Your games so far haven't shown this costs goals, so it isn't counted against you.";
+  const points = Math.round(s.extra_risk * 100);
+  if (points < 1) return 'A goal against follows no more often when that happens.';
+  return `When that happens, a goal against follows ${points} ${points === 1 ? 'point' : 'points'} more often.`;
 }
 
 export function groupByCategory(mistakes: ReviewMistake[]) {

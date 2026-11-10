@@ -149,6 +149,28 @@ export interface CategorySession {
   flags: number;
 }
 
+/** One choice a habit is judged on: how often it came up for you and how it went */
+export interface SituationSummary {
+  kind: string;
+  /** What is counted, such as "shots at your goal with you last back" */
+  what: string;
+  /** The bad choice, such as "out of position" */
+  bad_label: string;
+  count: number;
+  bad: number;
+  /** null when count is 0 */
+  bad_share: number | null;
+  /** The same share for the other players in your games */
+  others_bad_share: number | null;
+  conceded_after_bad: number;
+  /** How much more often a goal against followed the bad choice than the good one. null with too little data */
+  extra_risk: number | null;
+  /** Whether the games have shown the bad choice costs goals */
+  proven: boolean;
+  /** null when extra_risk is null */
+  goals_per_game: number | null;
+}
+
 export interface CategorySummary {
   category: string;
   label: string;
@@ -156,8 +178,16 @@ export interface CategorySummary {
   goals_cost: number;
   games: number;
   per_game: number | null;
-  latest_per_game: number | null;
-  before_per_game: number | null;
+  /** Flags a game over your last `trend_games` games, and the as many before. Null with fewer than 10 games */
+  recent_per_game: number | null;
+  earlier_per_game: number | null;
+  /** 0 when there are too few games for a trend */
+  trend_games: number;
+  /** Estimated goals a game the habit costs you */
+  cost_per_game: number;
+  /** True when measured from situations, false when it is half the goals the review put on the habit */
+  cost_measured: boolean;
+  situations: SituationSummary[];
   sessions: CategorySession[];
   kinds: Record<string, number>;
   top_kind: string | null;

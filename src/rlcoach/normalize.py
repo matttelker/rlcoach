@@ -28,7 +28,7 @@ from .parser.types import (
 # How far past the walls a position may read. Cars and the ball go inside the
 # goals, past the back wall
 X_LIMIT = SIDE_WALL_X * 1.1
-Y_LIMIT = BACK_WALL_Y * 1.1
+Y_LIMIT = BACK_WALL_Y + 1000.0  # A net is 880 uu deep
 Z_RANGE = (-100.0, CEILING_Z * 2.0)
 
 Raw = dict[str, Any]

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..events.kickoffs import (
     KickoffEvent,
@@ -22,7 +22,6 @@ from ..events.kickoffs import (
     flip_timing,
     kickoff_result,
     went_for_ball,
-    went_with,
 )
 from ..events.touches import detect_touches
 from ..events.types import (
@@ -41,6 +40,9 @@ from ..game import Game, read_game
 from ..identity import build_player_identities
 from ..modes import mode_of
 from ..parser.types import BallFrame, Frame, PlayerFrame
+
+if TYPE_CHECKING:
+    from .situations import Situation
 
 GOAL_LINE_Y = BACK_WALL_Y
 
@@ -67,7 +69,6 @@ RETURN_SPEED = 1000.0  # Driving home this fast is already the right response
 # also covers the clock reading 0:00 while the ball stays in the air.
 CHASE_WINDOW_S = 30.0
 
-LOW_BOOST = 20.0
 CHALLENGE_SETTLE_S = 0.5  # When the ball's direction shows who won a 50/50
 CLEAR_MIN_SPEED = 500.0  # Speed upfield that makes a touch a clear
 CLEAR_MIN_FLIGHT_S = 0.6  # A quicker reply from an opponent is a 50/50
@@ -124,17 +125,16 @@ INSTEAD = {
         "Turn back as soon as the ball passes you. Drive to your back post and "
         "take boost on the way."
     ),
-    "low_boost_challenge": (
-        "Don't contest under 20 boost. Collect pads on the way in, or drop back "
-        "and shadow until you are ready."
-    ),
+    # On your games a clear up the middle came back less often than one to the
+    # side, because it travels further. What matters is that it leaves your third
     "clear_given_back": (
-        "Aim clears at the side walls and corners, or take a touch to control "
-        "it, instead of hitting it to the next opponent."
+        "A clear isn't done until it's out of your third. Hit it hard enough to "
+        "reach halfway, or take a touch and carry it out, instead of a soft "
+        "hit to the next opponent."
     ),
     "own_touch_in": (
         "Near your net, don't hit the ball while you face your own goal. Go "
-        "around to the goal side, or aim for the side wall."
+        "around so you are between the ball and your net before you touch it."
     ),
     "no_save_attempt": (
         "Jump for any ball you can reach on the line, even if it looks high. "
@@ -142,7 +142,7 @@ INSTEAD = {
     ),
     "missed_clear": (
         "A slow ball by your net needs a calm touch. Slow down, line it up, and "
-        "hit it firmly at the side wall before anyone else arrives."
+        "hit it firmly away from your net before anyone else arrives."
     ),
     "missed_save": (
         "Get to the line early and square up to the shooter, so you only need a "
@@ -156,6 +156,14 @@ INSTEAD = {
         "As the last player back, keep the ball in front of you. Go no further "
         "than halfway, and only when your team has the ball deep in their end. "
         "When it comes loose, drop toward your back post before it gets past you."
+    ),
+    # Losing a 50/50 with a teammate behind you cost nothing on your games.
+    # Losing one as the last player back was followed by a goal 15% of the
+    # time, against 5% for one won
+    "last_back_challenge": (
+        "As the last player back, don't dive into a 50/50 you can lose. Stay "
+        "between the ball and your net, give ground, and challenge once a "
+        "teammate is back behind you or the ball is yours to win."
     ),
     "last_back_overcommit": (
         "When teammates are already challenging, stay in goal. Be the save "
@@ -177,11 +185,6 @@ INSTEAD = {
         "then jump or flip when it's in reach, not on the way to it. If you can't "
         "get there cleanly, don't go: shadow it and wait for a better touch."
     ),
-    "kickoff_double_commit": (
-        "Only one of you goes. From level spawns the usual rule is the car on "
-        "the left goes, otherwise the nearer car. The other cheats up behind "
-        "them or takes boost, ready for where the ball goes."
-    ),
 }
 
 # Each kind belongs to one habit to train. The dashboard groups by these.
@@ -190,7 +193,6 @@ CATEGORIES = {
     "rotation": "Rotation",
     "clearing": "Clearing",
     "goalkeeping": "Goalkeeping",
-    "boost": "Boost",
     "kickoffs": "Kickoffs",
     "whiffs": "Whiffs",
 }
@@ -205,10 +207,9 @@ CATEGORY = {
     "missed_save": "goalkeeping",
     "no_save_attempt": "goalkeeping",
     "behind_line": "goalkeeping",
-    "low_boost_challenge": "boost",
+    "last_back_challenge": "last_back",
     "kickoff_no_flip": "kickoffs",
     "kickoff_late_flip": "kickoffs",
-    "kickoff_double_commit": "kickoffs",
     "whiff": "whiffs",
 }
 SPOT_NAMES = {
@@ -381,10 +382,12 @@ class MistakeReport:
     touches: list[TouchMoment] = field(default_factory=list)
     challenges: list[ChallengeMoment] = field(default_factory=list)
     demos: list[DemoMoment] = field(default_factory=list)
+    # Every car's situations (see analysis.situations)
+    situations: list[Situation] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """The review, without the game's events."""
-        events = ("touches", "challenges", "demos")
+        events = ("touches", "challenges", "demos", "situations")
         trimmed = asdict(replace(self, **{name: [] for name in events}))
         return {key: value for key, value in trimmed.items() if key not in events}
 
@@ -813,21 +816,32 @@ def detect_caught_upfield(ctx: Context) -> list[Mistake]:
     return flags
 
 
-def detect_low_boost_challenges(ctx: Context) -> list[Mistake]:
-    """Flag 50/50s that were lost while nearly out of boost."""
-    flags: list[Mistake] = []
+def last_back_challenges(ctx: Context) -> Iterator[tuple[int, ChallengeEvent, bool]]:
+    """Your 50/50s in open play as your team's last player back: the frame just
+    before it, the 50/50, and whether you lost it."""
     mine = team_name(ctx.team)
     for challenge in ctx.challenges:
         if ctx.player_id not in (challenge.first_player, challenge.second_player):
             continue
-        if challenge.winner_team is None or challenge.winner_team == mine:
+        if challenge.winner_team is None:
             continue
         index = ctx.index_at(challenge.t - 0.3)
-        # Boost reads 0 on kickoff frames, so a kickoff says nothing here.
         if not ctx.live[index] or not _past_kickoff(ctx, index):
             continue
-        me = ctx.frames[index].get_player_by_id(ctx.player_id)
-        if me is None or me.boost_amount >= LOW_BOOST:
+        if is_last_back(ctx.frames[index], ctx.player_id):
+            yield index, challenge, challenge.winner_team != mine
+
+
+def detect_last_back_challenges(ctx: Context) -> list[Mistake]:
+    """Flag 50/50s lost as the last player back, with the ball then coming at
+    your goal.
+
+    Not while your team chases a late goal, when the last player back should
+    be up too.
+    """
+    flags: list[Mistake] = []
+    for index, challenge, lost in last_back_challenges(ctx):
+        if not lost or _chasing_late(ctx, index):
             continue
         # The event names whoever touched last, even if the ball went forward.
         after = ctx.frames[ctx.index_at(challenge.t + CHALLENGE_SETTLE_S)]
@@ -841,20 +855,23 @@ def detect_low_boost_challenges(ctx: Context) -> list[Mistake]:
         flags.append(
             _flag(
                 ctx,
-                "low_boost_challenge",
+                "last_back_challenge",
                 index,
                 0.0,
-                f"You contested {ctx.name(opponent)} on {me.boost_amount:.0f} boost "
-                "and lost the ball.",
+                f"You went into a 50/50 with {ctx.name(opponent)} as your team's "
+                "last player back and lost it, with nobody behind you.",
             )
         )
     return flags
 
 
-def detect_clears_given_back(ctx: Context) -> tuple[list[Mistake], dict[str, int]]:
-    """Count clears the opponent won back, and flag the ones that hurt."""
-    flags: list[Mistake] = []
-    summary = {"clears": 0, "given_back": 0}
+def clears(ctx: Context) -> Iterator[tuple[Contact, Contact | None, bool]]:
+    """Each of your clears: the touch, the next touch by anyone, and whether an
+    opponent won the ball back before it left your third.
+
+    A clear is your touch in your own half in open play that sends the ball
+    upfield, unless you touch it again next or an opponent blocks it at once.
+    """
     for position, contact in enumerate(ctx.contacts):
         if contact.player_id != ctx.player_id or not ctx.live[contact.index]:
             continue
@@ -874,13 +891,22 @@ def detect_clears_given_back(ctx: Context) -> tuple[list[Mistake], dict[str, int
             )
         ):
             continue
-        summary["clears"] += 1
-        if (
+        given_back = not (
             following is None
             or following.team == ctx.team
             or following.t - contact.t > CLEAR_RETURN_WINDOW_S
             or ctx.depth(ctx.frames[following.index].ball.position.y) <= CLEARED_DEPTH
-        ):
+        )
+        yield contact, following, given_back
+
+
+def detect_clears_given_back(ctx: Context) -> tuple[list[Mistake], dict[str, int]]:
+    """Count clears the opponent won back, and flag the ones that hurt."""
+    flags: list[Mistake] = []
+    summary = {"clears": 0, "given_back": 0}
+    for contact, following, given_back in clears(ctx):
+        summary["clears"] += 1
+        if not given_back:
             continue
         summary["given_back"] += 1
         flag = _flag(
@@ -973,6 +999,30 @@ def _lost_it(ctx: Context, t: float) -> tuple[bool, str | None]:
     return True, following.player_id
 
 
+def jumps_at_ball(ctx: Context) -> Iterator[tuple[int, int, float, bool]]:
+    """Each time you jumped or flipped at the ball in open play: the frame you
+    left the ground, the frame you came nearest the ball, how near, and whether
+    you hit it.
+
+    A miss is a go that came within reach with nobody touching the ball. One
+    where someone else got the touch, or that never came near, is neither.
+    """
+    for first, last in _goes(ctx):
+        if not _past_kickoff(ctx, first):
+            continue
+        frame = ctx.frames[first]
+        me = frame.get_player_by_id(ctx.player_id)
+        if me is None or _closing_speed(me, frame.ball) < WHIFF_MIN_CLOSING:
+            continue
+        start, end = ctx.times[first], ctx.times[last] + WHIFF_WINDOW_S
+        touches = [c for c in ctx.contacts if start - TOUCH_SLOP_S <= c.t <= end]
+        gap, nearest = _nearest_approach(ctx, first, end)
+        if any(c.player_id == ctx.player_id for c in touches):
+            yield first, nearest, gap, True
+        elif not touches and gap < WHIFF_REACH:
+            yield first, nearest, gap, False
+
+
 def detect_whiffs(ctx: Context) -> list[Mistake]:
     """Flag jumping or flipping at the ball and missing it, when the opponents
     took it and it led somewhere.
@@ -982,19 +1032,10 @@ def detect_whiffs(ctx: Context) -> list[Mistake]:
     """
     flags: list[Mistake] = []
     mine = team_name(ctx.team)
-    for first, last in _goes(ctx):
-        if not _past_kickoff(ctx, first):
+    for first, nearest, gap, hit in jumps_at_ball(ctx):
+        if hit:
             continue
-        frame = ctx.frames[first]
-        me = frame.get_player_by_id(ctx.player_id)
-        if me is None or _closing_speed(me, frame.ball) < WHIFF_MIN_CLOSING:
-            continue
-        start, end = ctx.times[first], ctx.times[last] + WHIFF_WINDOW_S
-        if any(start - TOUCH_SLOP_S <= c.t <= end for c in ctx.contacts):
-            continue
-        gap, nearest = _nearest_approach(ctx, first, end)
-        if gap >= WHIFF_REACH:
-            continue
+        start = ctx.times[first]
         t = ctx.times[nearest]
         if any(
             g.team != mine and 0.0 <= g.t - t <= GOAL_REVIEW_WINDOW_S for g in ctx.goals
@@ -1371,18 +1412,6 @@ def _kickoff_flags(
                 f"ball was played, from {spot}.{after}",
             )
         )
-    mates = went_with(kickoff, me)
-    if mates:
-        flags.append(
-            _flag(
-                ctx,
-                "kickoff_double_commit",
-                index,
-                0.0,
-                f"You and {ctx.name(mates[0].player_id)} both went for the "
-                f"kickoff.{after}",
-            )
-        )
     return flags
 
 
@@ -1446,10 +1475,9 @@ LEAD_IN = {
     "clear_given_back": "Your clear went straight back to them",
     "double_commit": "You double committed",
     "caught_upfield": "You were caught upfield",
-    "low_boost_challenge": "You lost a 50/50 on low boost",
+    "last_back_challenge": "You lost a 50/50 as the last player back",
     "kickoff_no_flip": "You went for the kickoff without a flip",
     "kickoff_late_flip": "Your kickoff flip came late",
-    "kickoff_double_commit": "You and a teammate both went for the kickoff",
     "whiff": "You whiffed",
 }
 
@@ -1542,6 +1570,8 @@ def review_player(
     `player_id` picks the player by the id the database stores, which survives
     a name change. Otherwise `player` matches a display name.
     """
+    from .situations import game_situations
+
     header, frames = game.header, game.frames
     check_supported_map(header.map_name)
 
@@ -1578,7 +1608,7 @@ def review_player(
         [
             *detect_double_commits(ctx),
             *detect_caught_upfield(ctx),
-            *detect_low_boost_challenges(ctx),
+            *detect_last_back_challenges(ctx),
             *clear_flags,
             *detect_whiffs(ctx),
             *kickoff_flags,
@@ -1599,6 +1629,7 @@ def review_player(
         touches=place_touches(ctx, game.touches),
         challenges=place_challenges(ctx, game.challenges),
         demos=place_demos(ctx, game.demos),
+        situations=game_situations(game, names),
     )
 
 

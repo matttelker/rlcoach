@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ from rlcoach.analysis.mistakes import (
     Mistake,
     MistakeReport,
 )
+from rlcoach.analysis.situations import Situation
 from rlcoach.events.kickoffs import KickoffEvent, KickoffPlayer
 
 
@@ -235,7 +237,6 @@ def test_coach_lists_every_category(client):
         "rotation",
         "clearing",
         "goalkeeping",
-        "boost",
         "kickoffs",
         "whiffs",
     ]
@@ -429,10 +430,83 @@ def test_coach_summarizes_your_kickoffs_and_the_ladder(client):
     assert going["flips"] == {"on_time": 0, "late": 0, "none": 1}
     assert (going["results"]["lost"], going["goals_against"]) == (1, 1)
     ladder = kickoffs["ladder"]
-    assert [s["key"] for s in ladder] == ["flip_in", "on_time", "one_goes", "speedflip"]
+    assert [s["key"] for s in ladder] == ["flip_in", "on_time", "speedflip"]
     # One kickoff is too few to judge any step
     assert {s["status"] for s in ladder} == {"unknown"}
 
 
 def test_replay_review_404s_for_an_unknown_game(client):
     assert client.get("/replays/nope/review").status_code == 404
+
+
+def test_coach_categories_carry_the_trend_situations_and_cost(client):
+    categories = client.get("/coach").json()["categories"]
+    last_back = next(c for c in categories if c["category"] == "last_back")
+    # Two reviewed games are too few for a trend
+    assert (last_back["trend_games"], last_back["recent_per_game"]) == (0, None)
+    assert last_back["earlier_per_game"] is None
+    assert "latest_per_game" not in last_back and "before_per_game" not in last_back
+    assert [s["kind"] for s in last_back["situations"]] == [
+        "shot_last_back",
+        "last_back_challenge",
+    ]
+    # Nothing measured, so half its one goal over two games
+    assert (last_back["cost_per_game"], last_back["cost_measured"]) == (0.25, False)
+    kickoffs = next(c for c in categories if c["category"] == "kickoffs")
+    [kickoff] = kickoffs["situations"]
+    # The one kickoff you went for, without a flip
+    assert (kickoff["count"], kickoff["bad"], kickoff["conceded_after_bad"]) == (
+        1,
+        1,
+        1,
+    )
+
+
+def _add_reviewed_game_with_situations(replay_id, playlist, situations):
+    """A reviewed game long ago in another playlist, with these situations."""
+    from rlcoach.db.models import Replay
+    from rlcoach.db.reviews import save_review
+    from rlcoach.db.session import create_session
+
+    session = create_session()
+    session.add(
+        Replay(
+            replay_id=replay_id,
+            source_file=f"/replays/{replay_id}.replay",
+            file_hash=replay_id,
+            played_at_utc=datetime(2025, 1, 1, tzinfo=UTC),
+            play_date=date.today() - timedelta(days=400),
+            map="Stadium_P",
+            playlist=playlist,
+            team_size=2,
+            duration_seconds=300.0,
+            my_player_id="epic:me",
+            my_team="ORANGE",
+            my_score=1,
+            opponent_score=0,
+            result="WIN",
+        )
+    )
+    session.commit()
+    session.close()
+    save_review(replay_id, "epic:me", replace(_review([], []), situations=situations))
+
+
+def test_coach_measures_risks_over_every_reviewed_game(client):
+    # Other players' jumps in an old Doubles game: 9 of 30 misses and 3 of 30
+    # hits were followed by a goal against
+    jumps = [
+        Situation("jump", "epic:them", float(n), 200.0, "own_half", n < 30, False)
+        for n in range(60)
+    ]
+    jumps = [replace(s, conceded=(s.t < 9 or 30 <= s.t < 33)) for s in jumps]
+    _add_reviewed_game_with_situations("doubles_old", "DOUBLES", jumps)
+
+    data = client.get("/coach", params={"playlist": "STANDARD"}).json()
+    assert data["reviewed_count"] == 2
+    whiffs = next(c for c in data["categories"] if c["category"] == "whiffs")
+    [jump] = whiffs["situations"]
+    assert jump["extra_risk"] == pytest.approx(0.2)
+    # None of them yours, and none in this view
+    assert (jump["count"], jump["others_bad_share"]) == (0, None)
+    assert (whiffs["cost_per_game"], whiffs["cost_measured"]) == (0, True)

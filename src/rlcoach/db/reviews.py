@@ -1,7 +1,7 @@
 """Store the mistake detector's review of each game, with the game's events.
 
-The events are every car's kickoffs, touches, 50/50s and demos. A game the
-review doesn't support, such as Hoops, has none stored.
+The events are every car's kickoffs, touches, 50/50s, demos and situations. A
+game the review doesn't support, such as Hoops, has none stored.
 
 Loading a game reviews it from the frames it already read. `rlcoach reviews`
 fills in games loaded before reviews existed, or redoes them all after the
@@ -26,6 +26,7 @@ from .models import (
     ReviewKickoff,
     ReviewKickoffCar,
     ReviewMistake,
+    ReviewSituation,
     ReviewTouch,
 )
 from .session import create_session
@@ -222,6 +223,19 @@ def save_review(
             ]
             review.challenges = [_challenge_row(m) for m in report.challenges]
             review.demos = [_demo_row(m) for m in report.demos]
+            review.situations = [
+                ReviewSituation(
+                    kind=s.kind,
+                    player_id=s.player_id,
+                    is_me=s.player_id == report.player_id,
+                    t=s.t,
+                    seconds_left=s.seconds_left,
+                    zone=s.zone,
+                    bad=s.bad,
+                    conceded=s.conceded,
+                )
+                for s in report.situations
+            ]
         session.add(review)
         session.commit()
     finally:

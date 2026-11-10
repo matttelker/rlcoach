@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rlcoach.field_constants import Vec3
+from rlcoach.field_constants import BACK_WALL_Y, Vec3
 from rlcoach.normalize import X_LIMIT, Y_LIMIT, Z_RANGE, build_timeline
 from rlcoach.parser.types import Header, PlayerInfo, Quaternion
 
@@ -91,6 +91,15 @@ def test_positions_are_held_to_the_field_but_speeds_are_not():
     frame = _one(ball=(far, far))
     assert frame.ball.position == Vec3(X_LIMIT, -Y_LIMIT, Z_RANGE[1])
     assert frame.ball.velocity == Vec3(*far)
+
+
+def test_a_car_deep_in_the_net_keeps_its_position():
+    """A net is 880 uu deep, so a car inside it reads past the back wall."""
+    for y in (BACK_WALL_Y + 800.0, -BACK_WALL_Y - 800.0):
+        car = _one(_car(position=(0.0, y, 17.0))).players[0]
+        assert car.position == Vec3(0.0, y, 17.0)
+        ball = _one(ball=((0.0, y, 93.15), STILL)).ball
+        assert ball.position.y == y
 
 
 def test_boost_is_held_from_0_to_100():

@@ -12,20 +12,31 @@ import {
   SectionTitle,
   SelectField,
 } from '../components';
-import type { CategorySummary, CoachResponse, CoachSession, Highlight, RuleGrades } from '../types/api';
+import type {
+  CategorySummary,
+  CoachResponse,
+  CoachSession,
+  Highlight,
+  RuleGrades,
+  SituationSummary,
+} from '../types/api';
 import { KickoffCoach } from './KickoffCoach';
 import {
   COACH_PLAYLISTS,
   PERIOD_OPTIONS,
   categoryTrend,
+  costNote,
+  costText,
   formatRate,
   gradeAccuracy,
-  headline,
   kindLabel,
+  riskText,
+  situationText,
   prettyMap,
   isMixedPlaylist,
   sessionTitle,
   teamSizeLabel,
+  trendText,
 } from './coachTransforms';
 
 // A replay lands about 30 seconds after a match ends, so check that often
@@ -139,13 +150,16 @@ export function CoachBody({ data }: { data: CoachResponse }) {
   }
 
   const unreviewed = data.game_count - data.reviewed_count;
-  const [first, ...rest] = data.targets;
+  const first = data.targets[0];
   const mixed = isMixedPlaylist(data.playlist);
 
   return (
     <div className="space-y-14">
       <section>
-        <SectionTitle title="Training targets" note="Ranked by goals they cost you, then how often they happen" />
+        <SectionTitle
+          title="What's holding you back"
+          note="Your training targets, ranked by the goals a game each habit costs you"
+        />
         {unreviewed > 0 && (
           <p className="mb-4 text-[14px] text-[var(--color-warning)]">
             {unreviewed} of {data.game_count} games have no mistake review yet. Run{' '}
@@ -155,10 +169,13 @@ export function CoachBody({ data }: { data: CoachResponse }) {
         {!first ? (
           <Card className="p-5 text-[var(--color-text-muted)]">No mistakes flagged in these games. Keep it up.</Card>
         ) : (
-          <>
-            <Prescription target={first} />
-            {rest.length > 0 && <RunnersUp targets={rest} />}
-          </>
+          <ol className="space-y-4">
+            {data.targets.map((target, index) => (
+              <li key={target.category}>
+                <TargetCard target={target} rank={index + 1} />
+              </li>
+            ))}
+          </ol>
         )}
       </section>
 
@@ -178,7 +195,7 @@ export function CoachBody({ data }: { data: CoachResponse }) {
         <SectionTitle
           title="Mistakes by category"
           note={
-            `${data.reviewed_count} reviewed games, your latest session against the ones before` +
+            `${data.reviewed_count} reviewed games, your last games against the ones before` +
             (mixed ? '. With Doubles and Standard together, a change can come from which mode you played' : '')
           }
         />
@@ -205,32 +222,63 @@ export function CoachBody({ data }: { data: CoachResponse }) {
   );
 }
 
-/** The one thing to work on, written up like a prescription. */
-function Prescription({ target }: { target: CategorySummary }) {
+/** A habit holding you back: what it costs, the evidence, and what to do instead. */
+function TargetCard({ target, rank }: { target: CategorySummary; rank: number }) {
+  const lead = rank === 1;
+  const note = costNote(target);
+  const trend = trendText(target);
   return (
     <article className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] overflow-hidden">
-      <div className={target.cue ? 'grid md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]' : ''}>
+      <div className={target.cue ? 'grid md:grid-cols-[minmax(0,6fr)_minmax(0,5fr)]' : ''}>
         <div className="p-5 sm:p-7">
           <div className="flex items-baseline gap-3">
-            <span className="type-score text-[44px] text-[var(--color-error)]">
-              <span className="sr-only">Rank </span>1
+            <span
+              className={`type-score ${lead ? 'text-[44px] text-[var(--color-error)]' : 'text-[30px] text-[var(--color-text-muted)]'}`}
+            >
+              <span className="sr-only">Rank </span>
+              {rank}
             </span>
             <span className="text-[17px] font-semibold">{target.label}</span>
           </div>
-          <p className="type-display text-[28px] sm:text-[34px] mt-4">{headline(target)}</p>
-          <p className="mt-3 text-[14px]">
+          <p className={`type-display mt-4 ${lead ? 'text-[28px] sm:text-[34px]' : 'text-[21px] sm:text-[24px]'}`}>
+            {costText(target)}
+          </p>
+          {note && <p className="mt-2 text-[13px] text-[var(--color-text-muted)]">{note}</p>}
+          <Evidence situations={target.situations} />
+          <p className="mt-4 text-[14px]">
             <TrendText category={target} />
+            {!trend && <span className="text-[var(--color-text-muted)]">, too few games yet to see a trend</span>}
           </p>
           <KindChips kinds={target.kinds} />
         </div>
         {target.cue && (
           <div className="relative p-5 sm:p-7 border-t md:border-t-0 md:border-l border-[var(--color-border)] bg-[var(--strip-paper)]">
             <RxMark />
-            <p className="mt-3 text-[19px] sm:text-[21px] leading-[1.55] max-w-[34em]">{target.cue}</p>
+            <p className={`mt-3 leading-[1.55] max-w-[34em] ${lead ? 'text-[19px] sm:text-[21px]' : 'text-[17px]'}`}>
+              {target.cue}
+            </p>
           </div>
         )}
       </div>
     </article>
+  );
+}
+
+/** One line per situation the habit is judged on, in plain words. */
+function Evidence({ situations }: { situations: SituationSummary[] }) {
+  if (situations.length === 0) return null;
+  return (
+    <ul className="mt-5 space-y-3 max-w-[60ch]">
+      {situations.map((s) => {
+        const risk = riskText(s);
+        return (
+          <li key={s.kind} className="text-[15px] leading-[1.5]">
+            {situationText(s)}
+            {risk && <span className="block text-[14px] text-[var(--color-text-muted)] mt-0.5">{risk}</span>}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -240,34 +288,6 @@ function RxMark() {
       R<span className="text-[15px] align-[-0.15em]">x</span>
       <span className="sr-only"> What to practise</span>
     </span>
-  );
-}
-
-function RunnersUp({ targets }: { targets: CategorySummary[] }) {
-  return (
-    <ol className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] divide-y divide-[var(--color-border)]">
-      {targets.map((target, index) => (
-        <li key={target.category} className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 p-5">
-          <span className="type-score text-[30px] text-[var(--color-text-muted)]">
-            <span className="sr-only">Rank </span>
-            {index + 2}
-          </span>
-          <div className="grid md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)] gap-x-8 gap-y-2">
-            <div>
-              <div className="font-semibold">{target.label}</div>
-              <div className="type-display text-[17px] mt-1">{headline(target)}</div>
-              <div className="text-[13px] mt-1.5">
-                <TrendText category={target} />
-              </div>
-            </div>
-            <div>
-              {target.cue && <p className="text-[var(--color-text-muted)] max-w-[60ch]">{target.cue}</p>}
-              <KindChips kinds={target.kinds} />
-            </div>
-          </div>
-        </li>
-      ))}
-    </ol>
   );
 }
 
@@ -357,7 +377,7 @@ function TrendText({ category }: { category: CategorySummary }) {
   const word = trend === 'worse' ? 'up' : trend === 'better' ? 'down' : 'steady';
   return (
     <span className={color}>
-      {formatRate(category.before_per_game)} → {formatRate(category.latest_per_game)} a game, {word}
+      {trendText(category)}, {word}
     </span>
   );
 }
@@ -371,8 +391,8 @@ function CategoryTable({ categories }: { categories: CategorySummary[] }) {
           <tr className="border-b border-[var(--color-border)]">
             <th className="th text-left pl-5 w-36">Category</th>
             <th className="th text-left">Flagged</th>
-            <th className="th text-right w-28">Goals cost</th>
-            <th className="th text-right w-60 pr-5">Before → latest session</th>
+            <th className="th text-right w-28">Goals a game</th>
+            <th className="th text-right w-80 pr-5">Flags a game, last games and before</th>
           </tr>
         </thead>
         <tbody>
@@ -386,15 +406,20 @@ function CategoryTable({ categories }: { categories: CategorySummary[] }) {
                       className="h-2 rounded-r"
                       style={{
                         width: `${(c.flags / most) * 100}%`,
-                        background: c.goals_cost ? 'var(--chart-bad)' : 'var(--color-text-muted)',
+                        background: c.cost_per_game > 0 ? 'var(--chart-bad)' : 'var(--color-text-muted)',
                       }}
                     />
                   </div>
                   <span className="w-6 text-right">{c.flags}</span>
                 </div>
               </td>
-              <td className={`px-3 py-3 text-right ${c.goals_cost ? 'text-[var(--color-error)] font-semibold' : ''}`}>
-                {c.goals_cost || '–'}
+              <td
+                className={`px-3 py-3 text-right ${c.cost_per_game > 0 ? 'text-[var(--color-error)] font-semibold' : ''}`}
+              >
+                {c.cost_per_game > 0 ? c.cost_per_game.toFixed(2) : '–'}
+                {c.cost_per_game > 0 && !c.cost_measured && (
+                  <span className="block text-[12px] font-normal text-[var(--color-text-muted)]">estimated</span>
+                )}
               </td>
               <td className="px-3 pr-5 py-3 text-right text-[14px]">
                 <TrendText category={c} />

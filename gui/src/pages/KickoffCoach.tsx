@@ -222,7 +222,7 @@ function SupportCard({ summary }: { summary: KickoffSummary }) {
           <dt className="text-[var(--color-text-muted)]">You held back</dt>
           <dd>{support.hold}</dd>
           <dt className="text-[var(--color-text-muted)]">You went too</dt>
-          <dd className={support.double_commits ? 'text-[var(--color-error)]' : ''}>{support.double_commits}</dd>
+          <dd>{support.double_commits}</dd>
           <dt className="text-[var(--color-text-muted)]">Goals within 10 s</dt>
           <dd>
             {support.goals_for} for, {support.goals_against} against
@@ -301,7 +301,7 @@ export function KickoffList({ kickoffs }: { kickoffs: ReviewKickoff[] }) {
                   </p>
                   {(k.double_commit || goal) && (
                     <p className="text-[13px] text-[var(--color-text-muted)]">
-                      {k.double_commit && <span className="text-[var(--color-error)]">You and a teammate both went. </span>}
+                      {k.double_commit && <span>You and a teammate both went. </span>}
                       {goal && (
                         <span className={k.goal_after === 'against' ? 'text-[var(--color-error)] font-semibold' : ''}>
                           {goal}.

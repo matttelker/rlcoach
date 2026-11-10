@@ -16,7 +16,9 @@ from ...coaching import (
     FlagRow,
     GoalRow,
     ReviewedGame,
+    SituationRow,
     find_highlights,
+    measure_risks,
     pick_targets,
     summarize_categories,
 )
@@ -28,10 +30,16 @@ from ...db.models import (
     PlayerGameStats,
     Replay,
     ReviewKickoff,
+    ReviewSituation,
 )
 from ...db.reviews import stored_kickoffs
 from ...db.session import create_session
-from ...kickoff_coaching import GameKickoffs, read_kickoff, summarize_kickoffs
+from ...kickoff_coaching import (
+    GameKickoffs,
+    kickoff_situations,
+    read_kickoff,
+    summarize_kickoffs,
+)
 from ...modes import COACHED_PLAYLISTS
 from .stats import direction, resolve_playlist, resolve_rank
 
@@ -128,6 +136,33 @@ def _game_kickoffs(replay: Replay, review: GameReview) -> GameKickoffs:
     )
 
 
+def _risks(session) -> dict[str, float | None]:
+    """Each situation's extra risk, measured on every reviewed game there is,
+    whatever the playlist or period: the more games, the surer the number."""
+    rows = [
+        SituationRow(kind, zone, bool(bad), bool(conceded), bool(is_me))
+        for kind, zone, bad, conceded, is_me in session.query(
+            ReviewSituation.kind,
+            ReviewSituation.zone,
+            ReviewSituation.bad,
+            ReviewSituation.conceded,
+            ReviewSituation.is_me,
+        )
+    ]
+    reviews = (
+        session.query(GameReview)
+        .filter(GameReview.status == "ok")
+        .options(
+            selectinload(GameReview.replay),
+            selectinload(GameReview.goals),
+            selectinload(GameReview.kickoffs).selectinload(ReviewKickoff.cars),
+        )
+    )
+    for review in reviews:
+        rows += kickoff_situations(_game_kickoffs(review.replay, review))
+    return measure_risks(rows)
+
+
 @router.get("/coach")
 async def get_coach(
     playlist: str | None = None,
@@ -157,6 +192,7 @@ async def get_coach(
             .options(
                 selectinload(Replay.review).selectinload(GameReview.mistakes),
                 selectinload(Replay.review).selectinload(GameReview.goals),
+                selectinload(Replay.review).selectinload(GameReview.situations),
                 selectinload(Replay.review)
                 .selectinload(GameReview.kickoffs)
                 .selectinload(ReviewKickoff.cars),
@@ -174,7 +210,8 @@ async def get_coach(
             review = replay.review
             if review is None or review.status != "ok":
                 continue
-            kickoff_games.append(_game_kickoffs(replay, review))
+            game_kickoffs = _game_kickoffs(replay, review)
+            kickoff_games.append(game_kickoffs)
             game = ReviewedGame(
                 replay_id=replay.replay_id,
                 play_date=replay.play_date,
@@ -198,11 +235,16 @@ async def get_coach(
                     for g in review.goals
                 ],
                 epic_saves=(stats.epic_saves or 0) if stats else 0,
+                situations=[
+                    SituationRow(s.kind, s.zone, s.bad, s.conceded, s.is_me)
+                    for s in review.situations
+                ]
+                + kickoff_situations(game_kickoffs),
             )
             reviewed.append(game)
             by_id[game.replay_id] = game
 
-        categories = summarize_categories(reviewed)
+        categories = summarize_categories(reviewed, _risks(session))
         highlights = find_highlights(reviewed, categories)
         stats_by_playlist: dict[str, list[PlayerGameStats]] = defaultdict(list)
         for replay, stats in rows:

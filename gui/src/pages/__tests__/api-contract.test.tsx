@@ -32,8 +32,39 @@ const LAST_BACK: CategorySummary = {
   goals_cost: 4,
   games: 10,
   per_game: 0.4,
-  latest_per_game: 0.67,
-  before_per_game: 0.29,
+  recent_per_game: 0.5,
+  earlier_per_game: 1.4,
+  trend_games: 10,
+  cost_per_game: 0.2,
+  cost_measured: true,
+  situations: [
+    {
+      kind: 'shot_last_back',
+      what: 'shots at your goal with you last back',
+      bad_label: 'out of position',
+      count: 106,
+      bad: 19,
+      bad_share: 0.179,
+      others_bad_share: 0.124,
+      conceded_after_bad: 9,
+      extra_risk: 0.2269,
+      proven: true,
+      goals_per_game: 0.105,
+    },
+    {
+      kind: 'last_back_challenge',
+      what: '50/50s as the last player back',
+      bad_label: 'lost',
+      count: 0,
+      bad: 0,
+      bad_share: null,
+      others_bad_share: 0.48,
+      conceded_after_bad: 0,
+      extra_risk: 0.14,
+      proven: true,
+      goals_per_game: 0,
+    },
+  ],
   sessions: [
     { play_date: '2026-10-31', games: 7, flags: 2 },
     { play_date: '2026-11-05', games: 3, flags: 2 },
@@ -51,8 +82,12 @@ const GOALKEEPING: CategorySummary = {
   flags: 0,
   goals_cost: 0,
   per_game: 0,
-  latest_per_game: 0,
-  before_per_game: 0,
+  recent_per_game: null,
+  earlier_per_game: null,
+  trend_games: 0,
+  cost_per_game: 0.05,
+  cost_measured: false,
+  situations: [],
   kinds: {},
   top_kind: null,
   cue: null,
@@ -122,19 +157,6 @@ const KICKOFFS: KickoffSummary = {
       status: 'later',
     },
     {
-      key: 'one_goes',
-      title: 'One goes, the rest support',
-      level: 'Platinum to Diamond',
-      measure: 'Kickoffs where only one of you went',
-      count: 251,
-      of: 270,
-      value: 0.93,
-      target: 0.95,
-      why: 'Two cars on the ball leave nobody for where it goes next.',
-      how: 'Only one of you goes.',
-      status: 'later',
-    },
-    {
       key: 'speedflip',
       title: 'Learn the speedflip',
       level: 'Diamond to Champion',
@@ -196,7 +218,7 @@ const COACH: CoachResponse = {
       },
     ],
   },
-  targets: [LAST_BACK],
+  targets: [LAST_BACK, GOALKEEPING],
   categories: [LAST_BACK, GOALKEEPING],
   highlights: [
     {
@@ -383,12 +405,43 @@ describe('Coach', () => {
   it('renders no placeholder text', () => {
     expect(html).not.toContain('NaN');
     expect(html).not.toContain('undefined');
+    expect(html).not.toContain('null');
+    expect(html).not.toContain('Infinity');
   });
 
-  it('leads with the target that cost the most goals, and its cue', () => {
-    expect(html).toContain('Cost you 4 goals in 10 games');
+  it('leads with what is holding you back, what it costs and its cue', () => {
+    expect(html).toContain('holding you back');
+    expect(html).toContain('Costs you about 1 goal every 5 games');
     expect(html).toContain('keep the ball in front of you');
     expect(html).toContain('Last back upfield ×2');
+  });
+
+  it('backs a measured target with its evidence', () => {
+    expect(html).toContain(
+      'Shots at your goal with you last back: 19 of 106 out of position (18%). Players in your games: 12%.',
+    );
+    expect(html).toContain('When that happens, a goal against follows 23 points more often.');
+    expect(html).toContain('No 50/50s as the last player back in these games yet.');
+  });
+
+  it('says an unmeasured target is an estimate', () => {
+    expect(html).toContain('Costs you about 1 goal every 20 games');
+    expect(html).toContain('Estimated from the goals it led to.');
+  });
+
+  it('words the trend over your last games, and shows none without enough games', () => {
+    expect(html).toContain('0.5 a game over your last 10 games, 1.4 over the 10 before');
+    expect(html).toContain('too few games yet to see a trend');
+  });
+
+  it('shows the cost a game in the category table', () => {
+    expect(html).toContain('Goals a game');
+    expect(html).toContain('0.20');
+    expect(html).toContain('estimated');
+  });
+
+  it('never presents both going for a kickoff as a mistake', () => {
+    expect(html).not.toContain('One goes');
   });
 
   it('shows the session and says which games still need a review', () => {
@@ -440,7 +493,7 @@ describe('Coach from an API without kickoffs', () => {
 
   it('leaves the kickoffs out', () => {
     expect(html).not.toContain('When you go');
-    expect(html).toContain('Training targets');
+    expect(html).toContain('holding you back');
   });
 });
 

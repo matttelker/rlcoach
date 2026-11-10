@@ -1,10 +1,17 @@
 """Kickoff coaching: how you play kickoffs, and the next thing to learn.
 
 A coach takes kickoffs in steps. First flip into the ball every time you go,
-then time that flip, then make sure only one of you goes while the others
-cheat up or take boost. Only then is the speedflip worth learning, the faster
+then time that flip. Only then is the speedflip worth learning, the faster
 kickoff higher ranks use. The ladder follows that order. Its targets are
 judgment about when a step is solid, not benchmarks from other players.
+
+Each step was checked against where the ball went on 41 games, 513 kickoffs by
+either team (2026-11-09). With no flip the ball came back at the car's team 56%
+of the time, against 28% with a flip on time. A late flip lost the ball no more
+often (31%), but a goal against followed within 10 s 14% of the time, against
+4%. "Only one of you goes" used to be a step. It isn't one at this rank: two
+cars going lost the ball 17% of the time, one car 35%, so it's counted and
+shown but not coached.
 
 A kickoff is won or lost by where the ball was a second after the hit. In the
 player's games the car there first got the first touch 91% of the time, but
@@ -20,6 +27,7 @@ from datetime import date
 from typing import Any
 
 from .analysis.mistakes import GOAL_CONSEQUENCE_S, INSTEAD
+from .coaching import SituationRow
 from .events.kickoffs import (
     KickoffEvent,
     KickoffPlayer,
@@ -146,6 +154,41 @@ def read_kickoff(game: GameKickoffs, kickoff: KickoffEvent) -> KickoffSeen | Non
     )
 
 
+def kickoff_situations(game: GameKickoffs) -> list[SituationRow]:
+    """Each kickoff a car went for as its team's GO car, as a situation: bad
+    without a flip on time, and whether a goal against its team followed.
+
+    Every car's, yours marked, so the cost of a late or missing flip is
+    measured like any other habit's.
+    """
+    rows = []
+    for kickoff in game.kickoffs:
+        me = next((p for p in kickoff.players if p.player_id == game.my_id), None)
+        if me is None or me.team is None:
+            continue
+        contact = kickoff.t_start + (kickoff.time_to_first_touch or 0.0)
+        soon = [
+            ours
+            for t, ours in game.goals
+            if contact <= t <= contact + GOAL_CONSEQUENCE_S
+        ]
+        for car in kickoff.players:
+            timing = flip_timing(car)
+            if car.role != "GO" or timing is None:
+                continue
+            with_me = car.team == me.team
+            rows.append(
+                SituationRow(
+                    kind="kickoff",
+                    zone="",
+                    bad=timing != "ON_TIME",
+                    conceded=any(ours != with_me for ours in soon),
+                    mine=car.player_id == game.my_id,
+                )
+            )
+    return rows
+
+
 def _results(seen: list[KickoffSeen]) -> dict[str, int]:
     counts = Counter(k.result for k in seen if k.result)
     return {"won": counts["WON"], "even": counts["EVEN"], "lost": counts["LOST"]}
@@ -210,9 +253,7 @@ def _lost_share(going: dict[str, Any], timing: str) -> str:
     return f"{group['lost']} of {group['count']} ({share}%)"
 
 
-def _ladder(
-    going: dict[str, Any], kickoffs: int, double_commits: int
-) -> list[dict[str, Any]]:
+def _ladder(going: dict[str, Any]) -> list[dict[str, Any]]:
     """The steps in order, each with your measure and whether it's solid."""
     went = going["went"]
     flips = going["flips"]
@@ -250,22 +291,6 @@ def _ladder(
                 " kickoffs when the flip came late."
             ),
             "how": INSTEAD["kickoff_late_flip"],
-        },
-        {
-            "key": "one_goes",
-            "title": "One goes, the rest support",
-            "level": "Platinum to Diamond",
-            "measure": "Kickoffs where only one of you went",
-            "count": kickoffs - double_commits,
-            "of": kickoffs,
-            "value": _share(kickoffs - double_commits, kickoffs),
-            "target": 0.95,
-            "why": (
-                "Two cars on the ball leave nobody for where it goes next. You "
-                f"and a teammate both went on {double_commits} of {kickoffs} "
-                "kickoffs."
-            ),
-            "how": INSTEAD["kickoff_double_commit"],
         },
         {
             "key": "speedflip",
@@ -336,5 +361,5 @@ def summarize_kickoffs(games: list[GameKickoffs]) -> dict[str, Any]:
             }
             for day in days
         ],
-        "ladder": _ladder(going_summary, len(seen), double_commits),
+        "ladder": _ladder(going_summary),
     }

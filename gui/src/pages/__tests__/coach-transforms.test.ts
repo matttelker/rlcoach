@@ -1,35 +1,43 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CategorySummary, LadderStep, ReplayReview, ReviewMistake } from '../../types/api';
+import type { CategorySummary, LadderStep, ReplayReview, ReviewMistake, SituationSummary } from '../../types/api';
 import {
   applyGrade,
   approachLabel,
   categoryTrend,
+  costNote,
+  costText,
   flipText,
   focusStep,
   goalAfterText,
   gradeAccuracy,
   groupByCategory,
-  headline,
   isMixedPlaylist,
   kickoffSeat,
   percent,
   prettyMap,
+  riskText,
   sessionTitle,
+  situationText,
   shareOf,
   teamSizeLabel,
   timelineX,
+  trendText,
 } from '../coachTransforms';
 
-const category = (before: number | null, latest: number | null): CategorySummary => ({
+const category = (earlier: number | null, recent: number | null, trendGames = 10): CategorySummary => ({
   category: 'rotation',
   label: 'Rotation',
   flags: 5,
   goals_cost: 0,
-  games: 10,
+  games: 20,
   per_game: 0.5,
-  latest_per_game: latest,
-  before_per_game: before,
+  recent_per_game: recent,
+  earlier_per_game: earlier,
+  trend_games: trendGames,
+  cost_per_game: 0,
+  cost_measured: false,
+  situations: [],
   sessions: [],
   kinds: {},
   top_kind: null,
@@ -66,10 +74,84 @@ describe('categoryTrend', () => {
   });
 });
 
-describe('headline', () => {
-  it('leads with goals when the habit cost any', () => {
-    expect(headline({ ...category(0, 0), goals_cost: 1, games: 1 })).toBe('Cost you 1 goal in 1 game');
-    expect(headline(category(0, 0))).toBe('5 flagged in 10 games');
+describe('trendText', () => {
+  it('compares your last games with as many before them', () => {
+    expect(trendText(category(1.4, 0.5))).toBe('0.5 a game over your last 10 games, 1.4 over the 10 before');
+    expect(trendText(category(1.4, 0.5, 6))).toBe('0.5 a game over your last 6 games, 1.4 over the 6 before');
+  });
+
+  it('has no trend when there are too few games', () => {
+    expect(trendText(category(null, null, 0))).toBeNull();
+    expect(categoryTrend(category(null, null, 0))).toBe('new');
+  });
+});
+
+// The real row the API sent for shots at your goal on 41 games
+const SHOTS: SituationSummary = {
+  kind: 'shot_last_back',
+  what: 'shots at your goal with you last back',
+  bad_label: 'out of position',
+  count: 106,
+  bad: 19,
+  bad_share: 0.179,
+  others_bad_share: 0.124,
+  conceded_after_bad: 9,
+  extra_risk: 0.2269,
+  proven: true,
+  goals_per_game: 0.105,
+};
+
+describe('costText', () => {
+  it('says a measured cost as one goal every so many games', () => {
+    expect(costText({ cost_per_game: 0.2 })).toBe('Costs you about 1 goal every 5 games');
+    expect(costText({ cost_per_game: 0.105 })).toBe('Costs you about 1 goal every 10 games');
+    expect(costNote({ cost_per_game: 0.2, cost_measured: true })).toContain('Measured from how often a goal followed');
+  });
+
+  it('says a cost of a goal or more a game in goals a game', () => {
+    expect(costText({ cost_per_game: 0.9 })).toBe('Costs you about 1 goal a game');
+    expect(costText({ cost_per_game: 1.46 })).toBe('Costs you about 1.5 goals a game');
+  });
+
+  it('says an unmeasured cost is an estimate', () => {
+    expect(costText({ cost_per_game: 0.05 })).toBe('Costs you about 1 goal every 20 games');
+    expect(costNote({ cost_per_game: 0.05, cost_measured: false })).toBe('Estimated from the goals it led to.');
+  });
+
+  it('never divides by a zero or tiny cost', () => {
+    expect(costText({ cost_per_game: 0 })).toBe('Costs you no goals that can be measured yet');
+    expect(costText({ cost_per_game: 0.001 })).toBe('Costs you less than 1 goal every 50 games');
+    expect(costNote({ cost_per_game: 0, cost_measured: false })).toBeNull();
+  });
+});
+
+describe('situationText', () => {
+  it('puts your rate beside the players you meet, and the goals that followed', () => {
+    expect(situationText(SHOTS)).toBe(
+      'Shots at your goal with you last back: 19 of 106 out of position (18%). Players in your games: 12%. ' +
+        'A goal against followed 9 of your 19.',
+    );
+    expect(riskText(SHOTS)).toBe('When that happens, a goal against follows 23 points more often.');
+  });
+
+  it('says when there is too little data to measure the risk', () => {
+    const few = { ...SHOTS, extra_risk: null, goals_per_game: null };
+    expect(riskText(few)).toBe('Too few of these yet to say how much more often a goal follows.');
+  });
+
+  it('never claims a negative risk', () => {
+    expect(riskText({ ...SHOTS, extra_risk: -0.03 })).toBe('A goal against follows no more often when that happens.');
+  });
+
+  it('handles a choice that never came up', () => {
+    const none = { ...SHOTS, count: 0, bad: 0, bad_share: null, others_bad_share: null, conceded_after_bad: 0 };
+    expect(situationText(none)).toBe('No shots at your goal with you last back in these games yet.');
+    expect(riskText(none)).toBeNull();
+  });
+
+  it('leaves out the other players when there are none to compare', () => {
+    const text = situationText({ ...SHOTS, others_bad_share: null, bad: 0, bad_share: 0 });
+    expect(text).toBe('Shots at your goal with you last back: 0 of 106 out of position (0%).');
   });
 });
 
@@ -197,5 +279,11 @@ describe('kickoff labels', () => {
     });
     expect(focusStep([step('a', 'solid'), step('b', 'focus'), step('c', 'later')])?.key).toBe('b');
     expect(focusStep([step('a', 'solid'), step('b', 'unknown')])).toBeUndefined();
+  });
+});
+
+describe('riskText for an unproven habit', () => {
+  it('says the games have not shown it costs goals', () => {
+    expect(riskText({ ...SHOTS, proven: false })).toMatch(/shown this costs goals/);
   });
 });
