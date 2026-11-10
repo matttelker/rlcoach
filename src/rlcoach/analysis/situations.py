@@ -29,6 +29,15 @@ Two rules were dropped on the same evidence. A 50/50 on low boost was lost no
 more often than any other (49% against 50%, at every boost level tried), and a
 50/50 lost with a teammate behind cost nothing. Two cars going for a kickoff
 lost the ball less often than one (17% against 35%).
+
+Boost and pace have no situation, because none tried was followed by more
+goals (41 games, 2026-11-09). Of 1,011 opponent attacks that began with the
+player upfield of the ball, getting back slowly was followed by a goal no more
+often than getting back fast (under 900 uu/s with boost to spend: +1.9 points,
+interval -3.8 to +7.0), and nor was starting the attack under 20 boost (+0.6,
+-3.8 to +6.0). The faster car won 229 of 460 50/50s. With no teammate back
+there are only 300 attacks and the intervals reach +17, so that case is open,
+and whether pace makes goals for your team wasn't measured.
 """
 
 from __future__ import annotations
